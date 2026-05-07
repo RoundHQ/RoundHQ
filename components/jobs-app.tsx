@@ -4315,7 +4315,7 @@ export default function JobsApp() {
           updated_at: new Date().toISOString(),
         },
         {
-          onConflict: "id",
+          onConflict: "organization_id,id",
         }
     );
 
@@ -4782,7 +4782,7 @@ export default function JobsApp() {
               .upsert(
                   createDefaultRolePermissions().map(mapRolePermissionToWriteRow),
                   {
-                    onConflict: "role,page_key",
+                    onConflict: "organization_id,role,page_key",
                   }
               )
               .select(ROLE_PERMISSION_SELECT_FIELDS);
@@ -7054,7 +7054,7 @@ export default function JobsApp() {
               allowed,
             }),
             {
-              onConflict: "role,page_key",
+              onConflict: "organization_id,role,page_key",
             }
         )
         .select(ROLE_PERMISSION_SELECT_FIELDS)
