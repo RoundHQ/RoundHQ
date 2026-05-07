@@ -12,6 +12,16 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const supabaseConfigured = isSupabaseConfigured();
 
+  const getNextPath = () => {
+    const nextPath = new URLSearchParams(window.location.search).get("next");
+
+    if (nextPath?.startsWith("/") && !nextPath.startsWith("//")) {
+      return nextPath;
+    }
+
+    return "/dashboard";
+  };
+
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setLoading(true);
@@ -38,7 +48,7 @@ export default function LoginPage() {
         return;
       }
 
-      window.location.href = "/dashboard";
+      window.location.href = getNextPath();
     } catch (err) {
       console.error(err);
       setError(err instanceof Error ? err.message : "Something went wrong");

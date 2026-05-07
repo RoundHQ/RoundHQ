@@ -1,28 +1,10 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import Stripe from "stripe";
 import { syncStripeCheckoutSession, syncStripeSubscription } from "@/lib/billing/stripe-sync";
 import { getStripe } from "@/lib/stripe/server";
+import { createServiceRoleClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
-
-function createServiceRoleClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error(
-      "Supabase service role credentials are required for Stripe webhooks."
-    );
-  }
-
-  return createClient(supabaseUrl, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
-}
 
 export async function POST(request: Request) {
   const stripe = getStripe();
@@ -92,4 +74,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

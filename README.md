@@ -47,6 +47,22 @@ https://roundhq.co.uk/api/stripe/webhook
 
 Send subscription events plus `checkout.session.completed` so RoundHQ can keep each workspace's subscription status in sync.
 
+## Owner Admin Console
+
+The hidden RoundHQ owner console lives at:
+
+```text
+/admin
+```
+
+Set the allowed owner emails in local and Vercel environment variables:
+
+```text
+ROUNDHQ_ADMIN_EMAILS=owner@example.com
+```
+
+Use a comma-separated list for more than one owner. The page also requires `SUPABASE_SERVICE_ROLE_KEY` so it can safely read customer workspaces across all organisations from the server.
+
 ## Launch Priorities
 
 1. Rebrand the user-facing app to RoundHQ.
