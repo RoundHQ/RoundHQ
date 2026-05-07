@@ -26,7 +26,7 @@ For the public RoundHQ project, run only the fresh tenant-safe schema:
 supabase/roundhq_tenant_schema.sql
 ```
 
-Apply it from the Supabase SQL editor after configuring Auth URL settings. The legacy SQL files in `supabase/` are kept as references from the private Cleancut app and should not be applied to the public SaaS database.
+Apply it from the Supabase SQL editor after configuring Auth URL settings. Make sure no partial text is selected before pressing Run, otherwise Supabase may execute only part of a function definition. The legacy SQL files in `supabase/` are kept as references from the private Cleancut app and should not be applied to the public SaaS database.
 
 ## Launch Priorities
 

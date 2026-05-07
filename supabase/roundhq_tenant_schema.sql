@@ -59,11 +59,7 @@ create table if not exists public.subscriptions (
 
 create or replace function public.current_organization_id()
 returns uuid
-language sql
-stable
-security definer
-set search_path = public
-as $$
+as $function$
   select organization_id
   from public.organization_members
   where user_id = auth.uid()
@@ -76,15 +72,15 @@ as $$
     end,
     created_at asc
   limit 1
-$$;
-
-create or replace function public.is_organization_member(target_organization_id uuid)
-returns boolean
+$function$
 language sql
 stable
 security definer
-set search_path = public
-as $$
+set search_path = public;
+
+create or replace function public.is_organization_member(target_organization_id uuid)
+returns boolean
+as $function$
   select exists (
     select 1
     from public.organization_members
@@ -92,15 +88,15 @@ as $$
       and user_id = auth.uid()
       and status = 'active'
   )
-$$;
-
-create or replace function public.is_organization_admin(target_organization_id uuid)
-returns boolean
+$function$
 language sql
 stable
 security definer
-set search_path = public
-as $$
+set search_path = public;
+
+create or replace function public.is_organization_admin(target_organization_id uuid)
+returns boolean
+as $function$
   select exists (
     select 1
     from public.organization_members
@@ -109,17 +105,21 @@ as $$
       and status = 'active'
       and role in ('owner', 'admin')
   )
-$$;
+$function$
+language sql
+stable
+security definer
+set search_path = public;
 
 create or replace function public.touch_updated_at()
 returns trigger
-language plpgsql
-as $$
+as $function$
 begin
   new.updated_at = now();
   return new;
 end;
-$$;
+$function$
+language plpgsql;
 
 create table if not exists public.app_state (
   organization_id uuid not null default public.current_organization_id()
@@ -550,10 +550,7 @@ on public.commercial_rams_documents (organization_id, updated_at desc);
 
 create or replace function public.seed_roundhq_organization(target_organization_id uuid)
 returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
+as $function$
 begin
   insert into public.app_state (organization_id, id, data)
   values (target_organization_id, 'primary', '{}'::jsonb)
@@ -606,14 +603,14 @@ begin
     (target_organization_id, 'Operator', 'settings', false)
   on conflict (organization_id, role, page_key) do nothing;
 end;
-$$;
+$function$
+language plpgsql
+security definer
+set search_path = public;
 
 create or replace function public.handle_roundhq_new_user()
 returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
+as $function$
 declare
   new_organization_id uuid;
   new_company_name text;
@@ -670,7 +667,10 @@ begin
 
   return new;
 end;
-$$;
+$function$
+language plpgsql
+security definer
+set search_path = public;
 
 drop trigger if exists on_auth_user_created_roundhq on auth.users;
 create trigger on_auth_user_created_roundhq
