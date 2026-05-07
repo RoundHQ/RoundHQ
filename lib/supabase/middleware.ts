@@ -10,6 +10,7 @@ export async function middleware(request: NextRequest) {
   const isSignupPage = request.nextUrl.pathname === "/signup";
   const isProtectedPath =
     request.nextUrl.pathname.startsWith("/dashboard") ||
+    request.nextUrl.pathname.startsWith("/billing") ||
     request.nextUrl.pathname.startsWith("/customers") ||
     request.nextUrl.pathname.startsWith("/routes") ||
     request.nextUrl.pathname.startsWith("/reports") ||

@@ -1,160 +1,16 @@
 import JobsApp from "@/components/jobs-app";
+import SubscriptionGate from "@/components/billing/subscription-gate";
+import {
+  ensureSubscriptionRow,
+  getSubscriptionStatusLabel,
+  hasDashboardAccess,
+} from "@/lib/billing/subscriptions";
 import { createClient } from "@/lib/supabase/server";
-import { randomUUID } from "crypto";
+import { isStripeConfigured } from "@/lib/stripe/server";
+import { ensureWorkspace } from "@/lib/workspace";
 import { redirect } from "next/navigation";
-import type { User } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
-
-const DEFAULT_ROLE_PERMISSIONS = [
-  ["Admin", "dashboard", true],
-  ["Admin", "schedule", true],
-  ["Admin", "rounds", true],
-  ["Admin", "history", true],
-  ["Admin", "map", true],
-  ["Admin", "actions", true],
-  ["Admin", "commercial", true],
-  ["Admin", "commercialDocs", true],
-  ["Admin", "customers", true],
-  ["Admin", "quotes", true],
-  ["Admin", "invoices", true],
-  ["Admin", "staff", true],
-  ["Admin", "settings", true],
-  ["Staff", "dashboard", true],
-  ["Staff", "schedule", true],
-  ["Staff", "rounds", true],
-  ["Staff", "history", true],
-  ["Staff", "map", true],
-  ["Staff", "actions", true],
-  ["Staff", "commercial", true],
-  ["Staff", "commercialDocs", true],
-  ["Staff", "customers", true],
-  ["Staff", "quotes", true],
-  ["Staff", "invoices", true],
-  ["Staff", "staff", false],
-  ["Staff", "settings", false],
-  ["Operator", "dashboard", true],
-  ["Operator", "schedule", false],
-  ["Operator", "rounds", true],
-  ["Operator", "history", true],
-  ["Operator", "map", true],
-  ["Operator", "actions", true],
-  ["Operator", "commercial", true],
-  ["Operator", "commercialDocs", false],
-  ["Operator", "customers", false],
-  ["Operator", "quotes", false],
-  ["Operator", "invoices", false],
-  ["Operator", "staff", false],
-  ["Operator", "settings", false],
-] as const;
-
-function getWorkspaceName(user: User) {
-  const metadataCompanyName = user.user_metadata?.company_name;
-
-  if (typeof metadataCompanyName === "string" && metadataCompanyName.trim()) {
-    return metadataCompanyName.trim();
-  }
-
-  return user.email?.split("@")[0] || "RoundHQ Workspace";
-}
-
-function getUserFullName(user: User) {
-  const metadataFullName = user.user_metadata?.full_name;
-
-  if (typeof metadataFullName === "string" && metadataFullName.trim()) {
-    return metadataFullName.trim();
-  }
-
-  return user.email || "Owner";
-}
-
-async function ensureWorkspace(supabase: Awaited<ReturnType<typeof createClient>>, user: User) {
-  const { data: existingMemberships, error: membershipError } = await supabase
-    .from("organization_members")
-    .select("organization_id")
-    .eq("user_id", user.id)
-    .eq("status", "active")
-    .limit(1);
-
-  if (membershipError) {
-    throw membershipError;
-  }
-
-  if ((existingMemberships ?? []).length > 0) {
-    return;
-  }
-
-  const organizationId = randomUUID();
-  const email = user.email ?? `${user.id}@roundhq.local`;
-  const fullName = getUserFullName(user);
-
-  const { error: organizationError } = await supabase
-    .from("organizations")
-    .insert({
-      id: organizationId,
-      name: getWorkspaceName(user),
-      owner_user_id: user.id,
-    });
-
-  if (organizationError) {
-    throw organizationError;
-  }
-
-  const { error: memberError } = await supabase
-    .from("organization_members")
-    .insert({
-      organization_id: organizationId,
-      user_id: user.id,
-      email,
-      full_name: fullName,
-      role: "owner",
-      status: "active",
-    });
-
-  if (memberError) {
-    throw memberError;
-  }
-
-  const seedOperations = [
-    supabase.from("subscriptions").insert({
-      organization_id: organizationId,
-      status: "trialing",
-    }),
-    supabase.from("app_state").upsert(
-      {
-        organization_id: organizationId,
-        id: "primary",
-        data: {},
-      },
-      { onConflict: "organization_id,id" }
-    ),
-    supabase.from("staff_members").insert({
-      organization_id: organizationId,
-      auth_user_id: user.id,
-      email,
-      full_name: fullName,
-      role: "Admin",
-      is_active: true,
-      is_system_admin: true,
-    }),
-    supabase.from("role_permissions").upsert(
-      DEFAULT_ROLE_PERMISSIONS.map(([role, pageKey, allowed]) => ({
-        organization_id: organizationId,
-        role,
-        page_key: pageKey,
-        allowed,
-      })),
-      { onConflict: "organization_id,role,page_key" }
-    ),
-  ];
-
-  const seedResults = await Promise.all(seedOperations);
-  const seedError = seedResults.find((result) => result.error)?.error;
-
-  if (seedError) {
-    throw seedError;
-  }
-}
 
 export default async function DashboardPage() {
   if (
@@ -174,7 +30,28 @@ export default async function DashboardPage() {
     redirect("/login");
   }
 
-  await ensureWorkspace(supabase, user);
+  const organizationId = await ensureWorkspace(supabase, user);
+  const subscription = await ensureSubscriptionRow(supabase, organizationId);
+
+  if (!hasDashboardAccess(subscription)) {
+    const { data: organizations } = await supabase
+      .from("organizations")
+      .select("name")
+      .eq("id", organizationId)
+      .limit(1);
+    const workspaceName =
+      typeof organizations?.[0]?.name === "string" && organizations[0].name.trim()
+        ? organizations[0].name.trim()
+        : "RoundHQ Workspace";
+
+    return (
+      <SubscriptionGate
+        workspaceName={workspaceName}
+        subscriptionStatus={getSubscriptionStatusLabel(subscription)}
+        stripeConfigured={isStripeConfigured()}
+      />
+    );
+  }
 
   return <JobsApp />;
 }

@@ -28,6 +28,25 @@ supabase/roundhq_tenant_schema.sql
 
 Apply it from the Supabase SQL editor after configuring Auth URL settings. Make sure no partial text is selected before pressing Run, otherwise Supabase may execute only part of a function definition. The legacy SQL files in `supabase/` are kept as references from the private Cleancut app and should not be applied to the public SaaS database.
 
+## Stripe Setup
+
+Create a Stripe product with a monthly recurring price, then add the price ID and secret keys to `.env.local`:
+
+```text
+STRIPE_SECRET_KEY=
+STRIPE_PRICE_ID=
+STRIPE_WEBHOOK_SECRET=
+SUPABASE_SERVICE_ROLE_KEY=
+```
+
+Webhook endpoint:
+
+```text
+https://roundhq.co.uk/api/stripe/webhook
+```
+
+Send subscription events plus `checkout.session.completed` so RoundHQ can keep each workspace's subscription status in sync.
+
 ## Launch Priorities
 
 1. Rebrand the user-facing app to RoundHQ.

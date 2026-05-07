@@ -38,7 +38,7 @@ create table if not exists public.subscriptions (
   stripe_customer_id text null,
   stripe_subscription_id text null,
   stripe_price_id text null,
-  status text not null default 'trialing' check (
+  status text not null default 'incomplete' check (
     status in (
       'incomplete',
       'incomplete_expired',
@@ -50,12 +50,26 @@ create table if not exists public.subscriptions (
       'paused'
     )
   ),
-  trial_ends_at timestamptz null default now() + interval '14 days',
+  trial_ends_at timestamptz null,
   current_period_end timestamptz null,
   cancel_at_period_end boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.subscriptions
+alter column status set default 'incomplete';
+
+alter table public.subscriptions
+alter column trial_ends_at drop default;
+
+create unique index if not exists subscriptions_stripe_customer_unique_idx
+on public.subscriptions (stripe_customer_id)
+where stripe_customer_id is not null;
+
+create unique index if not exists subscriptions_stripe_subscription_unique_idx
+on public.subscriptions (stripe_subscription_id)
+where stripe_subscription_id is not null;
 
 create or replace function public.current_organization_id()
 returns uuid
