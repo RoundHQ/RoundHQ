@@ -59,20 +59,20 @@ create table if not exists public.subscriptions (
 
 create or replace function public.current_organization_id()
 returns uuid
-as $function$
+as '
   select organization_id
   from public.organization_members
   where user_id = auth.uid()
-    and status = 'active'
+    and status = ''active''
   order by
     case role
-      when 'owner' then 1
-      when 'admin' then 2
+      when ''owner'' then 1
+      when ''admin'' then 2
       else 3
     end,
     created_at asc
   limit 1
-$function$
+'
 language sql
 stable
 security definer
@@ -80,15 +80,15 @@ set search_path = public;
 
 create or replace function public.is_organization_member(target_organization_id uuid)
 returns boolean
-as $function$
+as '
   select exists (
     select 1
     from public.organization_members
     where organization_id = target_organization_id
       and user_id = auth.uid()
-      and status = 'active'
+      and status = ''active''
   )
-$function$
+'
 language sql
 stable
 security definer
@@ -96,16 +96,16 @@ set search_path = public;
 
 create or replace function public.is_organization_admin(target_organization_id uuid)
 returns boolean
-as $function$
+as '
   select exists (
     select 1
     from public.organization_members
     where organization_id = target_organization_id
       and user_id = auth.uid()
-      and status = 'active'
-      and role in ('owner', 'admin')
+      and status = ''active''
+      and role in (''owner'', ''admin'')
   )
-$function$
+'
 language sql
 stable
 security definer
@@ -113,12 +113,12 @@ set search_path = public;
 
 create or replace function public.touch_updated_at()
 returns trigger
-as $function$
+as '
 begin
   new.updated_at = now();
   return new;
 end;
-$function$
+'
 language plpgsql;
 
 create table if not exists public.app_state (
@@ -550,77 +550,77 @@ on public.commercial_rams_documents (organization_id, updated_at desc);
 
 create or replace function public.seed_roundhq_organization(target_organization_id uuid)
 returns void
-as $function$
+as '
 begin
   insert into public.app_state (organization_id, id, data)
-  values (target_organization_id, 'primary', '{}'::jsonb)
+  values (target_organization_id, ''primary'', ''{}''::jsonb)
   on conflict (organization_id, id) do nothing;
 
   insert into public.subscriptions (organization_id, status)
-  values (target_organization_id, 'trialing')
+  values (target_organization_id, ''trialing'')
   on conflict (organization_id) do nothing;
 
   insert into public.role_permissions (organization_id, role, page_key, allowed)
   values
-    (target_organization_id, 'Admin', 'dashboard', true),
-    (target_organization_id, 'Admin', 'schedule', true),
-    (target_organization_id, 'Admin', 'rounds', true),
-    (target_organization_id, 'Admin', 'history', true),
-    (target_organization_id, 'Admin', 'map', true),
-    (target_organization_id, 'Admin', 'actions', true),
-    (target_organization_id, 'Admin', 'commercial', true),
-    (target_organization_id, 'Admin', 'commercialDocs', true),
-    (target_organization_id, 'Admin', 'customers', true),
-    (target_organization_id, 'Admin', 'quotes', true),
-    (target_organization_id, 'Admin', 'invoices', true),
-    (target_organization_id, 'Admin', 'staff', true),
-    (target_organization_id, 'Admin', 'settings', true),
-    (target_organization_id, 'Staff', 'dashboard', true),
-    (target_organization_id, 'Staff', 'schedule', true),
-    (target_organization_id, 'Staff', 'rounds', true),
-    (target_organization_id, 'Staff', 'history', true),
-    (target_organization_id, 'Staff', 'map', true),
-    (target_organization_id, 'Staff', 'actions', true),
-    (target_organization_id, 'Staff', 'commercial', true),
-    (target_organization_id, 'Staff', 'commercialDocs', true),
-    (target_organization_id, 'Staff', 'customers', true),
-    (target_organization_id, 'Staff', 'quotes', true),
-    (target_organization_id, 'Staff', 'invoices', true),
-    (target_organization_id, 'Staff', 'staff', false),
-    (target_organization_id, 'Staff', 'settings', false),
-    (target_organization_id, 'Operator', 'dashboard', true),
-    (target_organization_id, 'Operator', 'schedule', false),
-    (target_organization_id, 'Operator', 'rounds', true),
-    (target_organization_id, 'Operator', 'history', true),
-    (target_organization_id, 'Operator', 'map', true),
-    (target_organization_id, 'Operator', 'actions', true),
-    (target_organization_id, 'Operator', 'commercial', true),
-    (target_organization_id, 'Operator', 'commercialDocs', false),
-    (target_organization_id, 'Operator', 'customers', false),
-    (target_organization_id, 'Operator', 'quotes', false),
-    (target_organization_id, 'Operator', 'invoices', false),
-    (target_organization_id, 'Operator', 'staff', false),
-    (target_organization_id, 'Operator', 'settings', false)
+    (target_organization_id, ''Admin'', ''dashboard'', true),
+    (target_organization_id, ''Admin'', ''schedule'', true),
+    (target_organization_id, ''Admin'', ''rounds'', true),
+    (target_organization_id, ''Admin'', ''history'', true),
+    (target_organization_id, ''Admin'', ''map'', true),
+    (target_organization_id, ''Admin'', ''actions'', true),
+    (target_organization_id, ''Admin'', ''commercial'', true),
+    (target_organization_id, ''Admin'', ''commercialDocs'', true),
+    (target_organization_id, ''Admin'', ''customers'', true),
+    (target_organization_id, ''Admin'', ''quotes'', true),
+    (target_organization_id, ''Admin'', ''invoices'', true),
+    (target_organization_id, ''Admin'', ''staff'', true),
+    (target_organization_id, ''Admin'', ''settings'', true),
+    (target_organization_id, ''Staff'', ''dashboard'', true),
+    (target_organization_id, ''Staff'', ''schedule'', true),
+    (target_organization_id, ''Staff'', ''rounds'', true),
+    (target_organization_id, ''Staff'', ''history'', true),
+    (target_organization_id, ''Staff'', ''map'', true),
+    (target_organization_id, ''Staff'', ''actions'', true),
+    (target_organization_id, ''Staff'', ''commercial'', true),
+    (target_organization_id, ''Staff'', ''commercialDocs'', true),
+    (target_organization_id, ''Staff'', ''customers'', true),
+    (target_organization_id, ''Staff'', ''quotes'', true),
+    (target_organization_id, ''Staff'', ''invoices'', true),
+    (target_organization_id, ''Staff'', ''staff'', false),
+    (target_organization_id, ''Staff'', ''settings'', false),
+    (target_organization_id, ''Operator'', ''dashboard'', true),
+    (target_organization_id, ''Operator'', ''schedule'', false),
+    (target_organization_id, ''Operator'', ''rounds'', true),
+    (target_organization_id, ''Operator'', ''history'', true),
+    (target_organization_id, ''Operator'', ''map'', true),
+    (target_organization_id, ''Operator'', ''actions'', true),
+    (target_organization_id, ''Operator'', ''commercial'', true),
+    (target_organization_id, ''Operator'', ''commercialDocs'', false),
+    (target_organization_id, ''Operator'', ''customers'', false),
+    (target_organization_id, ''Operator'', ''quotes'', false),
+    (target_organization_id, ''Operator'', ''invoices'', false),
+    (target_organization_id, ''Operator'', ''staff'', false),
+    (target_organization_id, ''Operator'', ''settings'', false)
   on conflict (organization_id, role, page_key) do nothing;
 end;
-$function$
+'
 language plpgsql
 security definer
 set search_path = public;
 
 create or replace function public.handle_roundhq_new_user()
 returns trigger
-as $function$
+as '
 declare
   new_organization_id uuid;
   new_company_name text;
   new_full_name text;
 begin
-  new_company_name := nullif(btrim(coalesce(new.raw_user_meta_data ->> 'company_name', '')), '');
-  new_full_name := nullif(btrim(coalesce(new.raw_user_meta_data ->> 'full_name', '')), '');
+  new_company_name := nullif(btrim(coalesce(new.raw_user_meta_data ->> ''company_name'', '''')), '''');
+  new_full_name := nullif(btrim(coalesce(new.raw_user_meta_data ->> ''full_name'', '''')), '''');
 
   if new_company_name is null then
-    new_company_name := coalesce(nullif(split_part(new.email, '@', 1), ''), 'RoundHQ Workspace');
+    new_company_name := coalesce(nullif(split_part(new.email, ''@'', 1), ''''), ''RoundHQ Workspace'');
   end if;
 
   insert into public.organizations (name, owner_user_id)
@@ -640,8 +640,8 @@ begin
     new.id,
     new.email,
     coalesce(new_full_name, new.email),
-    'owner',
-    'active'
+    ''owner'',
+    ''active''
   );
 
   insert into public.staff_members (
@@ -656,9 +656,9 @@ begin
   values (
     new_organization_id,
     new.id,
-    coalesce(new.email, ''),
-    coalesce(new_full_name, new.email, 'Owner'),
-    'Admin',
+    coalesce(new.email, ''''),
+    coalesce(new_full_name, new.email, ''Owner''),
+    ''Admin'',
     true,
     true
   );
@@ -667,7 +667,7 @@ begin
 
   return new;
 end;
-$function$
+'
 language plpgsql
 security definer
 set search_path = public;
@@ -678,7 +678,7 @@ after insert on auth.users
 for each row
 execute function public.handle_roundhq_new_user();
 
-do $$
+do '
 declare
   existing_user record;
   new_organization_id uuid;
@@ -694,11 +694,11 @@ begin
       where user_id = auth_user.id
     )
   loop
-    new_company_name := nullif(btrim(coalesce(existing_user.raw_user_meta_data ->> 'company_name', '')), '');
-    new_full_name := nullif(btrim(coalesce(existing_user.raw_user_meta_data ->> 'full_name', '')), '');
+    new_company_name := nullif(btrim(coalesce(existing_user.raw_user_meta_data ->> ''company_name'', '''')), '''');
+    new_full_name := nullif(btrim(coalesce(existing_user.raw_user_meta_data ->> ''full_name'', '''')), '''');
 
     if new_company_name is null then
-      new_company_name := coalesce(nullif(split_part(existing_user.email, '@', 1), ''), 'RoundHQ Workspace');
+      new_company_name := coalesce(nullif(split_part(existing_user.email, ''@'', 1), ''''), ''RoundHQ Workspace'');
     end if;
 
     insert into public.organizations (name, owner_user_id)
@@ -718,8 +718,8 @@ begin
       existing_user.id,
       existing_user.email,
       coalesce(new_full_name, existing_user.email),
-      'owner',
-      'active'
+      ''owner'',
+      ''active''
     );
 
     insert into public.staff_members (
@@ -734,9 +734,9 @@ begin
     values (
       new_organization_id,
       existing_user.id,
-      coalesce(existing_user.email, ''),
-      coalesce(new_full_name, existing_user.email, 'Owner'),
-      'Admin',
+      coalesce(existing_user.email, ''''),
+      coalesce(new_full_name, existing_user.email, ''Owner''),
+      ''Admin'',
       true,
       true
     );
@@ -744,39 +744,39 @@ begin
     perform public.seed_roundhq_organization(new_organization_id);
   end loop;
 end;
-$$;
+';
 
-do $$
+do '
 declare
   table_name text;
 begin
   foreach table_name in array array[
-    'organizations',
-    'organization_members',
-    'subscriptions',
-    'staff_members',
-    'role_permissions',
-    'customers',
-    'visits',
-    'customer_leads',
-    'monthly_payments',
-    'items',
-    'quotes',
-    'invoices',
-    'recurring_invoice_templates',
-    'scheduled_jobs',
-    'commercial_rams_documents'
+    ''organizations'',
+    ''organization_members'',
+    ''subscriptions'',
+    ''staff_members'',
+    ''role_permissions'',
+    ''customers'',
+    ''visits'',
+    ''customer_leads'',
+    ''monthly_payments'',
+    ''items'',
+    ''quotes'',
+    ''invoices'',
+    ''recurring_invoice_templates'',
+    ''scheduled_jobs'',
+    ''commercial_rams_documents''
   ]
   loop
-    execute format('drop trigger if exists set_%I_updated_at on public.%I', table_name, table_name);
+    execute format(''drop trigger if exists set_%I_updated_at on public.%I'', table_name, table_name);
     execute format(
-      'create trigger set_%I_updated_at before update on public.%I for each row execute function public.touch_updated_at()',
+      ''create trigger set_%I_updated_at before update on public.%I for each row execute function public.touch_updated_at()'',
       table_name,
       table_name
     );
   end loop;
 end;
-$$;
+';
 
 grant usage on schema public to anon, authenticated;
 grant execute on function public.current_organization_id() to authenticated;
