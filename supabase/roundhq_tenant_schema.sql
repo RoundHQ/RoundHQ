@@ -59,67 +59,53 @@ create table if not exists public.subscriptions (
 
 create or replace function public.current_organization_id()
 returns uuid
-as '
+language sql
+stable
+security definer
+set search_path = public
+return (
   select organization_id
   from public.organization_members
   where user_id = auth.uid()
-    and status = ''active''
+    and status = 'active'
   order by
     case role
-      when ''owner'' then 1
-      when ''admin'' then 2
+      when 'owner' then 1
+      when 'admin' then 2
       else 3
     end,
     created_at asc
   limit 1
-'
-language sql
-stable
-security definer
-set search_path = public;
+);
 
 create or replace function public.is_organization_member(target_organization_id uuid)
 returns boolean
-as '
-  select exists (
-    select 1
-    from public.organization_members
-    where organization_id = target_organization_id
-      and user_id = auth.uid()
-      and status = ''active''
-  )
-'
 language sql
 stable
 security definer
-set search_path = public;
+set search_path = public
+return exists (
+  select 1
+  from public.organization_members
+  where organization_id = target_organization_id
+    and user_id = auth.uid()
+    and status = 'active'
+);
 
 create or replace function public.is_organization_admin(target_organization_id uuid)
 returns boolean
-as '
-  select exists (
-    select 1
-    from public.organization_members
-    where organization_id = target_organization_id
-      and user_id = auth.uid()
-      and status = ''active''
-      and role in (''owner'', ''admin'')
-  )
-'
 language sql
 stable
 security definer
-set search_path = public;
-
-create or replace function public.touch_updated_at()
-returns trigger
-as '
-begin
-  new.updated_at = now();
-  return new;
-end;
-'
-language plpgsql;
+set search_path = public
+return exists (
+  select 1
+  from public.organization_members
+  where organization_id = target_organization_id
+    and user_id = auth.uid()
+    and status = 'active'
+    and role in ('owner', 'admin')
+);
 
 create table if not exists public.app_state (
   organization_id uuid not null default public.current_organization_id()
@@ -548,242 +534,15 @@ create table if not exists public.commercial_rams_documents (
 create index if not exists commercial_rams_org_updated_at_idx
 on public.commercial_rams_documents (organization_id, updated_at desc);
 
-create or replace function public.seed_roundhq_organization(target_organization_id uuid)
-returns void
-as '
-begin
-  insert into public.app_state (organization_id, id, data)
-  values (target_organization_id, ''primary'', ''{}''::jsonb)
-  on conflict (organization_id, id) do nothing;
-
-  insert into public.subscriptions (organization_id, status)
-  values (target_organization_id, ''trialing'')
-  on conflict (organization_id) do nothing;
-
-  insert into public.role_permissions (organization_id, role, page_key, allowed)
-  values
-    (target_organization_id, ''Admin'', ''dashboard'', true),
-    (target_organization_id, ''Admin'', ''schedule'', true),
-    (target_organization_id, ''Admin'', ''rounds'', true),
-    (target_organization_id, ''Admin'', ''history'', true),
-    (target_organization_id, ''Admin'', ''map'', true),
-    (target_organization_id, ''Admin'', ''actions'', true),
-    (target_organization_id, ''Admin'', ''commercial'', true),
-    (target_organization_id, ''Admin'', ''commercialDocs'', true),
-    (target_organization_id, ''Admin'', ''customers'', true),
-    (target_organization_id, ''Admin'', ''quotes'', true),
-    (target_organization_id, ''Admin'', ''invoices'', true),
-    (target_organization_id, ''Admin'', ''staff'', true),
-    (target_organization_id, ''Admin'', ''settings'', true),
-    (target_organization_id, ''Staff'', ''dashboard'', true),
-    (target_organization_id, ''Staff'', ''schedule'', true),
-    (target_organization_id, ''Staff'', ''rounds'', true),
-    (target_organization_id, ''Staff'', ''history'', true),
-    (target_organization_id, ''Staff'', ''map'', true),
-    (target_organization_id, ''Staff'', ''actions'', true),
-    (target_organization_id, ''Staff'', ''commercial'', true),
-    (target_organization_id, ''Staff'', ''commercialDocs'', true),
-    (target_organization_id, ''Staff'', ''customers'', true),
-    (target_organization_id, ''Staff'', ''quotes'', true),
-    (target_organization_id, ''Staff'', ''invoices'', true),
-    (target_organization_id, ''Staff'', ''staff'', false),
-    (target_organization_id, ''Staff'', ''settings'', false),
-    (target_organization_id, ''Operator'', ''dashboard'', true),
-    (target_organization_id, ''Operator'', ''schedule'', false),
-    (target_organization_id, ''Operator'', ''rounds'', true),
-    (target_organization_id, ''Operator'', ''history'', true),
-    (target_organization_id, ''Operator'', ''map'', true),
-    (target_organization_id, ''Operator'', ''actions'', true),
-    (target_organization_id, ''Operator'', ''commercial'', true),
-    (target_organization_id, ''Operator'', ''commercialDocs'', false),
-    (target_organization_id, ''Operator'', ''customers'', false),
-    (target_organization_id, ''Operator'', ''quotes'', false),
-    (target_organization_id, ''Operator'', ''invoices'', false),
-    (target_organization_id, ''Operator'', ''staff'', false),
-    (target_organization_id, ''Operator'', ''settings'', false)
-  on conflict (organization_id, role, page_key) do nothing;
-end;
-'
-language plpgsql
-security definer
-set search_path = public;
-
-create or replace function public.handle_roundhq_new_user()
-returns trigger
-as '
-declare
-  new_organization_id uuid;
-  new_company_name text;
-  new_full_name text;
-begin
-  new_company_name := nullif(btrim(coalesce(new.raw_user_meta_data ->> ''company_name'', '''')), '''');
-  new_full_name := nullif(btrim(coalesce(new.raw_user_meta_data ->> ''full_name'', '''')), '''');
-
-  if new_company_name is null then
-    new_company_name := coalesce(nullif(split_part(new.email, ''@'', 1), ''''), ''RoundHQ Workspace'');
-  end if;
-
-  insert into public.organizations (name, owner_user_id)
-  values (new_company_name, new.id)
-  returning id into new_organization_id;
-
-  insert into public.organization_members (
-    organization_id,
-    user_id,
-    email,
-    full_name,
-    role,
-    status
-  )
-  values (
-    new_organization_id,
-    new.id,
-    new.email,
-    coalesce(new_full_name, new.email),
-    ''owner'',
-    ''active''
-  );
-
-  insert into public.staff_members (
-    organization_id,
-    auth_user_id,
-    email,
-    full_name,
-    role,
-    is_active,
-    is_system_admin
-  )
-  values (
-    new_organization_id,
-    new.id,
-    coalesce(new.email, ''''),
-    coalesce(new_full_name, new.email, ''Owner''),
-    ''Admin'',
-    true,
-    true
-  );
-
-  perform public.seed_roundhq_organization(new_organization_id);
-
-  return new;
-end;
-'
-language plpgsql
-security definer
-set search_path = public;
-
 drop trigger if exists on_auth_user_created_roundhq on auth.users;
-create trigger on_auth_user_created_roundhq
-after insert on auth.users
-for each row
-execute function public.handle_roundhq_new_user();
-
-do '
-declare
-  existing_user record;
-  new_organization_id uuid;
-  new_company_name text;
-  new_full_name text;
-begin
-  for existing_user in
-    select auth_user.id, auth_user.email, auth_user.raw_user_meta_data
-    from auth.users as auth_user
-    where not exists (
-      select 1
-      from public.organization_members
-      where user_id = auth_user.id
-    )
-  loop
-    new_company_name := nullif(btrim(coalesce(existing_user.raw_user_meta_data ->> ''company_name'', '''')), '''');
-    new_full_name := nullif(btrim(coalesce(existing_user.raw_user_meta_data ->> ''full_name'', '''')), '''');
-
-    if new_company_name is null then
-      new_company_name := coalesce(nullif(split_part(existing_user.email, ''@'', 1), ''''), ''RoundHQ Workspace'');
-    end if;
-
-    insert into public.organizations (name, owner_user_id)
-    values (new_company_name, existing_user.id)
-    returning id into new_organization_id;
-
-    insert into public.organization_members (
-      organization_id,
-      user_id,
-      email,
-      full_name,
-      role,
-      status
-    )
-    values (
-      new_organization_id,
-      existing_user.id,
-      existing_user.email,
-      coalesce(new_full_name, existing_user.email),
-      ''owner'',
-      ''active''
-    );
-
-    insert into public.staff_members (
-      organization_id,
-      auth_user_id,
-      email,
-      full_name,
-      role,
-      is_active,
-      is_system_admin
-    )
-    values (
-      new_organization_id,
-      existing_user.id,
-      coalesce(existing_user.email, ''''),
-      coalesce(new_full_name, existing_user.email, ''Owner''),
-      ''Admin'',
-      true,
-      true
-    );
-
-    perform public.seed_roundhq_organization(new_organization_id);
-  end loop;
-end;
-';
-
-do '
-declare
-  table_name text;
-begin
-  foreach table_name in array array[
-    ''organizations'',
-    ''organization_members'',
-    ''subscriptions'',
-    ''staff_members'',
-    ''role_permissions'',
-    ''customers'',
-    ''visits'',
-    ''customer_leads'',
-    ''monthly_payments'',
-    ''items'',
-    ''quotes'',
-    ''invoices'',
-    ''recurring_invoice_templates'',
-    ''scheduled_jobs'',
-    ''commercial_rams_documents''
-  ]
-  loop
-    execute format(''drop trigger if exists set_%I_updated_at on public.%I'', table_name, table_name);
-    execute format(
-      ''create trigger set_%I_updated_at before update on public.%I for each row execute function public.touch_updated_at()'',
-      table_name,
-      table_name
-    );
-  end loop;
-end;
-';
+drop function if exists public.handle_roundhq_new_user() cascade;
+drop function if exists public.seed_roundhq_organization(uuid) cascade;
+drop function if exists public.touch_updated_at() cascade;
 
 grant usage on schema public to anon, authenticated;
 grant execute on function public.current_organization_id() to authenticated;
 grant execute on function public.is_organization_member(uuid) to authenticated;
 grant execute on function public.is_organization_admin(uuid) to authenticated;
-revoke execute on function public.seed_roundhq_organization(uuid) from public, anon, authenticated;
-revoke execute on function public.handle_roundhq_new_user() from public, anon, authenticated;
 
 grant select, insert, update, delete on all tables in schema public to authenticated;
 grant usage, select on all sequences in schema public to authenticated;
@@ -810,7 +569,7 @@ create policy "Members can read organizations"
 on public.organizations
 for select
 to authenticated
-using (public.is_organization_member(id));
+using (owner_user_id = auth.uid() or public.is_organization_member(id));
 
 drop policy if exists "Admins can update organizations" on public.organizations;
 create policy "Admins can update organizations"
@@ -819,6 +578,13 @@ for update
 to authenticated
 using (public.is_organization_admin(id))
 with check (public.is_organization_admin(id));
+
+drop policy if exists "Users can create owned organizations" on public.organizations;
+create policy "Users can create owned organizations"
+on public.organizations
+for insert
+to authenticated
+with check (owner_user_id = auth.uid());
 
 drop policy if exists "Members can read organization members" on public.organization_members;
 create policy "Members can read organization members"
@@ -835,6 +601,23 @@ to authenticated
 using (public.is_organization_admin(organization_id))
 with check (public.is_organization_admin(organization_id));
 
+drop policy if exists "Users can create their owner membership" on public.organization_members;
+create policy "Users can create their owner membership"
+on public.organization_members
+for insert
+to authenticated
+with check (
+  user_id = auth.uid()
+  and role = 'owner'
+  and status = 'active'
+  and exists (
+    select 1
+    from public.organizations
+    where organizations.id = organization_id
+      and organizations.owner_user_id = auth.uid()
+  )
+);
+
 drop policy if exists "Members can read subscriptions" on public.subscriptions;
 create policy "Members can read subscriptions"
 on public.subscriptions
@@ -848,6 +631,13 @@ on public.subscriptions
 for update
 to authenticated
 using (public.is_organization_admin(organization_id))
+with check (public.is_organization_admin(organization_id));
+
+drop policy if exists "Admins can insert subscriptions" on public.subscriptions;
+create policy "Admins can insert subscriptions"
+on public.subscriptions
+for insert
+to authenticated
 with check (public.is_organization_admin(organization_id));
 
 drop policy if exists "Members can read app state" on public.app_state;
