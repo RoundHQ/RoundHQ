@@ -1,0 +1,74 @@
+<form id="cleancut-lead-form">
+  <label>
+    Name
+    <input name="name" autocomplete="name" required />
+  </label>
+
+  <label>
+    Email
+    <input name="email" type="email" autocomplete="email" />
+  </label>
+
+  <label>
+    Phone
+    <input name="phone" autocomplete="tel" />
+  </label>
+
+  <label>
+    Address
+    <input name="address" autocomplete="street-address" />
+  </label>
+
+  <label>
+    Postcode
+    <input name="postcode" autocomplete="postal-code" />
+  </label>
+
+  <label>
+    Service
+    <input name="service" placeholder="Grass cutting, hedge cutting, pressure washing..." />
+  </label>
+
+  <label>
+    Message
+    <textarea name="message" required></textarea>
+  </label>
+
+  <input name="companyWebsite" tabindex="-1" autocomplete="off" hidden />
+
+  <button type="submit">Send enquiry</button>
+  <p id="cleancut-lead-status" role="status"></p>
+</form>
+
+<script>
+  const form = document.querySelector("#cleancut-lead-form");
+  const status = document.querySelector("#cleancut-lead-status");
+  const endpoint = "https://YOUR-CLEANCUT-APP-DOMAIN/api/customer-leads";
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    status.textContent = "Sending...";
+
+    const payload = Object.fromEntries(new FormData(form).entries());
+
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+      const result = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(result.error || "Unable to send enquiry.");
+      }
+
+      form.reset();
+      status.textContent = "Thanks, your enquiry has been sent.";
+    } catch (error) {
+      status.textContent = error.message || "Unable to send enquiry.";
+    }
+  });
+</script>
