@@ -1,4 +1,4 @@
-<form id="cleancut-lead-form">
+<form id="roundhq-lead-form">
   <label>
     Name
     <input name="name" autocomplete="name" required />
@@ -37,13 +37,13 @@
   <input name="companyWebsite" tabindex="-1" autocomplete="off" hidden />
 
   <button type="submit">Send enquiry</button>
-  <p id="cleancut-lead-status" role="status"></p>
+  <p id="roundhq-lead-status" role="status"></p>
 </form>
 
 <script>
-  const form = document.querySelector("#cleancut-lead-form");
-  const status = document.querySelector("#cleancut-lead-status");
-  const endpoint = "https://YOUR-CLEANCUT-APP-DOMAIN/api/customer-leads";
+  const form = document.querySelector("#roundhq-lead-form");
+  const status = document.querySelector("#roundhq-lead-status");
+  const endpoint = "https://roundhq.co.uk/api/customer-leads";
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();

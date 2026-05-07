@@ -681,7 +681,7 @@ function buildBusinessName(details: PdfTemplateBrandDetails) {
     return (
         normalizeOptionalText(details.tradingName) ||
         normalizeOptionalText(details.businessName) ||
-        "Cleancut Garden & Property Maintenance"
+        "Your Business"
     );
 }
 

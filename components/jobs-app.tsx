@@ -1,5 +1,5 @@
 "use client";
-// Created By William Williamson For Cleancut Garden & Property Maintenance.
+// Created by William Williamson.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   LayoutDashboard,
@@ -704,10 +704,10 @@ const ROLE_PERMISSION_SELECT_FIELDS =
 const VISIT_ROUND_METADATA_SETUP_NOTICE =
     "Supabase is connected, but the visits table needs the latest round metadata columns. Run the visit round metadata SQL setup script and refresh.";
 
-const SETTINGS_STORAGE_KEY = "cleancut_settings";
+const SETTINGS_STORAGE_KEY = "roundhq_settings";
 
 const DEFAULT_APP_SETTINGS: AppSettings = {
-  businessName: "Cleancut Garden & Property Maintenance",
+  businessName: "Your Business",
   tradingName: "",
   businessEmail: "",
   businessPhone: "",
@@ -1175,7 +1175,7 @@ function formatTemplateCurrency(value: number) {
 }
 
 function getBusinessDisplayName(settings: Pick<AppSettings, "tradingName" | "businessName">) {
-  return settings.tradingName.trim() || settings.businessName.trim() || "Cleancut";
+  return settings.tradingName.trim() || settings.businessName.trim() || "Your Business";
 }
 
 function applyMessageTemplate(
@@ -8754,7 +8754,7 @@ export default function JobsApp() {
               ) : (
                   <div className="px-1">
                     <p className="text-xl font-black tracking-tight text-white">
-                      {appSettings.businessName || "Cleancut Garden & Property Maintenance"}
+                      {appSettings.businessName || "Your Business"}
                     </p>
                     {(appSettings.businessEmail || appSettings.businessPhone) && (
                         <p className="mt-1 text-xs text-white/60">

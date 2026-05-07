@@ -6,6 +6,19 @@ export async function middleware(request: NextRequest) {
     request,
   });
 
+  const isLoginPage = request.nextUrl.pathname === "/login";
+  const isSignupPage = request.nextUrl.pathname === "/signup";
+  const isProtectedPath =
+    request.nextUrl.pathname.startsWith("/dashboard") ||
+    request.nextUrl.pathname.startsWith("/customers") ||
+    request.nextUrl.pathname.startsWith("/routes") ||
+    request.nextUrl.pathname.startsWith("/reports") ||
+    request.nextUrl.pathname.startsWith("/staff");
+
+  if (!isProtectedPath && !isLoginPage && !isSignupPage) {
+    return response;
+  }
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
@@ -28,24 +41,15 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const isLoginPage = request.nextUrl.pathname === "/login";
-  const isProtectedPath =
-    request.nextUrl.pathname === "/" ||
-    request.nextUrl.pathname.startsWith("/dashboard") ||
-    request.nextUrl.pathname.startsWith("/customers") ||
-    request.nextUrl.pathname.startsWith("/routes") ||
-    request.nextUrl.pathname.startsWith("/reports") ||
-    request.nextUrl.pathname.startsWith("/staff");
-
   if (!user && isProtectedPath) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
-  if (user && isLoginPage) {
+  if (user && (isLoginPage || isSignupPage)) {
     const url = request.nextUrl.clone();
-    url.pathname = "/";
+    url.pathname = "/dashboard";
     return NextResponse.redirect(url);
   }
 

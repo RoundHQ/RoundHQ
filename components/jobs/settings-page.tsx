@@ -154,7 +154,7 @@ type SmsConfigStatus = {
     defaultCountryCode: string;
 };
 
-const STORAGE_KEY = "cleancut_settings";
+const STORAGE_KEY = "roundhq_settings";
 
 const visitDays = [
     "Monday",
@@ -172,7 +172,7 @@ const workflowMessageMethodOptions: WorkflowMessageMethod[] = [
 ];
 
 const defaultSettings: SettingsData = {
-    businessName: "Cleancut Garden & Property Maintenance",
+    businessName: "Your Business",
     tradingName: "",
     businessEmail: "",
     businessPhone: "",
@@ -648,7 +648,7 @@ export default function SettingsPage({
         useState(false);
     const [testSmsRecipient, setTestSmsRecipient] = useState("");
     const [testSmsMessage, setTestSmsMessage] = useState(
-        "This is a test text from Cleancut."
+        "This is a test text from RoundHQ."
     );
     const [isSendingTestSms, setIsSendingTestSms] = useState(false);
     const quoteServiceCategories = useMemo(
@@ -880,9 +880,9 @@ export default function SettingsPage({
                 },
                 body: JSON.stringify({
                     recipient,
-                    subject: "Cleancut test email",
+                    subject: "RoundHQ test email",
                     message: [
-                        "This is a test email from Cleancut.",
+                        "This is a test email from RoundHQ.",
                         "",
                         "Your SMTP settings are working and the website can send emails directly.",
                         "",
@@ -997,7 +997,7 @@ export default function SettingsPage({
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = "cleancut-settings.json";
+        a.download = "roundhq-settings.json";
         a.click();
         URL.revokeObjectURL(url);
 
@@ -2049,7 +2049,7 @@ export default function SettingsPage({
                                     <Input
                                         value={settings.emailFromName}
                                         onChange={(e) => update("emailFromName", e.target.value)}
-                                        placeholder="Cleancut Garden & Property Maintenance"
+                                        placeholder="Your Business"
                                     />
                                 </Field>
 

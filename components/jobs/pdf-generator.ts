@@ -257,7 +257,7 @@ function getCompanyName(details: DocumentBrandDetails) {
     return (
         normalizeOptionalText(details.tradingName) ||
         normalizeOptionalText(details.businessName) ||
-        "Cleancut Garden & Property Maintenance"
+        "Your Business"
     );
 }
 
@@ -536,7 +536,7 @@ function drawDocumentHeader(
         setTextColor(doc, palette.secondary);
         doc.setFont("helvetica", "bold");
         doc.setFontSize(18);
-        doc.text("CLEANCUT", MARGIN, 18);
+        doc.text("YOUR BUSINESS", MARGIN, 18);
         metaStartY = 23;
     }
 
@@ -590,7 +590,7 @@ function drawDocumentHeader(
             setTextColor(doc, "#ffffff");
             doc.setFont("helvetica", "bold");
             doc.setFontSize(18);
-            doc.text("CLEANCUT", MARGIN + bannerPadding, bannerY + 18.5);
+            doc.text("YOUR BUSINESS", MARGIN + bannerPadding, bannerY + 18.5);
         }
 
         setTextColor(doc, titleColor || "#ffffff");
@@ -1517,7 +1517,7 @@ async function buildQuotePdfDocument(
                 : [
                       quote.notes?.trim() ||
                           businessDetails.defaultQuoteTerms?.trim() ||
-                          "Thank you for considering Cleancut.",
+                          "Thank you for considering us.",
                   ],
         palette,
         accentColor: null,

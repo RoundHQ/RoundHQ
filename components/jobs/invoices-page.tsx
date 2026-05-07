@@ -228,7 +228,7 @@ function getBrandName(businessDetails: BusinessDetails) {
   return (
     businessDetails.tradingName?.trim() ||
     businessDetails.businessName?.trim() ||
-    "Cleancut"
+    "Your Business"
   );
 }
 

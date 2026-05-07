@@ -172,7 +172,7 @@ function getBrandName(businessDetails: Props["businessDetails"]) {
   return (
     businessDetails.tradingName?.trim() ||
     businessDetails.businessName?.trim() ||
-    "Cleancut"
+    "Your Business"
   );
 }
 

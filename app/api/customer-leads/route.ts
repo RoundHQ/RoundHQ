@@ -30,7 +30,7 @@ function getCorsHeaders(request: Request): CorsResult {
       "Access-Control-Allow-Origin": allowedOrigin,
       "Access-Control-Allow-Methods": "POST, OPTIONS",
       "Access-Control-Allow-Headers":
-        "Content-Type, X-Cleancut-Lead-Token",
+        "Content-Type, X-RoundHQ-Lead-Token",
       "Access-Control-Max-Age": "86400",
     },
   };
@@ -141,7 +141,7 @@ function hasValidFormToken(
   }
 
   const providedToken =
-    request.headers.get("x-cleancut-lead-token")?.trim() ||
+    request.headers.get("x-roundhq-lead-token")?.trim() ||
     getPayloadText(payload.formToken);
 
   return providedToken === expectedToken;

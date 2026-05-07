@@ -108,7 +108,7 @@ export function getRamsCompanyName(details: RamsBusinessDetails) {
   return (
     normalizeOptionalText(details.tradingName) ||
     normalizeOptionalText(details.businessName) ||
-    "Cleancut Garden & Property Maintenance Ltd"
+    "Your Business"
   );
 }
 
@@ -518,4 +518,3 @@ export function getRamsEmergencyInfo(document: CommercialRamsDocument) {
 
   return lines.join("\n");
 }
-
