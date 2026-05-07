@@ -59,53 +59,27 @@ create table if not exists public.subscriptions (
 
 create or replace function public.current_organization_id()
 returns uuid
+as 'select organization_id from public.organization_members where user_id = auth.uid() and status = ''active'' order by case role when ''owner'' then 1 when ''admin'' then 2 else 3 end, created_at asc limit 1'
 language sql
 stable
 security definer
-set search_path = public
-return (
-  select organization_id
-  from public.organization_members
-  where user_id = auth.uid()
-    and status = 'active'
-  order by
-    case role
-      when 'owner' then 1
-      when 'admin' then 2
-      else 3
-    end,
-    created_at asc
-  limit 1
-);
+set search_path = public;
 
 create or replace function public.is_organization_member(target_organization_id uuid)
 returns boolean
+as 'select exists (select 1 from public.organization_members where organization_id = target_organization_id and user_id = auth.uid() and status = ''active'')'
 language sql
 stable
 security definer
-set search_path = public
-return exists (
-  select 1
-  from public.organization_members
-  where organization_id = target_organization_id
-    and user_id = auth.uid()
-    and status = 'active'
-);
+set search_path = public;
 
 create or replace function public.is_organization_admin(target_organization_id uuid)
 returns boolean
+as 'select exists (select 1 from public.organization_members where organization_id = target_organization_id and user_id = auth.uid() and status = ''active'' and role in (''owner'', ''admin''))'
 language sql
 stable
 security definer
-set search_path = public
-return exists (
-  select 1
-  from public.organization_members
-  where organization_id = target_organization_id
-    and user_id = auth.uid()
-    and status = 'active'
-    and role in ('owner', 'admin')
-);
+set search_path = public;
 
 create table if not exists public.app_state (
   organization_id uuid not null default public.current_organization_id()
