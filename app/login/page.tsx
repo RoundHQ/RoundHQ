@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { ArrowRight } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const supabaseConfigured = isSupabaseConfigured();
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -17,6 +18,14 @@ export default function LoginPage() {
     setError("");
 
     try {
+      if (!supabaseConfigured) {
+        setError(
+          "RoundHQ is not connected to Supabase yet. Add the new Supabase URL and publishable key to .env.local."
+        );
+        setLoading(false);
+        return;
+      }
+
       const supabase = createClient();
       const { error } = await supabase.auth.signInWithPassword({
         email,
@@ -32,7 +41,7 @@ export default function LoginPage() {
       window.location.href = "/dashboard";
     } catch (err) {
       console.error(err);
-      setError("Something went wrong");
+      setError(err instanceof Error ? err.message : "Something went wrong");
       setLoading(false);
     }
   };
@@ -101,9 +110,15 @@ export default function LoginPage() {
                 </div>
               )}
 
+              {!supabaseConfigured && !error && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  Supabase is not configured in this RoundHQ folder yet.
+                </div>
+              )}
+
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || !supabaseConfigured}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-[#173f35] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#215648] disabled:opacity-50"
               >
                 {loading ? "Signing in..." : "Sign in"}

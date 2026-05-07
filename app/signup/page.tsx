@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { ArrowRight } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
 export default function SignupPage() {
   const [companyName, setCompanyName] = useState("");
@@ -13,6 +13,7 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const supabaseConfigured = isSupabaseConfigured();
 
   const handleSignup = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -21,6 +22,14 @@ export default function SignupPage() {
     setSuccess("");
 
     try {
+      if (!supabaseConfigured) {
+        setError(
+          "RoundHQ is not connected to Supabase yet. Add the new Supabase URL and publishable key to .env.local."
+        );
+        setLoading(false);
+        return;
+      }
+
       const supabase = createClient();
       const { data, error } = await supabase.auth.signUp({
         email,
@@ -49,7 +58,7 @@ export default function SignupPage() {
       setLoading(false);
     } catch (err) {
       console.error(err);
-      setError("Something went wrong");
+      setError(err instanceof Error ? err.message : "Something went wrong");
       setLoading(false);
     }
   };
@@ -151,9 +160,15 @@ export default function SignupPage() {
                 </div>
               )}
 
+              {!supabaseConfigured && !error && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  Supabase is not configured in this RoundHQ folder yet.
+                </div>
+              )}
+
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || !supabaseConfigured}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-[#173f35] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#215648] disabled:opacity-50"
               >
                 {loading ? "Creating account..." : "Create account"}
