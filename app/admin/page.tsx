@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import {
   AlertTriangle,
   Building2,
@@ -176,7 +176,13 @@ export default async function AdminPage({
   }
 
   if (!isAdminEmail(user.email)) {
-    notFound();
+    return (
+      <SetupNotice title="This account is not allowed into the owner console">
+        You are signed in as <code>{user.email ?? "unknown email"}</code>. Add
+        that exact email address to <code>ROUNDHQ_ADMIN_EMAILS</code>, restart
+        the local dev server, then refresh <code>/admin</code>.
+      </SetupNotice>
+    );
   }
 
   if (!isSupabaseServiceRoleConfigured()) {
