@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import {
   ArrowRight,
   BadgeCheck,
@@ -114,20 +115,15 @@ const trustItems = ["No card required", "Cancel anytime", "£30 / month"];
 
 function RoundHQLogo({ compact = false }: { compact?: boolean }) {
   return (
-    <Link href="/" className="flex items-center gap-2.5 text-white">
-      <span className="flex size-10 items-center justify-center rounded-md bg-[#18c653] text-white shadow-[0_10px_30px_rgba(24,198,83,0.25)]">
-        <MapPin aria-hidden="true" className="size-5 fill-white/20" />
-      </span>
-      <span className="leading-none">
-        <span className="block text-[1.95rem] font-bold tracking-normal">
-          Round<span className="text-[#20d85a]">HQ</span>
-        </span>
-        {!compact && (
-          <span className="mt-1 block text-[0.52rem] font-semibold uppercase tracking-[0.16em] text-white/72">
-            Run your rounds. Grow your business.
-          </span>
-        )}
-      </span>
+    <Link href="/" className="block shrink-0">
+      <Image
+        src="/roundhq-logo-long-white.png"
+        alt="RoundHQ"
+        width={1200}
+        height={300}
+        priority={!compact}
+        className={compact ? "h-auto w-[180px]" : "h-auto w-[220px] sm:w-[240px]"}
+      />
     </Link>
   );
 }
@@ -160,11 +156,11 @@ function MiniStat({
 
 function LaptopMockup() {
   const jobs = [
-    ["Sadie Arthur", "Residential", "Due"],
-    ["Jennifer Conan", "Commercial", "Due"],
-    ["Christopher Moore", "Residential", "Done"],
-    ["Robert Turnbull", "Monthly", "Due"],
-    ["Anne-Mare McLucas", "Cash", "Due"],
+    ["Demo Customer 01", "Residential", "Due"],
+    ["Demo Customer 02", "Commercial", "Due"],
+    ["Demo Customer 03", "Residential", "Done"],
+    ["Demo Customer 04", "Monthly", "Due"],
+    ["Demo Customer 05", "Cash", "Due"],
   ];
 
   return (
@@ -211,10 +207,10 @@ function LaptopMockup() {
               </div>
 
               <div className="grid grid-cols-4 gap-3">
-                <MiniStat label="Today's jobs" value="12" />
-                <MiniStat label="Cut status" value="0 / 12" tone="red" />
-                <MiniStat label="Total owed" value="£293.75" tone="red" />
-                <MiniStat label="Day value" value="£261.25" />
+                <MiniStat label="Today's jobs" value="8" />
+                <MiniStat label="Cut status" value="5 / 8" />
+                <MiniStat label="Total owed" value="£420.00" tone="red" />
+                <MiniStat label="Day value" value="£680.00" />
               </div>
 
               <div className="mt-4 grid grid-cols-[1.25fr_0.85fr] gap-4">
@@ -272,7 +268,7 @@ function LaptopMockup() {
                       Payments Snapshot
                     </h4>
                     <p className="mt-2 text-xl font-bold text-slate-950">
-                      £293.75
+                      £420.00
                     </p>
                     <p className="text-[0.68rem] font-semibold text-slate-400">
                       Total owed
@@ -317,12 +313,12 @@ function PhoneMockup() {
           <p className="text-[0.72rem] font-bold text-slate-950">
             Today - Wednesday
           </p>
-          {["Sadie Arthur", "Jennifer Conan", "Christopher Moore"].map(
+          {["Demo Customer 01", "Demo Customer 02", "Demo Customer 03"].map(
             (name) => (
               <div key={name} className="mt-3 border-b border-slate-100 pb-3">
                 <p className="text-[0.68rem] font-bold text-slate-900">{name}</p>
                 <p className="mt-1 text-[0.56rem] text-slate-500">
-                  Glasgow, G75
+                  Example Road, AB1
                 </p>
               </div>
             )
