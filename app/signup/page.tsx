@@ -1,9 +1,16 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { FormEvent, useState } from "react";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, BadgeCheck, ShieldCheck } from "lucide-react";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+
+const signupBenefits = [
+  "14-day free trial",
+  "No card required",
+  "Everything included for one monthly price",
+];
 
 export default function SignupPage() {
   const [companyName, setCompanyName] = useState("");
@@ -64,64 +71,105 @@ export default function SignupPage() {
   };
 
   return (
-    <main className="min-h-screen bg-[#f6f5ef] px-5 py-8 text-slate-950 sm:px-8">
-      <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-6xl flex-col">
-        <header className="flex items-center justify-between py-2">
-          <Link href="/" className="text-xl font-semibold">
-            RoundHQ
+    <main className="relative min-h-screen overflow-hidden bg-[#001d1f] px-5 py-7 text-white sm:px-8">
+      <div className="absolute inset-0 bg-[linear-gradient(120deg,#001d1f_0%,#012e31_52%,#001112_100%)]" />
+      <div className="absolute inset-0 opacity-[0.08] [background-image:linear-gradient(rgba(255,255,255,0.18)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.18)_1px,transparent_1px)] [background-size:64px_64px]" />
+      <div className="absolute -right-24 top-20 hidden h-[420px] w-[420px] rounded-full border border-[#20d85a]/12 lg:block" />
+      <div className="absolute -right-8 top-36 hidden h-[300px] w-[300px] rounded-full border border-[#20d85a]/12 lg:block" />
+
+      <div className="relative z-10 mx-auto flex min-h-[calc(100vh-3.5rem)] w-full max-w-7xl flex-col">
+        <header className="flex items-center justify-between">
+          <Link href="/" className="block shrink-0" aria-label="RoundHQ home">
+            <Image
+              src="/roundhq-logo-long-white.png"
+              alt="RoundHQ"
+              width={1200}
+              height={300}
+              priority
+              className="h-auto w-[210px] sm:w-[235px]"
+            />
           </Link>
           <Link
             href="/login"
-            className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-white hover:text-slate-950"
+            className="rounded-md border border-white/12 px-4 py-2 text-sm font-bold text-white/88 transition hover:bg-white/10 hover:text-white"
           >
             Login
           </Link>
         </header>
 
-        <div className="grid flex-1 items-center gap-10 py-10 lg:grid-cols-[1fr_440px]">
+        <div className="grid flex-1 items-center gap-10 py-12 lg:grid-cols-[1fr_460px]">
           <section className="max-w-2xl">
-            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#236b5a]">
-              Create your workspace
+            <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#20d85a]">
+              Start your free trial
             </p>
-            <h1 className="mt-4 text-4xl font-semibold tracking-normal sm:text-5xl">
-              Start running your rounds from RoundHQ.
+            <h1 className="mt-6 text-5xl font-extrabold leading-[1.08] tracking-normal text-white sm:text-6xl">
+              Create your RoundHQ workspace.
             </h1>
-            <p className="mt-5 text-lg leading-8 text-slate-600">
-              Set up your account, then use the dashboard to manage customers,
-              schedules, quotes, invoices, and field work from one place.
+            <p className="mt-6 max-w-xl text-lg leading-8 text-white/78">
+              Set up your account, then manage customers, schedules, quotes,
+              invoices, payments, and field work from one place.
             </p>
+
+            <ul className="mt-9 grid gap-4 sm:grid-cols-3">
+              {signupBenefits.map((item) => (
+                <li
+                  key={item}
+                  className="rounded-lg border border-white/10 bg-white/[0.055] p-4 text-sm font-semibold leading-6 text-white/84"
+                >
+                  <BadgeCheck
+                    aria-hidden="true"
+                    className="mb-3 size-5 text-[#20d85a]"
+                  />
+                  {item}
+                </li>
+              ))}
+            </ul>
           </section>
 
-          <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+          <section className="rounded-lg border border-white/12 bg-white p-6 text-slate-950 shadow-[0_30px_80px_rgba(0,0,0,0.35)] sm:p-8">
+            <div className="mb-6 flex items-start gap-4">
+              <span className="flex size-12 shrink-0 items-center justify-center rounded-md bg-[#e7f9ed] text-[#168b43]">
+                <ShieldCheck aria-hidden="true" className="size-7" />
+              </span>
+              <div>
+                <h2 className="text-2xl font-extrabold tracking-normal">
+                  Start free
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Your workspace is ready as soon as your account is confirmed.
+                </p>
+              </div>
+            </div>
+
             <form className="space-y-5" onSubmit={handleSignup}>
               <div>
-                <label className="mb-2 block text-sm font-medium text-slate-700">
+                <label className="mb-2 block text-sm font-bold text-slate-700">
                   Company name
                 </label>
                 <input
                   type="text"
                   value={companyName}
                   onChange={(event) => setCompanyName(event.target.value)}
-                  className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-[#236b5a] focus:bg-white"
+                  className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
                   required
                 />
               </div>
 
               <div>
-                <label className="mb-2 block text-sm font-medium text-slate-700">
+                <label className="mb-2 block text-sm font-bold text-slate-700">
                   Your name
                 </label>
                 <input
                   type="text"
                   value={fullName}
                   onChange={(event) => setFullName(event.target.value)}
-                  className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-[#236b5a] focus:bg-white"
+                  className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
                   required
                 />
               </div>
 
               <div>
-                <label className="mb-2 block text-sm font-medium text-slate-700">
+                <label className="mb-2 block text-sm font-bold text-slate-700">
                   Email
                 </label>
                 <input
@@ -129,13 +177,13 @@ export default function SignupPage() {
                   placeholder="owner@company.co.uk"
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
-                  className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-[#236b5a] focus:bg-white"
+                  className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
                   required
                 />
               </div>
 
               <div>
-                <label className="mb-2 block text-sm font-medium text-slate-700">
+                <label className="mb-2 block text-sm font-bold text-slate-700">
                   Password
                 </label>
                 <input
@@ -143,7 +191,7 @@ export default function SignupPage() {
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   minLength={8}
-                  className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-[#236b5a] focus:bg-white"
+                  className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
                   required
                 />
               </div>
@@ -169,7 +217,7 @@ export default function SignupPage() {
               <button
                 type="submit"
                 disabled={loading || !supabaseConfigured}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-[#173f35] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#215648] disabled:opacity-50"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-[#19c653] px-4 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.24)] transition hover:bg-[#22d861] disabled:opacity-50"
               >
                 {loading ? "Creating account..." : "Create account"}
                 {!loading && <ArrowRight aria-hidden="true" className="size-4" />}

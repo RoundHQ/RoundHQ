@@ -154,7 +154,7 @@ function MiniStat({
   );
 }
 
-function LaptopMockup() {
+function DesktopMockup() {
   const jobs = [
     ["Demo Customer 01", "Residential", "Due"],
     ["Demo Customer 02", "Commercial", "Due"],
@@ -164,12 +164,13 @@ function LaptopMockup() {
   ];
 
   return (
-    <div className="relative mx-auto w-full max-w-[720px]">
+    <div className="relative mx-auto w-full max-w-[760px] pb-20">
       <div className="absolute -right-5 top-0 hidden h-[420px] w-[420px] rounded-full border border-[#20d85a]/12 lg:block" />
       <div className="absolute right-6 top-10 hidden h-[340px] w-[340px] rounded-full border border-[#20d85a]/12 lg:block" />
-      <div className="relative rounded-[22px] border border-white/22 bg-[#1a2425] p-3 shadow-[0_35px_90px_rgba(0,0,0,0.55)]">
+      <div className="relative rounded-[18px] border-[10px] border-[#172122] bg-[#172122] shadow-[0_35px_90px_rgba(0,0,0,0.55)]">
+        <div className="absolute left-1/2 top-2 z-10 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-white/35" />
         <div className="overflow-hidden rounded-lg bg-slate-50">
-          <div className="grid min-h-[370px] grid-cols-[150px_1fr]">
+          <div className="grid min-h-[390px] grid-cols-[150px_1fr]">
             <aside className="bg-[#05372e] p-4 text-white">
               <div className="mb-5 flex items-center gap-2">
                 <span className="flex size-6 items-center justify-center rounded-md bg-[#20d85a]">
@@ -280,7 +281,9 @@ function LaptopMockup() {
           </div>
         </div>
       </div>
-      <div className="absolute -bottom-5 left-16 right-16 h-8 rounded-[50%] bg-black/40 blur-xl" />
+      <div className="mx-auto h-14 w-24 bg-gradient-to-b from-[#202b2d] to-[#0e1617]" />
+      <div className="mx-auto h-4 w-60 rounded-full bg-[#1a2425] shadow-[0_12px_30px_rgba(0,0,0,0.45)]" />
+      <div className="absolute bottom-10 left-16 right-16 h-8 rounded-[50%] bg-black/40 blur-xl" />
     </div>
   );
 }
@@ -435,7 +438,7 @@ export default function HomePage() {
           </div>
 
           <div className="relative pb-8">
-            <LaptopMockup />
+            <DesktopMockup />
             <PhoneMockup />
           </div>
         </div>
