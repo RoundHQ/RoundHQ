@@ -4,7 +4,6 @@ import {
   ArrowRight,
   BadgeCheck,
   CalendarDays,
-  ChevronDown,
   CirclePlay,
   CreditCard,
   FileText,
@@ -16,6 +15,9 @@ import {
   Star,
   Users,
 } from "lucide-react";
+import { getPublishedSitePages } from "@/lib/site-pages";
+
+export const dynamic = "force-dynamic";
 
 const productPillars = [
   {
@@ -349,7 +351,9 @@ function CheckItem({ children }: { children: React.ReactNode }) {
   );
 }
 
-export default function HomePage() {
+export default async function HomePage() {
+  const navPages = await getPublishedSitePages();
+
   return (
     <main className="min-h-screen bg-white text-slate-950">
       <section className="relative overflow-hidden bg-[#001d1f] text-white">
@@ -361,21 +365,15 @@ export default function HomePage() {
             <RoundHQLogo />
 
             <nav className="hidden items-center gap-9 text-sm font-semibold text-white/88 lg:flex">
-              <a href="#features" className="inline-flex items-center gap-1.5 hover:text-white">
-                Features <ChevronDown aria-hidden="true" className="size-3.5" />
-              </a>
-              <a href="#pricing" className="hover:text-white">
-                Pricing
-              </a>
-              <a href="#about" className="hover:text-white">
-                About
-              </a>
-              <a href="#resources" className="inline-flex items-center gap-1.5 hover:text-white">
-                Resources <ChevronDown aria-hidden="true" className="size-3.5" />
-              </a>
-              <a href="#contact" className="hover:text-white">
-                Contact
-              </a>
+              {navPages.map((page) => (
+                <Link
+                  key={page.slug}
+                  href={`/${page.slug}`}
+                  className="hover:text-white"
+                >
+                  {page.navLabel}
+                </Link>
+              ))}
             </nav>
 
             <div className="flex items-center gap-3">
@@ -624,9 +622,9 @@ export default function HomePage() {
           </div>
 
           {[
-            ["Product", "Features", "Pricing", "Integrations", "Updates"],
-            ["Support", "Help Centre", "Guides", "Contact Us", "System Status"],
-            ["Company", "About Us", "Blog", "Privacy Policy", "Terms of Service"],
+            ["Product", "Features", "Pricing"],
+            ["Support", "Resources", "Contact"],
+            ["Company", "About"],
           ].map(([heading, ...items]) => (
             <div key={heading}>
               <h3 className="text-xs font-extrabold uppercase tracking-[0.16em] text-white">
@@ -635,9 +633,12 @@ export default function HomePage() {
               <ul className="mt-5 space-y-3">
                 {items.map((item) => (
                   <li key={item}>
-                    <a href="#" className="text-sm text-white/60 hover:text-white">
+                    <Link
+                      href={`/${item.toLowerCase()}`}
+                      className="text-sm text-white/60 hover:text-white"
+                    >
                       {item}
-                    </a>
+                    </Link>
                   </li>
                 ))}
               </ul>

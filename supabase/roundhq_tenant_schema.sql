@@ -71,6 +71,135 @@ create unique index if not exists subscriptions_stripe_subscription_unique_idx
 on public.subscriptions (stripe_subscription_id)
 where stripe_subscription_id is not null;
 
+create table if not exists public.site_pages (
+  slug text primary key check (
+    slug in ('features', 'pricing', 'about', 'resources', 'contact')
+  ),
+  nav_label text not null,
+  eyebrow text not null,
+  title text not null,
+  summary text not null,
+  body text not null,
+  highlights jsonb not null default '[]'::jsonb,
+  primary_cta_label text not null default 'Start free trial',
+  primary_cta_href text not null default '/signup',
+  sort_order integer not null default 0,
+  is_published boolean not null default true,
+  updated_at timestamptz not null default now(),
+  check (jsonb_typeof(highlights) = 'array')
+);
+
+insert into public.site_pages (
+  slug,
+  nav_label,
+  eyebrow,
+  title,
+  summary,
+  body,
+  highlights,
+  primary_cta_label,
+  primary_cta_href,
+  sort_order,
+  is_published
+)
+values
+  (
+    'features',
+    'Features',
+    'Everything in one place',
+    'Tools built for the way maintenance teams actually work.',
+    'RoundHQ brings customer records, rounds, quotes, invoices, visits, payments, and staff access into one tidy workspace.',
+    'Your team can plan the week, see what is due, track who has been visited, and keep a clean record of every customer without fighting spreadsheets.
+
+Each feature is built around daily field work: quick scheduling, clear route visibility, simple quote creation, invoice tracking, and staff permissions that keep the right data in the right hands.',
+    jsonb_build_array(
+      'Customer management with notes, pricing, documents, and service history',
+      'Rounds and scheduling for weekly, fortnightly, and monthly work',
+      'Quotes, invoices, payments, route maps, staff roles, and reporting'
+    ),
+    'Start free trial',
+    '/signup',
+    10,
+    true
+  ),
+  (
+    'pricing',
+    'Pricing',
+    'Simple pricing',
+    'One monthly price. Everything included.',
+    'RoundHQ is GBP 30 per month for each business account, with no setup fees and no complicated feature tiers.',
+    'The full platform is included from day one: unlimited customers, jobs and quotes, invoicing, payments, route planning, staff accounts, reminders, and reports.
+
+Start with a 14-day free trial. No card is required for the trial, and you can cancel whenever you need to.',
+    jsonb_build_array(
+      'GBP 30 per month per business account',
+      '14-day free trial with no card required',
+      'All current RoundHQ features included'
+    ),
+    'Start free trial',
+    '/signup',
+    20,
+    true
+  ),
+  (
+    'about',
+    'About',
+    'Built for maintenance businesses',
+    'RoundHQ helps practical teams run calmer days.',
+    'RoundHQ was created for garden maintenance and field service businesses that need structure without heavy software.',
+    'Most maintenance teams grow from hard work, repeat customers, and a lot of moving parts. RoundHQ gives that work a proper operating base so owners can see what is happening, staff know where they need to be, and customers get a more reliable service.
+
+The aim is simple: fewer missed details, clearer schedules, faster admin, and more control over the business.',
+    jsonb_build_array(
+      'Designed around rounds, visits, quotes, invoices, and field teams',
+      'Built for owners who want visibility without adding admin drag',
+      'Focused on practical workflows rather than bloated software'
+    ),
+    'See the features',
+    '/features',
+    30,
+    true
+  ),
+  (
+    'resources',
+    'Resources',
+    'Guides and updates',
+    'Helpful resources for growing maintenance teams.',
+    'Find practical guidance, product updates, and workflow ideas for running a more organised maintenance business.',
+    'This resources area is ready for guides, support articles, product updates, and practical templates as RoundHQ grows.
+
+Use it to explain how to get the most from scheduling, customer management, quoting, invoicing, payments, and staff access.',
+    jsonb_build_array(
+      'Product updates and new feature notes',
+      'Guides for scheduling, quoting, invoices, and payments',
+      'Operational templates for garden and property maintenance teams'
+    ),
+    'Contact RoundHQ',
+    '/contact',
+    40,
+    true
+  ),
+  (
+    'contact',
+    'Contact',
+    'Talk to RoundHQ',
+    'Questions, support, or setup help.',
+    'Get in touch if you want to ask about RoundHQ, the free trial, billing, or setting up your business workspace.',
+    'RoundHQ is here for maintenance businesses that want a cleaner way to manage the day-to-day work.
+
+Use this page for contact details, support information, demo requests, or any launch messaging you want customers to see before they sign up.',
+    jsonb_build_array(
+      'Ask about the 14-day free trial',
+      'Get help setting up your workspace',
+      'Share product questions or customer support requests'
+    ),
+    'Start free trial',
+    '/signup',
+    50,
+    true
+  )
+on conflict (slug) do nothing;
+
 create or replace function public.current_organization_id()
 returns uuid
 as 'select organization_id from public.organization_members where user_id = auth.uid() and status = ''active'' order by case role when ''owner'' then 1 when ''admin'' then 2 else 3 end, created_at asc limit 1'
@@ -531,10 +660,12 @@ grant usage on schema public to anon, authenticated;
 grant execute on function public.current_organization_id() to authenticated;
 grant execute on function public.is_organization_member(uuid) to authenticated;
 grant execute on function public.is_organization_admin(uuid) to authenticated;
+grant select on public.site_pages to anon, authenticated;
 
 grant select, insert, update, delete on all tables in schema public to authenticated;
 grant usage, select on all sequences in schema public to authenticated;
 
+alter table public.site_pages enable row level security;
 alter table public.organizations enable row level security;
 alter table public.organization_members enable row level security;
 alter table public.subscriptions enable row level security;
@@ -551,6 +682,13 @@ alter table public.invoices enable row level security;
 alter table public.recurring_invoice_templates enable row level security;
 alter table public.scheduled_jobs enable row level security;
 alter table public.commercial_rams_documents enable row level security;
+
+drop policy if exists "Published site pages are public" on public.site_pages;
+create policy "Published site pages are public"
+on public.site_pages
+for select
+to anon, authenticated
+using (is_published);
 
 drop policy if exists "Members can read organizations" on public.organizations;
 create policy "Members can read organizations"

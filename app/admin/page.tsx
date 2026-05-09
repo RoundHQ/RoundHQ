@@ -7,6 +7,7 @@ import {
   Building2,
   CreditCard,
   ExternalLink,
+  FileText,
   Search,
   ShieldCheck,
   Users,
@@ -251,6 +252,13 @@ export default async function AdminPage({
             </div>
 
             <div className="flex flex-wrap gap-2 text-sm">
+              <Link
+                href="/admin/pages"
+                className="inline-flex items-center gap-2 rounded-md border border-white/12 px-4 py-2 font-bold text-white/88 transition hover:bg-white/10 hover:text-white"
+              >
+                <FileText aria-hidden="true" className="size-4" />
+                Pages
+              </Link>
               <Link
                 href="/dashboard"
                 className="rounded-md border border-white/12 px-4 py-2 font-bold text-white/88 transition hover:bg-white/10 hover:text-white"
