@@ -1,4 +1,5 @@
 import JobsApp from "@/components/jobs-app";
+import AccountDisabledGate from "@/components/admin/account-disabled-gate";
 import SubscriptionGate from "@/components/billing/subscription-gate";
 import {
   ensureSubscriptionRow,
@@ -6,6 +7,7 @@ import {
   hasDashboardAccess,
 } from "@/lib/billing/subscriptions";
 import { createClient } from "@/lib/supabase/server";
+import { getCustomerAccountSettings } from "@/lib/customer-account";
 import { isStripeConfigured } from "@/lib/stripe/server";
 import { ensureWorkspace } from "@/lib/workspace";
 import { redirect } from "next/navigation";
@@ -32,18 +34,27 @@ export default async function DashboardPage() {
 
   const organizationId = await ensureWorkspace(supabase, user);
   const subscription = await ensureSubscriptionRow(supabase, organizationId);
+  const { data: organizations } = await supabase
+    .from("organizations")
+    .select("name")
+    .eq("id", organizationId)
+    .limit(1);
+  const workspaceName =
+    typeof organizations?.[0]?.name === "string" && organizations[0].name.trim()
+      ? organizations[0].name.trim()
+      : "RoundHQ Workspace";
+  const accountSettings = await getCustomerAccountSettings(supabase, organizationId);
+
+  if (accountSettings.accountStatus === "disabled") {
+    return (
+      <AccountDisabledGate
+        workspaceName={workspaceName}
+        disabledReason={accountSettings.disabledReason}
+      />
+    );
+  }
 
   if (!hasDashboardAccess(subscription)) {
-    const { data: organizations } = await supabase
-      .from("organizations")
-      .select("name")
-      .eq("id", organizationId)
-      .limit(1);
-    const workspaceName =
-      typeof organizations?.[0]?.name === "string" && organizations[0].name.trim()
-        ? organizations[0].name.trim()
-        : "RoundHQ Workspace";
-
     return (
       <SubscriptionGate
         workspaceName={workspaceName}
@@ -53,5 +64,5 @@ export default async function DashboardPage() {
     );
   }
 
-  return <JobsApp />;
+  return <JobsApp featureAccess={accountSettings.featureAccess} />;
 }

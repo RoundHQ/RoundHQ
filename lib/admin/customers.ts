@@ -1,3 +1,12 @@
+import {
+  getDefaultCustomerAccountSettings,
+  mapCustomerAccountSettingsRow,
+  normalizeCustomerAccountStatus,
+  normalizeSupportPriority,
+  type CustomerAccountSettings,
+  type CustomerAccountStatus,
+  type CustomerSupportPriority,
+} from "@/lib/customer-account";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 
 type OrganizationRow = {
@@ -17,6 +26,7 @@ type OrganizationMemberRow = {
   role: string;
   status: string;
   created_at: string;
+  updated_at?: string | null;
 };
 
 type SubscriptionRow = {
@@ -32,8 +42,54 @@ type SubscriptionRow = {
   updated_at: string;
 };
 
+type CustomerAccountSettingsRow = {
+  organization_id?: string;
+  account_status: string | null;
+  disabled_reason: string | null;
+  feature_access: unknown;
+  internal_notes: string | null;
+  support_priority: string | null;
+  updated_at: string | null;
+};
+
 type OrganizationScopedRow = {
   organization_id: string;
+};
+
+type AppCustomerRow = {
+  id: number;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  customer_type: string | null;
+  created_at: string | null;
+};
+
+type CustomerLeadRow = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  source: string | null;
+  status: string | null;
+  created_at: string | null;
+};
+
+type DocumentRow = {
+  id: string;
+  customer_name: string | null;
+  status: string | null;
+  total: number | null;
+  date: string | null;
+  created_at: string | null;
+};
+
+type ScheduledJobRow = {
+  id: string;
+  title: string | null;
+  type: string | null;
+  status: string | null;
+  date: string | null;
+  created_at: string | null;
 };
 
 export type AdminCustomerWorkspace = {
@@ -49,8 +105,11 @@ export type AdminCustomerWorkspace = {
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
   stripePriceId: string | null;
+  trialEndsAt: string | null;
   currentPeriodEnd: string | null;
   cancelAtPeriodEnd: boolean;
+  accountStatus: CustomerAccountStatus;
+  supportPriority: CustomerSupportPriority;
   createdAt: string;
   updatedAt: string;
 };
@@ -60,7 +119,37 @@ export type AdminCustomerStats = {
   activeSubscriptions: number;
   incompleteSubscriptions: number;
   pastDueSubscriptions: number;
+  disabledAccounts: number;
   totalAppCustomers: number;
+};
+
+export type AdminCustomerMember = {
+  userId: string;
+  email: string;
+  fullName: string;
+  role: string;
+  status: string;
+  createdAt: string;
+};
+
+export type AdminCustomerProfile = {
+  workspace: AdminCustomerWorkspace;
+  settings: CustomerAccountSettings;
+  members: AdminCustomerMember[];
+  usage: {
+    appCustomers: number;
+    leads: number;
+    quotes: number;
+    invoices: number;
+    scheduledJobs: number;
+    activeStaff: number;
+  };
+  recentCustomers: AppCustomerRow[];
+  recentLeads: CustomerLeadRow[];
+  recentQuotes: DocumentRow[];
+  recentInvoices: DocumentRow[];
+  upcomingJobs: ScheduledJobRow[];
+  settingsSchemaError: string;
 };
 
 function incrementCount(counts: Map<string, number>, organizationId: string) {
@@ -86,6 +175,69 @@ function getOwnerMember(
   );
 }
 
+function buildWorkspace({
+  organization,
+  members,
+  subscription,
+  appCustomerCount,
+  activeStaffCount,
+  settings,
+}: {
+  organization: OrganizationRow;
+  members: OrganizationMemberRow[];
+  subscription?: SubscriptionRow | null;
+  appCustomerCount: number;
+  activeStaffCount: number;
+  settings?: CustomerAccountSettings | null;
+}): AdminCustomerWorkspace {
+  const owner = getOwnerMember(organization, members);
+  const memberCount = members.filter(
+    (member) => member.organization_id === organization.id
+  ).length;
+
+  return {
+    id: organization.id,
+    name: organization.name,
+    slug: organization.slug,
+    ownerEmail: owner?.email ?? "Unknown",
+    ownerName: owner?.full_name ?? "Unknown",
+    memberCount,
+    appCustomerCount,
+    activeStaffCount,
+    subscriptionStatus: subscription?.status ?? "missing",
+    stripeCustomerId: subscription?.stripe_customer_id ?? null,
+    stripeSubscriptionId: subscription?.stripe_subscription_id ?? null,
+    stripePriceId: subscription?.stripe_price_id ?? null,
+    trialEndsAt: subscription?.trial_ends_at ?? null,
+    currentPeriodEnd: subscription?.current_period_end ?? null,
+    cancelAtPeriodEnd: subscription?.cancel_at_period_end ?? false,
+    accountStatus: settings?.accountStatus ?? "active",
+    supportPriority: settings?.supportPriority ?? "standard",
+    createdAt: organization.created_at,
+    updatedAt: organization.updated_at,
+  };
+}
+
+function getSettingsFromListRows(settingsRows: CustomerAccountSettingsRow[]) {
+  return new Map(
+    settingsRows
+      .filter((row) => typeof row.organization_id === "string")
+      .map((row) => [
+        row.organization_id as string,
+        {
+          accountStatus: normalizeCustomerAccountStatus(row.account_status),
+          supportPriority: normalizeSupportPriority(row.support_priority),
+        },
+      ])
+  );
+}
+
+function throwIfError(result: { error: unknown }) {
+  if (result.error) {
+    throw result.error;
+  }
+}
+
 export async function getAdminCustomerWorkspaces() {
   const supabase = createServiceRoleClient();
 
@@ -95,6 +247,7 @@ export async function getAdminCustomerWorkspaces() {
     subscriptionsResult,
     customersResult,
     staffResult,
+    settingsResult,
   ] = await Promise.all([
     supabase
       .from("organizations")
@@ -113,44 +266,35 @@ export async function getAdminCustomerWorkspaces() {
       .from("staff_members")
       .select("organization_id")
       .eq("is_active", true),
+    supabase
+      .from("customer_account_settings")
+      .select("organization_id, account_status, support_priority"),
   ]);
 
-  if (organizationsResult.error) {
-    throw organizationsResult.error;
-  }
-
-  if (membersResult.error) {
-    throw membersResult.error;
-  }
-
-  if (subscriptionsResult.error) {
-    throw subscriptionsResult.error;
-  }
-
-  if (customersResult.error) {
-    throw customersResult.error;
-  }
-
-  if (staffResult.error) {
-    throw staffResult.error;
-  }
+  throwIfError(organizationsResult);
+  throwIfError(membersResult);
+  throwIfError(subscriptionsResult);
+  throwIfError(customersResult);
+  throwIfError(staffResult);
 
   const organizations = (organizationsResult.data ?? []) as OrganizationRow[];
   const members = (membersResult.data ?? []) as OrganizationMemberRow[];
   const subscriptions = (subscriptionsResult.data ?? []) as SubscriptionRow[];
   const customers = (customersResult.data ?? []) as OrganizationScopedRow[];
   const staff = (staffResult.data ?? []) as OrganizationScopedRow[];
+  const settingsRows = settingsResult.error
+    ? []
+    : ((settingsResult.data ?? []) as CustomerAccountSettingsRow[]);
+  const settingsByOrganization = getSettingsFromListRows(settingsRows);
   const subscriptionsByOrganization = new Map(
     subscriptions.map((subscription) => [
       subscription.organization_id,
       subscription,
     ])
   );
-  const membersByOrganization = new Map<string, number>();
   const customersByOrganization = new Map<string, number>();
   const staffByOrganization = new Map<string, number>();
 
-  members.forEach((member) => incrementCount(membersByOrganization, member.organization_id));
   customers.forEach((customer) =>
     incrementCount(customersByOrganization, customer.organization_id)
   );
@@ -159,27 +303,21 @@ export async function getAdminCustomerWorkspaces() {
   );
 
   const workspaces: AdminCustomerWorkspace[] = organizations.map((organization) => {
-    const owner = getOwnerMember(organization, members);
-    const subscription = subscriptionsByOrganization.get(organization.id);
+    const setting = settingsByOrganization.get(organization.id);
 
-    return {
-      id: organization.id,
-      name: organization.name,
-      slug: organization.slug,
-      ownerEmail: owner?.email ?? "Unknown",
-      ownerName: owner?.full_name ?? "Unknown",
-      memberCount: membersByOrganization.get(organization.id) ?? 0,
+    return buildWorkspace({
+      organization,
+      members,
+      subscription: subscriptionsByOrganization.get(organization.id),
       appCustomerCount: customersByOrganization.get(organization.id) ?? 0,
       activeStaffCount: staffByOrganization.get(organization.id) ?? 0,
-      subscriptionStatus: subscription?.status ?? "missing",
-      stripeCustomerId: subscription?.stripe_customer_id ?? null,
-      stripeSubscriptionId: subscription?.stripe_subscription_id ?? null,
-      stripePriceId: subscription?.stripe_price_id ?? null,
-      currentPeriodEnd: subscription?.current_period_end ?? null,
-      cancelAtPeriodEnd: subscription?.cancel_at_period_end ?? false,
-      createdAt: organization.created_at,
-      updatedAt: organization.updated_at,
-    };
+      settings: setting
+        ? getDefaultCustomerAccountSettings({
+            accountStatus: setting.accountStatus,
+            supportPriority: setting.supportPriority,
+          })
+        : null,
+    });
   });
 
   const stats: AdminCustomerStats = {
@@ -195,9 +333,164 @@ export async function getAdminCustomerWorkspaces() {
     pastDueSubscriptions: workspaces.filter(
       (workspace) => workspace.subscriptionStatus === "past_due"
     ).length,
+    disabledAccounts: workspaces.filter(
+      (workspace) => workspace.accountStatus === "disabled"
+    ).length,
     totalAppCustomers: customers.length,
   };
 
   return { workspaces, stats };
 }
 
+export async function getAdminCustomerProfile(organizationId: string) {
+  const supabase = createServiceRoleClient();
+
+  const [
+    organizationResult,
+    membersResult,
+    subscriptionResult,
+    settingsResult,
+    customersResult,
+    staffResult,
+    leadsResult,
+    quotesResult,
+    invoicesResult,
+    jobsResult,
+  ] = await Promise.all([
+    supabase
+      .from("organizations")
+      .select("id, name, slug, owner_user_id, created_at, updated_at")
+      .eq("id", organizationId)
+      .maybeSingle(),
+    supabase
+      .from("organization_members")
+      .select("organization_id, user_id, email, full_name, role, status, created_at")
+      .eq("organization_id", organizationId)
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("subscriptions")
+      .select(
+        "organization_id, stripe_customer_id, stripe_subscription_id, stripe_price_id, status, trial_ends_at, current_period_end, cancel_at_period_end, created_at, updated_at"
+      )
+      .eq("organization_id", organizationId)
+      .maybeSingle(),
+    supabase
+      .from("customer_account_settings")
+      .select(
+        "account_status, disabled_reason, feature_access, internal_notes, support_priority, updated_at"
+      )
+      .eq("organization_id", organizationId)
+      .maybeSingle(),
+    supabase
+      .from("customers")
+      .select("id, name, email, phone, customer_type, created_at", {
+        count: "exact",
+      })
+      .eq("organization_id", organizationId)
+      .order("created_at", { ascending: false })
+      .limit(6),
+    supabase
+      .from("staff_members")
+      .select("organization_id")
+      .eq("organization_id", organizationId)
+      .eq("is_active", true),
+    supabase
+      .from("customer_leads")
+      .select("id, name, email, source, status, created_at", { count: "exact" })
+      .eq("organization_id", organizationId)
+      .order("created_at", { ascending: false })
+      .limit(6),
+    supabase
+      .from("quotes")
+      .select("id, customer_name, status, total, date, created_at", {
+        count: "exact",
+      })
+      .eq("organization_id", organizationId)
+      .order("created_at", { ascending: false })
+      .limit(6),
+    supabase
+      .from("invoices")
+      .select("id, customer_name, status, total, date, created_at", {
+        count: "exact",
+      })
+      .eq("organization_id", organizationId)
+      .order("created_at", { ascending: false })
+      .limit(6),
+    supabase
+      .from("scheduled_jobs")
+      .select("id, title, type, status, date, created_at", { count: "exact" })
+      .eq("organization_id", organizationId)
+      .order("date", { ascending: false })
+      .limit(6),
+  ]);
+
+  throwIfError(organizationResult);
+  throwIfError(membersResult);
+  throwIfError(customersResult);
+  throwIfError(staffResult);
+  throwIfError(leadsResult);
+  throwIfError(quotesResult);
+  throwIfError(invoicesResult);
+  throwIfError(jobsResult);
+
+  if (subscriptionResult.error && subscriptionResult.error.code !== "PGRST116") {
+    throw subscriptionResult.error;
+  }
+
+  const organization = organizationResult.data as OrganizationRow | null;
+
+  if (!organization) {
+    return null;
+  }
+
+  const members = (membersResult.data ?? []) as OrganizationMemberRow[];
+  const subscription = subscriptionResult.data as SubscriptionRow | null;
+  const settingsSchemaError = settingsResult.error ? settingsResult.error.message : "";
+  const settings = settingsResult.error
+    ? getDefaultCustomerAccountSettings({
+        schemaReady: false,
+        schemaError: settingsSchemaError,
+      })
+    : mapCustomerAccountSettingsRow(
+        settingsResult.data as CustomerAccountSettingsRow | null
+      );
+  const recentCustomers = (customersResult.data ?? []) as AppCustomerRow[];
+  const recentLeads = (leadsResult.data ?? []) as CustomerLeadRow[];
+  const recentQuotes = (quotesResult.data ?? []) as DocumentRow[];
+  const recentInvoices = (invoicesResult.data ?? []) as DocumentRow[];
+  const upcomingJobs = (jobsResult.data ?? []) as ScheduledJobRow[];
+
+  return {
+    workspace: buildWorkspace({
+      organization,
+      members,
+      subscription,
+      appCustomerCount: customersResult.count ?? recentCustomers.length,
+      activeStaffCount: ((staffResult.data ?? []) as OrganizationScopedRow[]).length,
+      settings,
+    }),
+    settings,
+    members: members.map((member) => ({
+      userId: member.user_id,
+      email: member.email ?? "Unknown",
+      fullName: member.full_name ?? "Unknown",
+      role: member.role,
+      status: member.status,
+      createdAt: member.created_at,
+    })),
+    usage: {
+      appCustomers: customersResult.count ?? recentCustomers.length,
+      leads: leadsResult.count ?? recentLeads.length,
+      quotes: quotesResult.count ?? recentQuotes.length,
+      invoices: invoicesResult.count ?? recentInvoices.length,
+      scheduledJobs: jobsResult.count ?? upcomingJobs.length,
+      activeStaff: ((staffResult.data ?? []) as OrganizationScopedRow[]).length,
+    },
+    recentCustomers,
+    recentLeads,
+    recentQuotes,
+    recentInvoices,
+    upcomingJobs,
+    settingsSchemaError,
+  } satisfies AdminCustomerProfile;
+}

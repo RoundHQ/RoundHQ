@@ -71,6 +71,23 @@ create unique index if not exists subscriptions_stripe_subscription_unique_idx
 on public.subscriptions (stripe_subscription_id)
 where stripe_subscription_id is not null;
 
+create table if not exists public.customer_account_settings (
+  organization_id uuid primary key references public.organizations(id) on delete cascade,
+  account_status text not null default 'active' check (account_status in ('active', 'disabled')),
+  disabled_reason text null,
+  feature_access jsonb not null default '{}'::jsonb,
+  internal_notes text not null default '',
+  support_priority text not null default 'standard' check (
+    support_priority in ('standard', 'priority', 'watch')
+  ),
+  updated_at timestamptz not null default now(),
+  check (jsonb_typeof(feature_access) = 'object')
+);
+
+insert into public.customer_account_settings (organization_id)
+select id from public.organizations
+on conflict (organization_id) do nothing;
+
 create table if not exists public.site_pages (
   slug text primary key check (
     slug in ('features', 'pricing', 'about', 'resources', 'contact')
@@ -661,6 +678,7 @@ grant execute on function public.current_organization_id() to authenticated;
 grant execute on function public.is_organization_member(uuid) to authenticated;
 grant execute on function public.is_organization_admin(uuid) to authenticated;
 grant select on public.site_pages to anon, authenticated;
+grant select on public.customer_account_settings to authenticated;
 
 grant select, insert, update, delete on all tables in schema public to authenticated;
 grant usage, select on all sequences in schema public to authenticated;
@@ -669,6 +687,7 @@ alter table public.site_pages enable row level security;
 alter table public.organizations enable row level security;
 alter table public.organization_members enable row level security;
 alter table public.subscriptions enable row level security;
+alter table public.customer_account_settings enable row level security;
 alter table public.app_state enable row level security;
 alter table public.staff_members enable row level security;
 alter table public.role_permissions enable row level security;
@@ -689,6 +708,13 @@ on public.site_pages
 for select
 to anon, authenticated
 using (is_published);
+
+drop policy if exists "Members can read customer account settings" on public.customer_account_settings;
+create policy "Members can read customer account settings"
+on public.customer_account_settings
+for select
+to authenticated
+using (public.is_organization_member(organization_id));
 
 drop policy if exists "Members can read organizations" on public.organizations;
 create policy "Members can read organizations"

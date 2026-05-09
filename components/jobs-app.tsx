@@ -97,6 +97,11 @@ import {
   sortCustomerLeads,
   type CustomerLeadRow,
 } from "@/lib/supabase/customer-leads-data";
+import {
+  normalizeCustomerFeatureAccess,
+  type CustomerFeatureAccess,
+  type CustomerFeatureKey,
+} from "@/lib/customer-features";
 
 import {
   type CommercialRamsDocument,
@@ -853,6 +858,31 @@ const PAGE_PERMISSION_OVERRIDES: Record<PageKey, StaffPageAccessKey> = {
   customers: "customers",
   customerProfit: "customers",
   payments: "customers",
+  customerProfile: "customers",
+  actions: "actions",
+  map: "map",
+  staff: "staff",
+  quotes: "quotes",
+  quoteForm: "quotes",
+  invoices: "invoices",
+  invoiceForm: "invoices",
+  commercialDocs: "commercialDocs",
+  settings: "settings",
+};
+
+const CUSTOMER_FEATURE_PAGE_OVERRIDES: Record<PageKey, CustomerFeatureKey> = {
+  dashboard: "dashboard",
+  schedule: "schedule",
+  jobs: "schedule",
+  scheduledJobProfile: "schedule",
+  rounds: "rounds",
+  commercial: "rounds",
+  routeEfficiency: "routeEfficiency",
+  history: "history",
+  leads: "leads",
+  customers: "customers",
+  customerProfit: "customerProfit",
+  payments: "payments",
   customerProfile: "customers",
   actions: "actions",
   map: "map",
@@ -2845,6 +2875,10 @@ function getPageAccessKey(page: PageKey) {
   return PAGE_PERMISSION_OVERRIDES[page];
 }
 
+function getCustomerFeatureKey(page: PageKey) {
+  return CUSTOMER_FEATURE_PAGE_OVERRIDES[page];
+}
+
 function ScheduledJobProfileSection({
                                       job,
                                       checklist,
@@ -3954,7 +3988,15 @@ function ScheduledJobProfileSection({
   );
 }
 
-export default function JobsApp() {
+type JobsAppProps = {
+  featureAccess?: Partial<CustomerFeatureAccess>;
+};
+
+export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
+  const customerFeatureAccess = useMemo(
+      () => normalizeCustomerFeatureAccess(featureAccess),
+      [featureAccess]
+  );
   const [page, setPage] = useState<PageKey>("dashboard");
   const [expandedNavSections, setExpandedNavSections] = useState<Record<string, boolean>>(
       () => getExpandedNavSections(getNavSectionTitle("dashboard"))
@@ -4100,6 +4142,10 @@ export default function JobsApp() {
   }, [currentStaffMember, currentUserIsAdmin, rolePermissions, staffSystemReady]);
   const hasPageAccess = useCallback(
       (nextPage: PageKey) => {
+        if (!customerFeatureAccess[getCustomerFeatureKey(nextPage)]) {
+          return false;
+        }
+
         if (!staffSystemReady || currentUserIsAdmin) {
           return true;
         }
@@ -4112,7 +4158,7 @@ export default function JobsApp() {
 
         return allowedRolePages.has(accessKey);
       },
-      [allowedRolePages, currentUserIsAdmin, staffSystemReady]
+      [allowedRolePages, currentUserIsAdmin, customerFeatureAccess, staffSystemReady]
   );
   const accessibleNavSections = useMemo(
       () =>

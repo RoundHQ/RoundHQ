@@ -84,6 +84,7 @@ function matchesSearch(workspace: AdminCustomerWorkspace, query: string) {
     workspace.ownerName,
     workspace.stripeCustomerId,
     workspace.stripeSubscriptionId,
+    workspace.accountStatus,
   ]
     .filter(Boolean)
     .join(" ")
@@ -311,9 +312,9 @@ export default async function AdminPage({
                 icon={AlertTriangle}
               />
               <StatTile
-                title="App customers"
-                value={stats.totalAppCustomers}
-                detail="Customers stored inside all workspaces"
+                title="Disabled"
+                value={stats.disabledAccounts}
+                detail="Accounts currently blocked by owner controls"
                 icon={Users}
               />
             </section>
@@ -371,6 +372,7 @@ export default async function AdminPage({
                     <th className="px-4 py-4 font-bold">Usage</th>
                     <th className="px-4 py-4 font-bold">Joined</th>
                     <th className="px-4 py-4 font-bold">Stripe</th>
+                    <th className="px-4 py-4 font-bold">Profile</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -385,12 +387,20 @@ export default async function AdminPage({
                         className="align-top transition hover:bg-slate-50/80"
                       >
                         <td className="px-4 py-4">
-                          <div className="font-bold text-slate-950">
+                          <Link
+                            href={`/admin/customers/${workspace.id}`}
+                            className="font-bold text-slate-950 hover:text-[#168b43] hover:underline"
+                          >
                             {workspace.name}
-                          </div>
+                          </Link>
                           <div className="mt-1 max-w-[260px] truncate text-xs text-slate-500">
                             {workspace.id}
                           </div>
+                          {workspace.accountStatus === "disabled" && (
+                            <span className="mt-2 inline-flex rounded-full bg-rose-50 px-2.5 py-1 text-xs font-bold text-rose-700 ring-1 ring-rose-200">
+                              Disabled
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-4">
                           <div className="font-semibold text-slate-800">
@@ -454,6 +464,15 @@ export default async function AdminPage({
                               {workspace.stripePriceId}
                             </div>
                           )}
+                        </td>
+                        <td className="px-4 py-4">
+                          <Link
+                            href={`/admin/customers/${workspace.id}`}
+                            className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 transition hover:border-[#19c653]/45 hover:bg-[#f1fff6]"
+                          >
+                            View profile
+                            <ArrowRight aria-hidden="true" className="size-3.5" />
+                          </Link>
                         </td>
                       </tr>
                     );
