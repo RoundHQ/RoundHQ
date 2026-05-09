@@ -5,6 +5,7 @@ import {
   ArrowRight,
   FileText,
   LayoutDashboard,
+  Settings,
   ShieldCheck,
   Users,
 } from "lucide-react";
@@ -51,6 +52,13 @@ export function AdminTopHeader() {
           >
             <FileText aria-hidden="true" className="size-4" />
             Pages
+          </Link>
+          <Link
+            href="/admin/settings"
+            className="inline-flex items-center gap-2 rounded-md border border-white/12 px-4 py-2 font-bold text-white/88 transition hover:bg-white/10 hover:text-white"
+          >
+            <Settings aria-hidden="true" className="size-4" />
+            Settings
           </Link>
           <Link
             href="/dashboard"
