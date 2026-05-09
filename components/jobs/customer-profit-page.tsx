@@ -18,7 +18,11 @@ import {
   formatCustomerProfitDate,
   type CustomerProfitRow,
 } from "./customer-profit";
-import type { Customer, MonthlyPayment, VisitLog } from "./types";
+import {
+  DEFAULT_ROTATION_WEEKS,
+  normalizeRotationWeeks,
+} from "./rotation";
+import type { Customer, MonthlyPayment, RotationWeeks, VisitLog } from "./types";
 
 type Props = {
   customers: Customer[];
@@ -26,6 +30,7 @@ type Props = {
   monthlyPayments: MonthlyPayment[];
   grassCutSeasonStart: string;
   grassCutSeasonEnd: string;
+  defaultRotationWeeks?: RotationWeeks;
   onOpenCustomer: (customerId: number) => void;
 };
 
@@ -132,14 +137,14 @@ function sortCustomerProfitRows(rows: CustomerProfitRow[], sortKey: SortKey) {
 
 function getPaymentDetail(row: CustomerProfitRow) {
   if (!row.isGrassCuttingCustomer) {
-    return "No grass route";
+    return "No service route";
   }
 
   if (row.paymentMethod === "Monthly") {
     return `${row.paidMonthCount} paid months, ${row.outstandingMonthCount} due`;
   }
 
-  return `${row.paidVisitCount} paid cuts, ${row.unpaidVisitCount} unpaid`;
+  return `${row.paidVisitCount} paid visits, ${row.unpaidVisitCount} unpaid`;
 }
 
 function Select({
@@ -175,6 +180,7 @@ export default function CustomerProfitPage({
   monthlyPayments,
   grassCutSeasonStart,
   grassCutSeasonEnd,
+  defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
   onOpenCustomer,
 }: Props) {
   const [searchQuery, setSearchQuery] = useState("");
@@ -182,6 +188,7 @@ export default function CustomerProfitPage({
   const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [sortKey, setSortKey] = useState<SortKey>("paid_desc");
+  const normalizedDefaultRotationWeeks = normalizeRotationWeeks(defaultRotationWeeks);
 
   const profitRows = useMemo(
     () =>
@@ -191,6 +198,7 @@ export default function CustomerProfitPage({
         monthlyPayments,
         grassCutSeasonStart,
         grassCutSeasonEnd,
+        defaultRotationWeeks: normalizedDefaultRotationWeeks,
         includeNonGrassCustomers: true,
       }),
     [
@@ -198,6 +206,7 @@ export default function CustomerProfitPage({
       grassCutSeasonEnd,
       grassCutSeasonStart,
       monthlyPayments,
+      normalizedDefaultRotationWeeks,
       visits,
     ]
   );
@@ -256,7 +265,7 @@ export default function CustomerProfitPage({
               </h1>
               <p className="mt-1 text-sm text-slate-500">
                 Current season performance by customer, including paid income,
-                unpaid work, missed cuts, and payment risk.
+                unpaid work, missed visits, and payment risk.
               </p>
             </div>
           </div>
@@ -391,8 +400,8 @@ export default function CustomerProfitPage({
             <option value="all">All statuses</option>
             <option value="needs_review">Needs review</option>
             <option value="payment_due">Payment due</option>
-            <option value="missed_cuts">Missed cuts</option>
-            <option value="no_cuts">No cuts logged</option>
+            <option value="missed_cuts">Missed visits</option>
+            <option value="no_cuts">No visits logged</option>
             <option value="healthy">Healthy</option>
             <option value="non_routine">Non-routine</option>
           </Select>
@@ -405,7 +414,7 @@ export default function CustomerProfitPage({
             <option value="paid_desc">Highest paid</option>
             <option value="outstanding_desc">Most owed</option>
             <option value="booked_desc">Highest due total</option>
-            <option value="missed_desc">Most missed cuts</option>
+            <option value="missed_desc">Most missed visits</option>
             <option value="last_visit_desc">Latest visit</option>
             <option value="name_asc">Name A-Z</option>
           </Select>
@@ -508,7 +517,7 @@ export default function CustomerProfitPage({
                     Visits
                   </p>
                   <p className="font-semibold text-slate-700">
-                    {row.completedVisitCount} cut
+                    {row.completedVisitCount} completed
                   </p>
                   <p className="mt-0.5 text-xs text-slate-500">
                     {row.notCutCount} missed

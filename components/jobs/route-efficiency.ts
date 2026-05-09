@@ -1,5 +1,13 @@
 import { APPROX_SPEED_MPH, getCustomerDisplayAddress } from "./helpers";
-import type { Customer, DayName, WeekNumber } from "./types";
+import {
+  DEFAULT_ROTATION_WEEKS,
+  getActiveRotationWeeks,
+  getRotationCycleLabel,
+  getWeekOptions,
+  isCustomerDueInSelectedWeek,
+  normalizeRotationWeeks,
+} from "./rotation";
+import type { Customer, DayName, RotationWeeks, WeekNumber } from "./types";
 
 export type RouteKey = `${WeekNumber}-${DayName}`;
 
@@ -91,7 +99,7 @@ export type RouteChangeRecord = {
 
 export type RouteNotes = Record<string, string>;
 
-export const ROUTE_WEEKS: WeekNumber[] = ["Week 1", "Week 2"];
+export const ROUTE_WEEKS: WeekNumber[] = getWeekOptions(4);
 export const ROUTE_DAYS: DayName[] = [
   "Monday",
   "Tuesday",
@@ -254,13 +262,32 @@ function getRouteScore(currentMiles: number, optimizedMiles: number, mappedStops
   return Math.max(0, Math.min(100, Math.round(ratio * 100)));
 }
 
-export function buildRouteSummaries(customers: Customer[]) {
-  return ROUTE_WEEKS.flatMap((week) =>
+export function buildRouteSummaries(
+  customers: Customer[],
+  defaultRotationWeeks: RotationWeeks = DEFAULT_ROTATION_WEEKS,
+  routeWeeks?: WeekNumber[]
+) {
+  const normalizedDefaultRotationWeeks = normalizeRotationWeeks(defaultRotationWeeks);
+  const weeks =
+    routeWeeks?.length
+      ? routeWeeks
+      : getWeekOptions(
+          getActiveRotationWeeks(customers, normalizedDefaultRotationWeeks)
+        );
+  const routeRotationWeeks = normalizeRotationWeeks(
+    weeks.length || normalizedDefaultRotationWeeks
+  );
+
+  return weeks.flatMap((week) =>
     ROUTE_DAYS.map<RouteSummary>((day) => {
       const routeCustomers = customers.filter(
         (customer) =>
           customer.isGrassCuttingCustomer &&
-          customer.week === week &&
+          isCustomerDueInSelectedWeek(
+            customer,
+            week,
+            normalizedDefaultRotationWeeks
+          ) &&
           customer.day === day
       );
       const orderedCustomers = sortByRouteOrder(routeCustomers);
@@ -273,7 +300,7 @@ export function buildRouteSummaries(customers: Customer[]) {
         key: getRouteKey(week, day),
         week,
         day,
-        label: `${week} ${day}`,
+        label: `${getRotationCycleLabel(week, routeRotationWeeks)} ${day}`,
         customers: routeCustomers,
         orderedCustomers,
         optimizedCustomers,

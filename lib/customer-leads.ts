@@ -251,8 +251,8 @@ function inferServiceFromMessage(text: string) {
   }
 
   const serviceMatches: Array<[RegExp, string]> = [
-    [/\bgrass\b|\blawn\b|\bcut(?:ting)?\b/i, "Grass cutting"],
-    [/\bhedge\b|\btrimming\b/i, "Hedge cutting"],
+    [/\bgrass\b|\blawn\b|\bcut(?:ting)?\b/i, "Routine service"],
+    [/\bhedge\b|\btrimming\b/i, "Hedge trimming"],
     [/\bstone\b|\bslab\b|\bpaving\b/i, "Stone laying"],
     [/\bturf\b/i, "Turf laying"],
     [/\bovergrown\b/i, "Overgrown garden"],
@@ -284,8 +284,8 @@ function normalizeService(value: unknown) {
   const lowerValue = normalizedValue?.toLowerCase() ?? "";
 
   if (!lowerValue) return undefined;
-  if (lowerValue.includes("grass")) return "Grass cutting";
-  if (lowerValue.includes("hedge")) return "Hedge cutting";
+  if (lowerValue.includes("grass")) return "Routine service";
+  if (lowerValue.includes("hedge")) return "Hedge trimming";
   if (lowerValue.includes("stone") || lowerValue.includes("slab")) return "Stone laying";
   if (lowerValue.includes("turf")) return "Turf laying";
   if (lowerValue.includes("overgrown")) return "Overgrown garden";

@@ -145,6 +145,10 @@ function getJobTypeClasses(type: ScheduledJobType) {
     }
 }
 
+function getJobTypeLabel(type: ScheduledJobType) {
+    return type === "Grass Cut" ? "Service Visit" : type;
+}
+
 function getJobStatusClasses(status: ScheduledJobStatus) {
     switch (status) {
         case "Completed":
@@ -404,7 +408,7 @@ export default function JobsPage({
                             <option value="all">All job types</option>
                             <option value="One Off">One Off</option>
                             <option value="Quote Accepted">Quote Accepted</option>
-                            <option value="Grass Cut">Grass Cut</option>
+                            <option value="Grass Cut">Service Visit</option>
                             <option value="Commercial">Commercial</option>
                         </select>
                     </div>
@@ -459,7 +463,7 @@ export default function JobsPage({
                                                             job.type
                                                         )}`}
                                                     >
-                                                        {job.type}
+                                                        {getJobTypeLabel(job.type)}
                                                     </span>
                                                     {displayNotes ? (
                                                         <span className="text-xs text-slate-500">

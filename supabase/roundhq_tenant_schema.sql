@@ -10,9 +10,24 @@ create table if not exists public.organizations (
   name text not null,
   slug text null,
   owner_user_id uuid null references auth.users(id) on delete set null,
+  default_rotation_weeks integer not null default 2 check (default_rotation_weeks in (1, 2, 3, 4)),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.organizations
+add column if not exists default_rotation_weeks integer not null default 2;
+
+update public.organizations
+set default_rotation_weeks = 2
+where default_rotation_weeks is null;
+
+alter table public.organizations
+drop constraint if exists organizations_default_rotation_weeks_check;
+
+alter table public.organizations
+add constraint organizations_default_rotation_weeks_check
+check (default_rotation_weeks in (1, 2, 3, 4));
 
 create unique index if not exists organizations_slug_unique_idx
 on public.organizations (lower(slug))
@@ -313,7 +328,7 @@ create table if not exists public.customers (
   contact_emails jsonb not null default '[]'::jsonb,
   is_grass_cutting_customer boolean not null default true,
   grass_cut_areas jsonb not null default '["All"]'::jsonb,
-  week integer not null default 1 check (week in (1, 2)),
+  week integer not null default 1 check (week in (1, 2, 3, 4)),
   day text null check (
     day is null or day in ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday')
   ),
@@ -321,7 +336,10 @@ create table if not exists public.customers (
     customer_type in ('Residential', 'Commercial')
   ),
   cut_frequency text not null default 'Fortnightly' check (
-    cut_frequency in ('Fortnightly', '3 Weekly', 'Monthly')
+    cut_frequency in ('Weekly', 'Fortnightly', '3 Weekly', 'Monthly')
+  ),
+  rotation_weeks_override integer null check (
+    rotation_weeks_override is null or rotation_weeks_override in (1, 2, 3, 4)
   ),
   site_name text null,
   site_address text null,
@@ -343,6 +361,104 @@ create table if not exists public.customers (
   check (jsonb_typeof(grass_cut_areas) = 'array')
 );
 
+alter table public.customers
+add column if not exists rotation_weeks_override integer null;
+
+alter table public.customers
+drop constraint if exists customers_week_check;
+
+alter table public.customers
+add constraint customers_week_check
+check (week in (1, 2, 3, 4));
+
+alter table public.customers
+drop constraint if exists customers_cut_frequency_check;
+
+alter table public.customers
+add constraint customers_cut_frequency_check
+check (cut_frequency in ('Weekly', 'Fortnightly', '3 Weekly', 'Monthly'));
+
+alter table public.customers
+drop constraint if exists customers_rotation_weeks_override_check;
+
+alter table public.customers
+add constraint customers_rotation_weeks_override_check
+check (rotation_weeks_override is null or rotation_weeks_override in (1, 2, 3, 4));
+
+update public.customers as customers
+set rotation_weeks_override =
+  case
+    when
+      case
+        when customers.cut_frequency = 'Weekly' then 1
+        when customers.cut_frequency = '3 Weekly' then 3
+        when customers.cut_frequency = 'Monthly' then 4
+        else 2
+      end = coalesce(organizations.default_rotation_weeks, 2)
+    then null
+    else
+      case
+        when customers.cut_frequency = 'Weekly' then 1
+        when customers.cut_frequency = '3 Weekly' then 3
+        when customers.cut_frequency = 'Monthly' then 4
+        else 2
+      end
+  end
+from public.organizations as organizations
+where customers.organization_id = organizations.id
+  and customers.rotation_weeks_override is null;
+
+update public.customers as customers
+set week = least(
+  customers.week,
+  coalesce(customers.rotation_weeks_override, organizations.default_rotation_weeks, 2)
+)
+from public.organizations as organizations
+where customers.organization_id = organizations.id
+  and customers.week > coalesce(
+    customers.rotation_weeks_override,
+    organizations.default_rotation_weeks,
+    2
+  );
+
+create or replace function public.validate_customer_rotation()
+returns trigger
+as '
+declare
+  effective_rotation_weeks integer;
+begin
+  if new.rotation_weeks_override is not null
+    and new.rotation_weeks_override not in (1, 2, 3, 4) then
+    raise exception ''rotationWeeksOverride must be null or one of 1, 2, 3, 4'';
+  end if;
+
+  select coalesce(new.rotation_weeks_override, organizations.default_rotation_weeks, 2)
+  into effective_rotation_weeks
+  from public.organizations as organizations
+  where organizations.id = new.organization_id;
+
+  effective_rotation_weeks := coalesce(
+    effective_rotation_weeks,
+    coalesce(new.rotation_weeks_override, 2)
+  );
+
+  if new.week > effective_rotation_weeks then
+    raise exception ''customer cycle week cannot exceed effective rotation length'';
+  end if;
+
+  return new;
+end'
+language plpgsql
+security definer
+set search_path = public;
+
+drop trigger if exists validate_customer_rotation_trigger on public.customers;
+create trigger validate_customer_rotation_trigger
+before insert or update of organization_id, week, rotation_weeks_override
+on public.customers
+for each row
+execute function public.validate_customer_rotation();
+
 create index if not exists customers_org_name_idx
 on public.customers (organization_id, name);
 
@@ -355,7 +471,7 @@ create table if not exists public.visits (
     references public.organizations(id) on delete cascade,
   customer_id bigint not null references public.customers(id) on delete cascade,
   visit_date date not null,
-  week integer null check (week is null or week in (1, 2)),
+  week integer null check (week is null or week in (1, 2, 3, 4)),
   day text null check (
     day is null or day in ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday')
   ),
@@ -383,6 +499,13 @@ create table if not exists public.visits (
   ),
   price_at_visit numeric(10, 2) null
 );
+
+alter table public.visits
+drop constraint if exists visits_week_check;
+
+alter table public.visits
+add constraint visits_week_check
+check (week is null or week in (1, 2, 3, 4));
 
 create index if not exists visits_org_date_idx
 on public.visits (organization_id, visit_date desc);
@@ -629,8 +752,8 @@ create table if not exists public.commercial_rams_documents (
   prepared_by text null,
   work_type text not null check (
     work_type in (
-      'Grass Cutting',
-      'Hedge Cutting',
+      'Grounds Maintenance',
+      'Hedge Trimming',
       'Pressure Washing',
       'Gutter Cleaning',
       'Grounds Maintenance',
@@ -986,3 +1109,254 @@ for all
 to authenticated
 using (public.is_organization_member(organization_id))
 with check (public.is_organization_member(organization_id));
+
+create table if not exists public.platform_email_settings (
+  id text primary key default 'primary',
+  email_from_name text,
+  email_from_address text,
+  email_reply_to text,
+  smtp_host text,
+  smtp_port integer default 587,
+  smtp_secure boolean default false,
+  smtp_username text,
+  smtp_password text,
+  invoice_automation_enabled boolean default false,
+  invoice_days_before_due integer default 7,
+  invoice_subject_template text,
+  invoice_message_template text,
+  verification_subject_template text,
+  verification_message_template text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.platform_email_settings
+  add column if not exists email_from_name text,
+  add column if not exists email_from_address text,
+  add column if not exists email_reply_to text,
+  add column if not exists smtp_host text,
+  add column if not exists smtp_port integer default 587,
+  add column if not exists smtp_secure boolean default false,
+  add column if not exists smtp_username text,
+  add column if not exists smtp_password text,
+  add column if not exists invoice_automation_enabled boolean default false,
+  add column if not exists invoice_days_before_due integer default 7,
+  add column if not exists invoice_subject_template text,
+  add column if not exists invoice_message_template text,
+  add column if not exists verification_subject_template text,
+  add column if not exists verification_message_template text,
+  add column if not exists created_at timestamptz not null default now(),
+  add column if not exists updated_at timestamptz not null default now();
+
+alter table public.platform_email_settings enable row level security;
+
+create table if not exists public.support_tickets (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  created_by_user_id uuid references auth.users(id) on delete set null,
+  customer_name text,
+  customer_email text,
+  subject text not null,
+  category text not null default 'general',
+  priority text not null default 'normal',
+  status text not null default 'open' check (
+    status in ('open', 'waiting_on_us', 'waiting_on_customer', 'resolved', 'closed')
+  ),
+  assigned_admin_email text,
+  last_customer_reply_at timestamptz,
+  last_admin_reply_at timestamptz,
+  resolved_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.support_messages (
+  id uuid primary key default gen_random_uuid(),
+  ticket_id uuid not null references public.support_tickets(id) on delete cascade,
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  author_type text not null default 'customer' check (author_type in ('customer', 'admin')),
+  author_email text,
+  body text not null,
+  is_internal boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.support_attachments (
+  id uuid primary key default gen_random_uuid(),
+  ticket_id uuid not null references public.support_tickets(id) on delete cascade,
+  message_id uuid references public.support_messages(id) on delete cascade,
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  file_name text not null,
+  file_type text,
+  file_size bigint not null default 0,
+  storage_bucket text,
+  storage_path text,
+  file_url text,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.support_categories (
+  id uuid primary key default gen_random_uuid(),
+  label text not null,
+  slug text not null unique,
+  description text,
+  is_active boolean not null default true,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.support_canned_replies (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  category text not null default 'general',
+  body text not null,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.support_priorities (
+  id uuid primary key default gen_random_uuid(),
+  label text not null,
+  slug text not null unique,
+  description text,
+  response_target_hours integer not null default 24,
+  is_active boolean not null default true,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.support_settings (
+  id text primary key default 'primary',
+  default_assigned_admin_email text,
+  notify_admin_emails text,
+  auto_acknowledge_enabled boolean not null default true,
+  auto_acknowledge_subject text,
+  auto_acknowledge_message text,
+  max_attachment_mb integer not null default 8,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.support_categories
+  add column if not exists description text;
+
+alter table public.support_priorities
+  add column if not exists description text,
+  add column if not exists response_target_hours integer not null default 24,
+  add column if not exists is_active boolean not null default true,
+  add column if not exists sort_order integer not null default 0,
+  add column if not exists created_at timestamptz not null default now(),
+  add column if not exists updated_at timestamptz not null default now();
+
+alter table public.support_settings
+  add column if not exists default_assigned_admin_email text,
+  add column if not exists notify_admin_emails text,
+  add column if not exists auto_acknowledge_enabled boolean not null default true,
+  add column if not exists auto_acknowledge_subject text,
+  add column if not exists auto_acknowledge_message text,
+  add column if not exists max_attachment_mb integer not null default 8,
+  add column if not exists created_at timestamptz not null default now(),
+  add column if not exists updated_at timestamptz not null default now();
+
+alter table public.support_tickets
+  drop constraint if exists support_tickets_category_check,
+  drop constraint if exists support_tickets_priority_check;
+
+alter table public.support_canned_replies
+  drop constraint if exists support_canned_replies_category_check;
+
+create index if not exists support_tickets_organization_idx
+  on public.support_tickets (organization_id, updated_at desc);
+
+create index if not exists support_tickets_status_idx
+  on public.support_tickets (status, priority, updated_at desc);
+
+create index if not exists support_messages_ticket_idx
+  on public.support_messages (ticket_id, created_at);
+
+create index if not exists support_attachments_ticket_idx
+  on public.support_attachments (ticket_id, created_at);
+
+alter table public.support_tickets enable row level security;
+alter table public.support_messages enable row level security;
+alter table public.support_attachments enable row level security;
+alter table public.support_categories enable row level security;
+alter table public.support_canned_replies enable row level security;
+alter table public.support_priorities enable row level security;
+alter table public.support_settings enable row level security;
+
+drop policy if exists "Members can read support tickets" on public.support_tickets;
+create policy "Members can read support tickets"
+on public.support_tickets
+for select
+to authenticated
+using (public.is_organization_member(organization_id));
+
+drop policy if exists "Members can create support tickets" on public.support_tickets;
+create policy "Members can create support tickets"
+on public.support_tickets
+for insert
+to authenticated
+with check (public.is_organization_member(organization_id));
+
+drop policy if exists "Members can read non-internal support messages" on public.support_messages;
+create policy "Members can read non-internal support messages"
+on public.support_messages
+for select
+to authenticated
+using (public.is_organization_member(organization_id) and is_internal = false);
+
+drop policy if exists "Members can create customer support messages" on public.support_messages;
+create policy "Members can create customer support messages"
+on public.support_messages
+for insert
+to authenticated
+with check (
+  public.is_organization_member(organization_id)
+  and author_type = 'customer'
+  and is_internal = false
+);
+
+drop policy if exists "Members can read support attachments" on public.support_attachments;
+create policy "Members can read support attachments"
+on public.support_attachments
+for select
+to authenticated
+using (public.is_organization_member(organization_id));
+
+drop policy if exists "Members can create support attachments" on public.support_attachments;
+create policy "Members can create support attachments"
+on public.support_attachments
+for insert
+to authenticated
+with check (public.is_organization_member(organization_id));
+
+insert into public.support_categories (label, slug, sort_order)
+values
+  ('General', 'general', 10),
+  ('Billing', 'billing', 20),
+  ('Bug', 'bug', 30),
+  ('Feature request', 'feature_request', 40),
+  ('Account access', 'account_access', 50)
+on conflict (slug) do nothing;
+
+insert into public.support_priorities (
+  label,
+  slug,
+  description,
+  response_target_hours,
+  sort_order
+)
+values
+  ('Low', 'low', 'Useful but not time-sensitive.', 72, 10),
+  ('Normal', 'normal', 'Standard support request.', 24, 20),
+  ('High', 'high', 'Important issue affecting day-to-day use.', 8, 30),
+  ('Urgent', 'urgent', 'Critical access, billing, or service issue.', 4, 40)
+on conflict (slug) do nothing;
+
+insert into public.support_settings (id)
+values ('primary')
+on conflict (id) do nothing;

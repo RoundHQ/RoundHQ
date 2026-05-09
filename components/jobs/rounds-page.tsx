@@ -1,13 +1,21 @@
 "use client";
 
 import { getCustomerDisplayAddress } from "@/components/jobs/helpers";
-import type { Customer, VisitLog } from "@/components/jobs/types";
+import {
+  DEFAULT_ROTATION_WEEKS,
+  getRotationCycleLabel,
+  isCustomerDueInSelectedWeek,
+  normalizeRotationWeeks,
+} from "@/components/jobs/rotation";
+import type { Customer, RotationWeeks, VisitLog } from "@/components/jobs/types";
 
 type Props = {
   customers: Customer[];
   visits: VisitLog[];
   selectedWeek: string;
   selectedDay: string;
+  defaultRotationWeeks?: RotationWeeks;
+  activeRotationWeeks?: RotationWeeks;
   isLocked: boolean;
   onMarkVisit: (
     customerId: number,
@@ -29,6 +37,8 @@ export default function RoundsPage({
   customers,
   selectedWeek,
   selectedDay,
+  defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
+  activeRotationWeeks,
   isLocked,
   onMarkVisit,
   onSetPaidStatus,
@@ -37,11 +47,23 @@ export default function RoundsPage({
   getCurrentVisit,
   onOpenCustomer,
 }: Props) {
+  const normalizedDefaultRotationWeeks = normalizeRotationWeeks(defaultRotationWeeks);
+  const roundRotationWeeks = normalizeRotationWeeks(
+      activeRotationWeeks ?? normalizedDefaultRotationWeeks
+  );
+  const selectedCycleLabel = getRotationCycleLabel(
+      selectedWeek,
+      roundRotationWeeks
+  );
   const roundCustomers = customers
       .filter(
           (customer) =>
               customer.isGrassCuttingCustomer &&
-              customer.week === selectedWeek &&
+              isCustomerDueInSelectedWeek(
+                  customer,
+                  selectedWeek,
+                  normalizedDefaultRotationWeeks
+              ) &&
               customer.day === selectedDay
       )
       .sort((left, right) => {
@@ -90,13 +112,13 @@ export default function RoundsPage({
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/65">
-              Grass Schedule
+              Service Schedule
             </p>
             <h2 className="mt-2 text-3xl font-black tracking-tight">
-              Grass Cutting Round
+              Service Round
             </h2>
             <p className="mt-2 text-sm text-white/75">
-              {selectedWeek} · {selectedDay} · {residentialCount} residential ·{" "}
+              {selectedCycleLabel} · {selectedDay} · {residentialCount} residential ·{" "}
               {commercialCount} commercial
             </p>
           </div>
@@ -134,7 +156,7 @@ export default function RoundsPage({
 
         <div className="rounded-[22px] border border-rose-200 bg-rose-50 p-5 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-wide text-rose-500">
-            Not Cut
+            Not Completed
           </p>
           <p className="mt-2 text-4xl font-black tracking-tight text-rose-700">
             {notCutCount}
@@ -188,9 +210,9 @@ export default function RoundsPage({
 
             const statusLabel =
               visit?.status === "completed"
-                ? "Cut"
+                ? "Completed"
                 : visit?.status === "not_cut"
-                ? "Not Cut"
+                ? "Not Completed"
                 : "Not Started";
 
             const statusClass =
@@ -263,7 +285,7 @@ export default function RoundsPage({
                       }
                       className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      Mark Cut
+                      Mark Complete
                     </button>
 
                     <button
@@ -277,7 +299,7 @@ export default function RoundsPage({
                       }
                       className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      Not Cut
+                      Not Completed
                     </button>
 
                     {isCashCustomer && (

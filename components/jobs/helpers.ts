@@ -5,9 +5,17 @@ import {
   type DayName,
   type GrassCutArea,
   type MonthlyPayment,
+  type RotationWeeks,
   type VisitLog,
   type WeekNumber,
 } from "./types";
+import {
+  DEFAULT_ROTATION_WEEKS,
+  getCycleWeek,
+  getEffectiveRotationWeeks,
+  getRotationDays,
+  getRotationWeeksFromCutFrequency,
+} from "./rotation";
 
 export const dayOrder = [
   "Monday",
@@ -18,12 +26,6 @@ export const dayOrder = [
 ] as const;
 export const APPROX_SPEED_MPH = 20;
 const CALENDAR_DAY_MS = 24 * 60 * 60 * 1000;
-const FORTNIGHT_ANCHOR_DATE = {
-  year: 2026,
-  monthIndex: 3,
-  day: 20,
-  week: "Week 2" as WeekNumber,
-};
 export const DEFAULT_GRASS_CUT_SEASON_START = "01-01";
 export const DEFAULT_GRASS_CUT_SEASON_END = "12-31";
 
@@ -312,7 +314,7 @@ export function formatGrassCutAreas(
   customer: Pick<Customer, "grassCutAreas" | "isGrassCuttingCustomer">
 ) {
   if (!customer.isGrassCuttingCustomer) {
-    return "Not on grass cutting round";
+    return "Not on service round";
   }
 
   const grassCutAreas = normalizeGrassCutAreas(
@@ -354,10 +356,6 @@ export function getCustomerDisplayAddress(
   return [siteName, address, location].filter(Boolean).join(", ");
 }
 
-function positiveModulo(value: number, divisor: number) {
-  return ((value % divisor) + divisor) % divisor;
-}
-
 function getCalendarDayNumber(date: Date) {
   return Math.floor(
     Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / CALENDAR_DAY_MS
@@ -387,19 +385,7 @@ export function getWorkdayFromDate(date: Date): {
 }
 
 export function getFortnightWeek(date: Date): WeekNumber {
-  const anchorDate = new Date(
-    FORTNIGHT_ANCHOR_DATE.year,
-    FORTNIGHT_ANCHOR_DATE.monthIndex,
-    FORTNIGHT_ANCHOR_DATE.day
-  );
-  const weekOptions: WeekNumber[] = ["Week 1", "Week 2"];
-  const anchorWeekIndex = weekOptions.indexOf(FORTNIGHT_ANCHOR_DATE.week);
-  const dayOffset = getCalendarDayNumber(date) - getCalendarDayNumber(anchorDate);
-  const weekOffset = Math.floor(dayOffset / 7);
-
-  return weekOptions[
-    positiveModulo(anchorWeekIndex + weekOffset, weekOptions.length)
-  ];
+  return getCycleWeek(date, 2);
 }
 
 export function getSeasonStartYear(
@@ -563,15 +549,14 @@ export function formatMinutes(minutes: number) {
 }
 
 export function getFrequencyBadgeClass(frequency: CutFrequency) {
+  if (frequency === "Weekly") return "bg-teal-600 text-white";
   if (frequency === "Fortnightly") return "bg-emerald-600 text-white";
   if (frequency === "3 Weekly") return "bg-amber-500 text-black";
   return "bg-sky-600 text-white";
 }
 
 export function getFrequencyDays(frequency: CutFrequency) {
-  if (frequency === "Fortnightly") return 14;
-  if (frequency === "3 Weekly") return 21;
-  return 30;
+  return getRotationDays(getRotationWeeksFromCutFrequency(frequency));
 }
 
 export function getMonthlyPlanCharge(customer: Customer | null | undefined) {
@@ -579,20 +564,26 @@ export function getMonthlyPlanCharge(customer: Customer | null | undefined) {
   return amount;
 }
 
-export function getEstimatedCustomerMonthlyValue(customer: Customer) {
+export function getEstimatedCustomerMonthlyValue(
+  customer: Customer,
+  defaultRotationWeeks: RotationWeeks | number | null | undefined = DEFAULT_ROTATION_WEEKS
+) {
   const amount = Number((customer as any)?.grassCutAmount ?? 0);
+  const effectiveRotationWeeks = getEffectiveRotationWeeks(
+    customer,
+    defaultRotationWeeks
+  );
 
   if (!customer.isGrassCuttingCustomer) return 0;
   if ((customer.paymentMethod ?? "Monthly") === "Monthly") {
     return getMonthlyPlanCharge(customer);
   }
-  if (customer.cutFrequency === "Fortnightly") return amount * 2;
-  if (customer.cutFrequency === "3 Weekly") return amount * (52 / 12 / 3);
-  return amount;
+
+  return amount * (52 / 12 / effectiveRotationWeeks);
 }
 
 export function getSeasonCutSlotCount(
-  frequency: CutFrequency,
+  frequencyOrRotationWeeks: CutFrequency | RotationWeeks | number,
   seasonStartYear: number,
   seasonStart: string | null | undefined = DEFAULT_GRASS_CUT_SEASON_START,
   seasonEnd: string | null | undefined = DEFAULT_GRASS_CUT_SEASON_END
@@ -600,14 +591,19 @@ export function getSeasonCutSlotCount(
   const range = getSeasonDateRange(seasonStartYear, seasonStart, seasonEnd);
   const dayCount =
     getCalendarDayNumber(range.endDate) - getCalendarDayNumber(range.startDate);
+  const frequencyDays =
+    typeof frequencyOrRotationWeeks === "string"
+      ? getFrequencyDays(frequencyOrRotationWeeks)
+      : getRotationDays(frequencyOrRotationWeeks);
 
-  return Math.max(1, Math.floor(dayCount / getFrequencyDays(frequency)) + 1);
+  return Math.max(1, Math.floor(dayCount / frequencyDays) + 1);
 }
 
 export function getEstimatedCustomerYearlyValue(
   customer: Customer,
   seasonStart: string | null | undefined = DEFAULT_GRASS_CUT_SEASON_START,
-  seasonEnd: string | null | undefined = DEFAULT_GRASS_CUT_SEASON_END
+  seasonEnd: string | null | undefined = DEFAULT_GRASS_CUT_SEASON_END,
+  defaultRotationWeeks: RotationWeeks | number | null | undefined = DEFAULT_ROTATION_WEEKS
 ) {
   if (!customer.isGrassCuttingCustomer) return 0;
 
@@ -621,11 +617,15 @@ export function getEstimatedCustomerYearlyValue(
   }
 
   const amount = Number((customer as any)?.grassCutAmount ?? 0);
+  const effectiveRotationWeeks = getEffectiveRotationWeeks(
+    customer,
+    defaultRotationWeeks
+  );
 
   return (
     amount *
     getSeasonCutSlotCount(
-      customer.cutFrequency,
+      effectiveRotationWeeks,
       currentSeasonStartYear,
       seasonStart,
       seasonEnd
@@ -639,12 +639,19 @@ export function getLastVisitForCustomer(customerId: number, visitLogs: VisitLog[
     .sort((a, b) => +new Date(b.visitDate) - +new Date(a.visitDate))[0];
 }
 
-export function formatNextDue(customer: Customer, visitLogs: VisitLog[]) {
+export function formatNextDue(
+  customer: Customer,
+  visitLogs: VisitLog[],
+  defaultRotationWeeks: RotationWeeks | number | null | undefined = DEFAULT_ROTATION_WEEKS
+) {
   const lastVisit = getLastVisitForCustomer(customer.id, visitLogs);
   if (!lastVisit) return "Due now";
 
   const base = new Date(lastVisit.visitDate);
-  base.setDate(base.getDate() + getFrequencyDays(customer.cutFrequency));
+  base.setDate(
+    base.getDate() +
+      getRotationDays(getEffectiveRotationWeeks(customer, defaultRotationWeeks))
+  );
   return base.toLocaleDateString();
 }
 

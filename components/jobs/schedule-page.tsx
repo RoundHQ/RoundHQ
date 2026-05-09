@@ -4,11 +4,17 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import {
   getCustomerDisplayAddress,
-  getFortnightWeek,
   isDateWithinRecurringSeason,
   getWorkdayFromDate,
 } from "./helpers";
-import type { Customer, DayName, WeekNumber } from "./types";
+import {
+  DEFAULT_ROTATION_WEEKS,
+  getCycleWeek,
+  getRotationCycleLabel,
+  isCustomerDueOnDate,
+  normalizeRotationWeeks,
+} from "./rotation";
+import type { Customer, DayName, RotationWeeks, WeekNumber } from "./types";
 
 type ScheduledJobType =
   | "One Off"
@@ -64,6 +70,8 @@ type Props = {
   customers: Customer[];
   grassCutSeasonStart: string;
   grassCutSeasonEnd: string;
+  defaultRotationWeeks?: RotationWeeks;
+  activeRotationWeeks?: RotationWeeks;
   onAddJob: (job: ScheduledJob) => void | boolean | Promise<void | boolean>;
   pendingQuoteSchedule: PendingQuoteSchedule | null;
   onScheduleQuote: (details: {
@@ -167,6 +175,10 @@ function getJobBadgeClass(type?: ScheduledJobType, status?: ScheduledJobStatus) 
   }
 }
 
+function getJobTypeLabel(type?: ScheduledJobType | null) {
+  return type === "Grass Cut" ? "Service Visit" : type ?? "One Off";
+}
+
 function getJobCardClass(status?: ScheduledJobStatus) {
   switch (status) {
     case "Completed":
@@ -241,7 +253,9 @@ function buildGrassCutSummary(
   date: Date,
   customers: Customer[],
   grassCutSeasonStart: string,
-  grassCutSeasonEnd: string
+  grassCutSeasonEnd: string,
+  defaultRotationWeeks: RotationWeeks,
+  activeRotationWeeks: RotationWeeks
 ): ScheduleEntry | null {
   if (
     !isDateWithinRecurringSeason(
@@ -259,12 +273,11 @@ function buildGrassCutSummary(
     return null;
   }
 
-  const roundWeek = getFortnightWeek(date);
+  const roundWeek = getCycleWeek(date, activeRotationWeeks);
   const scheduledCustomers = customers.filter(
     (customer) =>
       customer.isGrassCuttingCustomer &&
-      customer.week === roundWeek &&
-      customer.day === selectedDay
+      isCustomerDueOnDate(customer, date, selectedDay, defaultRotationWeeks)
   );
 
   if (scheduledCustomers.length === 0) {
@@ -284,7 +297,7 @@ function buildGrassCutSummary(
 
   return {
     id: `grass-summary-${toDateInputValue(date)}`,
-    title: `${roundWeek} Grass Cuts`,
+    title: `${getRotationCycleLabel(roundWeek, activeRotationWeeks)} Service Visits`,
     date: toDateInputValue(date),
     notes: breakdown || undefined,
     customerId: null,
@@ -310,6 +323,8 @@ export default function SchedulePage({
   customers,
   grassCutSeasonStart,
   grassCutSeasonEnd,
+  defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
+  activeRotationWeeks,
   onAddJob,
   pendingQuoteSchedule,
   onScheduleQuote,
@@ -322,6 +337,11 @@ export default function SchedulePage({
   const [selectedDate, setSelectedDate] = useState<string>(toDateInputValue(today));
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<"job" | "quote">("job");
+  const normalizedDefaultRotationWeeks =
+    normalizeRotationWeeks(defaultRotationWeeks);
+  const calendarRotationWeeks = normalizeRotationWeeks(
+    activeRotationWeeks ?? normalizedDefaultRotationWeeks
+  );
 
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
@@ -352,7 +372,9 @@ export default function SchedulePage({
         fromDateInputValue(dateKey),
         customers,
         grassCutSeasonStart,
-        grassCutSeasonEnd
+        grassCutSeasonEnd,
+        normalizedDefaultRotationWeeks,
+        calendarRotationWeeks
       );
 
       if (!summaryJob) {
@@ -388,7 +410,16 @@ export default function SchedulePage({
     }
 
     return map;
-  }, [customers, days, grassCutSeasonEnd, grassCutSeasonStart, jobs, selectedDate]);
+  }, [
+    customers,
+    days,
+    grassCutSeasonEnd,
+    grassCutSeasonStart,
+    jobs,
+    calendarRotationWeeks,
+    normalizedDefaultRotationWeeks,
+    selectedDate,
+  ]);
 
   const selectedDateJobs = jobsByDate.get(selectedDate) ?? [];
   const scheduledItemCount = useMemo(
@@ -747,7 +778,7 @@ export default function SchedulePage({
         <div className="mt-4 space-y-3">
           {selectedDateJobs.length === 0 ? (
             <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">
-              No jobs or grass cuts scheduled for this date.
+              No jobs or service visits scheduled for this date.
             </div>
           ) : (
             selectedDateJobs.map((job) => {
@@ -757,7 +788,7 @@ export default function SchedulePage({
                 ? `${job.roundDay} round - ${job.grassCutCount ?? 0} customer${
                     job.grassCutCount === 1 ? "" : "s"
                   } scheduled`
-                : `${job.type ?? "One Off"}${
+                : `${getJobTypeLabel(job.type)}${
                     job.customerName ? ` - ${job.customerName}` : ""
                   }`;
 
@@ -791,8 +822,8 @@ export default function SchedulePage({
                     )}`}
                   >
                     {job.status === "Scheduled"
-                      ? job.type ?? "One Off"
-                      : `${job.status} - ${job.type ?? "One Off"}`}
+                      ? getJobTypeLabel(job.type)
+                      : `${job.status} - ${getJobTypeLabel(job.type)}`}
                   </span>
                 </div>
               );
@@ -890,7 +921,7 @@ export default function SchedulePage({
                     >
                       <option value="One Off">One Off</option>
                       <option value="Quote Accepted">Quote Accepted</option>
-                      <option value="Grass Cut">Grass Cut</option>
+                      <option value="Grass Cut">Service Visit</option>
                       <option value="Commercial">Commercial</option>
                     </select>
                   </div>

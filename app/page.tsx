@@ -211,7 +211,7 @@ function DesktopMockup() {
 
               <div className="grid grid-cols-4 gap-3">
                 <MiniStat label="Today's jobs" value="8" />
-                <MiniStat label="Cut status" value="5 / 8" />
+                <MiniStat label="Visit status" value="5 / 8" />
                 <MiniStat label="Total owed" value="£420.00" tone="red" />
                 <MiniStat label="Day value" value="£680.00" />
               </div>

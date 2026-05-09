@@ -3,12 +3,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LocateFixed, Navigation } from "lucide-react";
 import { formatGrassCutAreas, getCustomerDisplayAddress } from "./helpers";
+import {
+  DEFAULT_ROTATION_WEEKS,
+  getRotationCycleLabel,
+  isCustomerDueInSelectedWeek,
+  normalizeRotationWeeks,
+} from "./rotation";
 import type {
   Customer,
   VisitLog,
   DayName,
   WeekNumber,
   NotCutReason,
+  RotationWeeks,
 } from "./types";
 
 type Props = {
@@ -16,6 +23,8 @@ type Props = {
   visits: VisitLog[];
   selectedWeek: WeekNumber;
   selectedDay: DayName;
+  defaultRotationWeeks?: RotationWeeks;
+  activeRotationWeeks?: RotationWeeks;
   isLocked: boolean;
   getCurrentVisit: (customerId: number) => VisitLog | null;
   onUpdateCustomer: (customer: Customer) => Promise<unknown>;
@@ -208,6 +217,8 @@ export default function MapPage({
   visits,
   selectedWeek,
   selectedDay,
+  defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
+  activeRotationWeeks,
   isLocked,
   getCurrentVisit,
   onUpdateCustomer,
@@ -232,6 +243,11 @@ export default function MapPage({
   const [isOptimizingRoute, setIsOptimizingRoute] = useState(false);
   const [routePlanningStatus, setRoutePlanningStatus] = useState<string | null>(null);
   const [showCommentEditor, setShowCommentEditor] = useState(false);
+  const normalizedDefaultRotationWeeks = normalizeRotationWeeks(defaultRotationWeeks);
+  const routeRotationWeeks = normalizeRotationWeeks(
+    activeRotationWeeks ?? normalizedDefaultRotationWeeks
+  );
+  const selectedCycleLabel = getRotationCycleLabel(selectedWeek, routeRotationWeeks);
 
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<any>(null);
@@ -242,12 +258,16 @@ export default function MapPage({
     const filtered = customers.filter(
         (customer) =>
             customer.isGrassCuttingCustomer &&
-            customer.week === selectedWeek &&
+            isCustomerDueInSelectedWeek(
+              customer,
+              selectedWeek,
+              normalizedDefaultRotationWeeks
+            ) &&
             customer.day === selectedDay
     );
 
     return nearestNeighbourSort(filtered);
-  }, [customers, selectedWeek, selectedDay]);
+  }, [customers, normalizedDefaultRotationWeeks, selectedWeek, selectedDay]);
 
   const selectedCustomer =
     dayStops.find((c) => c.id === selectedCustomerId) ?? dayStops[0] ?? null;
@@ -510,7 +530,7 @@ export default function MapPage({
     }
 
     if (!dayStops.length) {
-      setRoutePlanningStatus("There are no grass cuts to optimise for this day.");
+      setRoutePlanningStatus("There are no service visits to optimise for this day.");
       return;
     }
 
@@ -594,7 +614,7 @@ export default function MapPage({
               Day Route
             </p>
             <h2 className="mt-2 text-3xl font-black tracking-tight">
-              {selectedWeek} · {selectedDay}
+              {selectedCycleLabel} · {selectedDay}
             </h2>
             <p className="mt-2 text-sm text-white/75">
               Showing all stops for this day on the map.
@@ -705,7 +725,7 @@ export default function MapPage({
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   <div className="rounded-2xl bg-slate-50 p-4">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                      Grass Cut Amount
+                      Service Amount
                     </p>
                     <p className="mt-2 text-sm font-semibold text-slate-900">
                       {formatMoney(selectedOrCurrentCustomer.grassCutAmount)}
@@ -723,7 +743,7 @@ export default function MapPage({
 
                   <div className="rounded-2xl bg-slate-50 p-4">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                      Grass Areas
+                      Service Areas
                     </p>
                     <p className="mt-2 text-sm font-semibold text-slate-900">
                       {formatGrassCutAreas(selectedOrCurrentCustomer)}
@@ -736,9 +756,9 @@ export default function MapPage({
                     </p>
                     <p className="mt-2 text-sm font-semibold text-slate-900">
                       {selectedVisit?.status === "completed"
-                        ? "Cut"
+                        ? "Completed"
                         : selectedVisit?.status === "not_cut"
-                        ? `Not Cut${
+                        ? `Not Completed${
                             selectedVisit.notCutReason
                               ? ` - ${selectedVisit.notCutReason}`
                               : ""
@@ -808,14 +828,14 @@ export default function MapPage({
                           onClick={handleMarkCut}
                           className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100"
                         >
-                          Cut
+                          Completed
                         </button>
 
                         <button
                           onClick={handleOpenNotCut}
                           className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100"
                         >
-                          Not Cut
+                          Not Completed
                         </button>
 
                         {currentStopIsCashCustomer && (
@@ -900,7 +920,7 @@ export default function MapPage({
                       {currentVisit?.notCutReason && (
                         <div className="rounded-2xl bg-white p-4">
                           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                            Not Cut Reason
+                            Not Completed Reason
                           </p>
                           <p className="mt-2 text-sm font-semibold text-slate-900">
                             {currentVisit.notCutReason}
@@ -1048,9 +1068,9 @@ export default function MapPage({
                           }`}
                         >
                           {visit?.status === "completed"
-                            ? "Cut"
+                            ? "Completed"
                             : visit?.status === "not_cut"
-                            ? "Not Cut"
+                            ? "Not Completed"
                             : "Not Started"}
                         </span>
 
@@ -1080,10 +1100,10 @@ export default function MapPage({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-lg rounded-[24px] bg-white p-6 shadow-xl">
             <h3 className="text-xl font-black tracking-tight text-slate-900">
-              Not Cut Reason
+              Not Completed Reason
             </h3>
             <p className="mt-1 text-sm text-slate-500">
-              Record why this property wasn’t cut.
+              Record why this visit was not completed.
             </p>
 
             <div className="mt-5 space-y-4">
@@ -1124,7 +1144,7 @@ export default function MapPage({
                 onClick={handleSubmitNotCut}
                 className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700"
               >
-                Save Not Cut
+                Save Reason
               </button>
 
               <button

@@ -1,5 +1,9 @@
 import * as XLSX from "xlsx";
-import type { Customer } from "./types";
+import {
+    getRotationWeeksFromCutFrequency,
+    normalizeWeekNumber,
+} from "./rotation";
+import type { Customer, CutFrequency, WeekNumber } from "./types";
 
 type RawRow = Record<string, unknown>;
 
@@ -41,9 +45,13 @@ function normaliseCustomerType(value: string): "Residential" | "Commercial" {
     return value.toLowerCase() === "commercial" ? "Commercial" : "Residential";
 }
 
-function normaliseFrequency(value: string): "Fortnightly" | "3 Weekly" | "Monthly" {
-    if (value.toLowerCase().includes("3")) return "3 Weekly";
-    if (value.toLowerCase().includes("month")) return "Monthly";
+function normaliseFrequency(value: string): CutFrequency {
+    const lower = value.toLowerCase();
+    if (lower.includes("3")) return "3 Weekly";
+    if (lower.includes("month") || lower.includes("4")) return "Monthly";
+    if ((lower.includes("weekly") || lower.includes("week")) && !lower.includes("fortnight")) {
+        return "Weekly";
+    }
     return "Fortnightly";
 }
 
@@ -54,8 +62,8 @@ function normalisePaymentType(value: string): "Monthly" | "On Day Transfer" | "C
     return "Monthly";
 }
 
-function normaliseWeek(value: string): "Week 1" | "Week 2" {
-    return value.toLowerCase().includes("2") ? "Week 2" : "Week 1";
+function normaliseWeek(value: string, rotationWeeks: number): WeekNumber {
+    return normalizeWeekNumber(value, rotationWeeks);
 }
 
 function normaliseDay(
@@ -90,17 +98,21 @@ export async function importCustomersFromFile(file: File): Promise<Customer[]> {
             );
             const isGrassCuttingCustomer = getBoolean(
                 row,
-                ["Grass Cutting Customer", "Grass Customer", "On Grass Round"],
+                ["Service Customer", "Grass Customer", "On Grass Round"],
                 true
             );
             const cutFrequency = normaliseFrequency(
-                getString(row, ["Cut Frequency", "Frequency"]) || "Fortnightly"
+                getString(row, ["Service Rotation", "Frequency"]) || "Fortnightly"
             );
-            const grassCutAmount = getNumber(row, ["Grass Cut Amount", "Price", "Grass Cut Price"]);
+            const rotationWeeksOverride = getRotationWeeksFromCutFrequency(cutFrequency);
+            const grassCutAmount = getNumber(row, ["Service Amount", "Price", "Service Price"]);
             const paymentMethod = normalisePaymentType(
                 getString(row, ["Payment Type", "Payment Method"]) || "Monthly"
             );
-            const week = normaliseWeek(getString(row, ["Week"]) || "Week 1");
+            const week = normaliseWeek(
+                getString(row, ["Week"]) || "Week 1",
+                rotationWeeksOverride
+            );
             const day = normaliseDay(getString(row, ["Day"]) || "Monday");
             const notes = getString(row, ["Notes"]);
             const accessNotes = getString(row, ["Access Notes"]);
@@ -118,6 +130,7 @@ export async function importCustomersFromFile(file: File): Promise<Customer[]> {
                 isGrassCuttingCustomer,
                 customerType,
                 cutFrequency,
+                rotationWeeksOverride,
                 grassCutAmount,
                 paymentMethod,
                 week,

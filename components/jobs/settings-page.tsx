@@ -31,6 +31,13 @@ import {
     getSeasonDateInputValue,
     normalizeSeasonMonthDay,
 } from "./helpers";
+import {
+    DEFAULT_ROTATION_WEEKS,
+    getRotationLabel,
+    normalizeRotationWeeks,
+    ROTATION_WEEK_OPTIONS,
+} from "./rotation";
+import type { RotationWeeks } from "./types";
 
 type PaymentMethod = "cash" | "bank_transfer" | "direct_debit" | "invoice";
 type CutType = "front_only" | "front_back" | "full_garden";
@@ -87,6 +94,7 @@ export type SettingsData = {
     defaultCutType: CutType;
     defaultVisitDay: string;
     defaultVisitFrequencyDays: number;
+    defaultRotationWeeks: RotationWeeks;
     grassCutSeasonStart: string;
     grassCutSeasonEnd: string;
     autoCompleteRoutineJobs: boolean;
@@ -201,6 +209,7 @@ const defaultSettings: SettingsData = {
     defaultCutType: "front_back",
     defaultVisitDay: "Monday",
     defaultVisitFrequencyDays: 14,
+    defaultRotationWeeks: DEFAULT_ROTATION_WEEKS,
     grassCutSeasonStart: DEFAULT_GRASS_CUT_SEASON_START,
     grassCutSeasonEnd: DEFAULT_GRASS_CUT_SEASON_END,
     autoCompleteRoutineJobs: true,
@@ -272,7 +281,7 @@ const defaultSettings: SettingsData = {
         "Hi {{customerName}}, this is a reminder that invoice {{documentNumber}} from {{businessName}} is overdue. Total: {{total}}. Due date: {{dueDate}}. Please let me know once payment has been made.",
     autoSendVisitCompletionTexts: false,
     visitCompletionTextTemplate:
-        "Hi {{customerName}}, your grass has been cut today. Payment due: {{amount}}. {{paymentDetails}} Reference: {{paymentReference}}. Thanks, {{businessName}}",
+        "Hi {{customerName}}, your service visit has been completed today. Payment due: {{amount}}. {{paymentDetails}} Reference: {{paymentReference}}. Thanks, {{businessName}}",
 
     showWeatherWidget: true,
     showRevenueWidget: true,
@@ -609,6 +618,7 @@ function safeMergeSettings(source?: Partial<SettingsData> | null): SettingsData 
     return {
         ...defaultSettings,
         ...(source || {}),
+        defaultRotationWeeks: normalizeRotationWeeks(source?.defaultRotationWeeks),
         quoteFollowUpMethod,
         invoiceReminderMethod,
         quoteServices: normalizeQuoteServices(source?.quoteServices),
@@ -1395,14 +1405,14 @@ export default function SettingsPage({
                             icon={CreditCard}
                         >
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                                <Field label="Default grass cut price (£)">
+                                <Field label="Default service price (£)">
                                     <NumberInput
                                         value={settings.defaultGrassCutPrice}
                                         onChange={(value) => update("defaultGrassCutPrice", value)}
                                     />
                                 </Field>
 
-                                <Field label="Default hedge cut price (£)">
+                                <Field label="Default hedge trimming price (£)">
                                     <NumberInput
                                         value={settings.defaultHedgeCutPrice}
                                         onChange={(value) => update("defaultHedgeCutPrice", value)}
@@ -1456,7 +1466,7 @@ export default function SettingsPage({
                                     </Select>
                                 </Field>
 
-                                <Field label="Default cut type">
+                                <Field label="Default service type">
                                     <Select
                                         value={settings.defaultCutType}
                                         onChange={(e) =>
@@ -1492,7 +1502,7 @@ export default function SettingsPage({
                                 </Field>
 
                                 <Field
-                                    label="Grass cutting season start"
+                                    label="Service season start"
                                     hint="Only the month and day are used, so this repeats every year."
                                 >
                                     <Input
@@ -1514,7 +1524,7 @@ export default function SettingsPage({
                                 </Field>
 
                                 <Field
-                                    label="Grass cutting season end"
+                                    label="Service season end"
                                     hint="Only the month and day are used, so this repeats every year."
                                 >
                                     <Input
@@ -1564,6 +1574,35 @@ export default function SettingsPage({
                                         description="Good for pressure washing and transformations."
                                     />
                                 </div>
+                            </div>
+                        </Card>
+
+                        <Card
+                            title="Round settings"
+                            description="Choose how your normal service rotation behaves."
+                            icon={RotateCcw}
+                        >
+                            <div className="grid grid-cols-1 gap-4">
+                                <Field
+                                    label="Default service rotation"
+                                    hint="This will be used automatically for new customers. You can still change the rotation for individual customers."
+                                >
+                                    <Select
+                                        value={settings.defaultRotationWeeks}
+                                        onChange={(e) =>
+                                            update(
+                                                "defaultRotationWeeks",
+                                                normalizeRotationWeeks(e.target.value)
+                                            )
+                                        }
+                                    >
+                                        {ROTATION_WEEK_OPTIONS.map((rotationWeeks) => (
+                                            <option key={rotationWeeks} value={rotationWeeks}>
+                                                {getRotationLabel(rotationWeeks)}
+                                            </option>
+                                        ))}
+                                    </Select>
+                                </Field>
                             </div>
                         </Card>
 
@@ -2372,8 +2411,8 @@ export default function SettingsPage({
                 {activeTab === "sms" && (
                     <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
                         <Card
-                            title="Automatic cut texts"
-                            description="Send an automatic payment-due text when an On Day Transfer customer is marked as cut."
+                            title="Automatic completion texts"
+                            description="Send an automatic payment-due text when an On Day Transfer customer is marked complete."
                             icon={MessageSquare}
                         >
                             <div className="grid grid-cols-1 gap-5">
@@ -2382,12 +2421,12 @@ export default function SettingsPage({
                                     onChange={(value) =>
                                         update("autoSendVisitCompletionTexts", value)
                                     }
-                                    label="Send payment text after Cut"
+                                    label="Send payment text after completion"
                                     description="Only sends for customers whose payment method is On Day Transfer. Cash and monthly customers are ignored."
                                 />
 
                                 <Field
-                                    label="Cut text template"
+                                    label="Completion text template"
                                     hint="Placeholders: {{customerName}}, {{businessName}}, {{amount}}, {{visitDate}}, {{paymentDetails}}, {{paymentReference}}"
                                 >
                                     <Textarea
@@ -2399,7 +2438,7 @@ export default function SettingsPage({
                                 </Field>
 
                                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600">
-                                    Automatic cut texts only work after the Twilio variables are
+                                    Automatic completion texts only work after the Twilio variables are
                                     added in Vercel and the site is redeployed. The Auth Token is
                                     kept out of app settings so it is not exposed in the browser.
                                 </div>

@@ -17,8 +17,8 @@ create table if not exists public.commercial_rams_documents (
   prepared_by text null,
   work_type text not null check (
     work_type in (
-      'Grass Cutting',
-      'Hedge Cutting',
+      'Grounds Maintenance',
+      'Hedge Trimming',
       'Pressure Washing',
       'Gutter Cleaning',
       'Grounds Maintenance',

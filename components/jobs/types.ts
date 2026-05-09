@@ -18,16 +18,17 @@ export type DayName =
   | "Thursday"
   | "Friday";
 
-export type WeekNumber = "Week 1" | "Week 2";
+export type RotationWeeks = 1 | 2 | 3 | 4;
+export type WeekNumber = "Week 1" | "Week 2" | "Week 3" | "Week 4";
 export type VisitStatus = "completed" | "not_cut";
 export type PaymentMethod = "Monthly" | "On Day Transfer" | "Cash";
 export type CustomerType = "Residential" | "Commercial";
-export type CutFrequency = "Fortnightly" | "3 Weekly" | "Monthly";
+export type CutFrequency = "Weekly" | "Fortnightly" | "3 Weekly" | "Monthly";
 export const GRASS_CUT_AREA_OPTIONS = ["Front", "Back", "Side", "All"] as const;
 export type GrassCutArea = (typeof GRASS_CUT_AREA_OPTIONS)[number];
 export const RAMS_WORK_TYPE_OPTIONS = [
-  "Grass Cutting",
-  "Hedge Cutting",
+  "Grounds Maintenance",
+  "Hedge Trimming",
   "Pressure Washing",
   "Gutter Cleaning",
   "Grounds Maintenance",
@@ -109,6 +110,7 @@ export type Customer = {
 
   customerType: CustomerType;
   cutFrequency: CutFrequency;
+  rotationWeeksOverride?: RotationWeeks | null;
   grassCutAmount: number;
   siteName?: string;
   siteAddress?: string;
@@ -194,6 +196,7 @@ export type Quote = {
 
 export type Invoice = {
   id: string;
+  invoiceNumber: string;
   customerId: number | null;
   customerName: string;
   customerType?: CustomerType;

@@ -30,6 +30,9 @@ import {
   ChevronRight,
   LogOut,
   Inbox,
+  Bell,
+  HelpCircle,
+  CloudSun,
   X,
 } from "lucide-react";
 
@@ -61,12 +64,23 @@ import {
   getCustomerEmailAddresses,
   getCustomerDisplayAddress,
   getCustomerTotals,
-  getFortnightWeek,
   getInputDateValue,
   getWorkdayFromDate,
   getTodayDateInputValue,
   toStoredDateTime,
 } from "@/components/jobs/helpers";
+import {
+  DEFAULT_ROTATION_WEEKS,
+  getActiveRotationWeeks,
+  getCutFrequencyFromRotationWeeks,
+  getCycleWeek,
+  getEffectiveRotationWeeks,
+  getRotationCycleLabel,
+  getWeekOptions,
+  isCustomerDueInSelectedWeek,
+  normalizeRotationWeeks,
+  normalizeWeekNumber,
+} from "@/components/jobs/rotation";
 import {
   buildTextMessageUrl,
   sendCustomerEmailMessage,
@@ -126,9 +140,11 @@ import {
   type NotCutReason,
   type QuoteStatus,
   type RolePermission,
+  type RotationWeeks,
   type StaffMember,
   type StaffPageAccessKey,
   type StaffRole,
+  type WeekNumber,
 } from "@/components/jobs/types";
 
 type QuoteService = {
@@ -172,6 +188,7 @@ type AppSettings = {
   defaultCutType: "front_only" | "front_back" | "full_garden";
   defaultVisitDay: string;
   defaultVisitFrequencyDays: number;
+  defaultRotationWeeks: RotationWeeks;
   grassCutSeasonStart: string;
   grassCutSeasonEnd: string;
   autoCompleteRoutineJobs: boolean;
@@ -251,7 +268,7 @@ type PageKey =
     | "settings";
 
 type DayName = "Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday";
-type WeekName = "Week 1" | "Week 2";
+type WeekName = WeekNumber;
 type CustomerType = "Residential" | "Commercial";
 
 type LineItem = {
@@ -741,6 +758,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   defaultCutType: "front_back",
   defaultVisitDay: "Monday",
   defaultVisitFrequencyDays: 14,
+  defaultRotationWeeks: DEFAULT_ROTATION_WEEKS,
   grassCutSeasonStart: DEFAULT_GRASS_CUT_SEASON_START,
   grassCutSeasonEnd: DEFAULT_GRASS_CUT_SEASON_END,
   autoCompleteRoutineJobs: true,
@@ -812,7 +830,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
       "Hi {{customerName}}, this is a reminder that invoice {{documentNumber}} from {{businessName}} is overdue. Total: {{total}}. Due date: {{dueDate}}. Please let me know once payment has been made.",
   autoSendVisitCompletionTexts: false,
   visitCompletionTextTemplate:
-      "Hi {{customerName}}, your grass has been cut today. Payment due: {{amount}}. {{paymentDetails}} Reference: {{paymentReference}}. Thanks, {{businessName}}",
+      "Hi {{customerName}}, your service visit has been completed today. Payment due: {{amount}}. {{paymentDetails}} Reference: {{paymentReference}}. Thanks, {{businessName}}",
 
   showWeatherWidget: true,
   showRevenueWidget: true,
@@ -833,10 +851,10 @@ const STAFF_PAGE_OPTIONS: {
 }[] = [
   { key: "dashboard", label: "Dashboard", section: "Dashboard" },
   { key: "schedule", label: "Schedule", section: "Dashboard" },
-  { key: "rounds", label: "Rounds", section: "Grass Schedule" },
-  { key: "history", label: "History", section: "Grass Schedule" },
-  { key: "map", label: "Map", section: "Grass Schedule" },
-  { key: "actions", label: "Actions", section: "Grass Schedule" },
+  { key: "rounds", label: "Rounds", section: "Service Schedule" },
+  { key: "history", label: "History", section: "Service Schedule" },
+  { key: "map", label: "Map", section: "Service Schedule" },
+  { key: "actions", label: "Actions", section: "Service Schedule" },
   { key: "commercialDocs", label: "RAMS & Documents", section: "Commercial" },
   { key: "customers", label: "All Customers", section: "Customers" },
   { key: "quotes", label: "Quotes", section: "Customers" },
@@ -923,6 +941,7 @@ function mergeAppSettings(value?: Partial<AppSettings> | null): AppSettings {
   return {
     ...DEFAULT_APP_SETTINGS,
     ...(value || {}),
+    defaultRotationWeeks: normalizeRotationWeeks(value?.defaultRotationWeeks),
     quoteFollowUpMethod,
     invoiceReminderMethod,
     quoteServices: normalizeQuoteServices(value?.quoteServices),
@@ -942,22 +961,6 @@ function loadAppSettings(): AppSettings {
     console.error("Failed to load app settings:", error);
     return DEFAULT_APP_SETTINGS;
   }
-}
-
-function getBrandSurface(settings: AppSettings) {
-  return settings.themeMode === "dark" ? "#0f172a" : "#f5f7f8";
-}
-
-function getBrandPageBackground(settings: AppSettings) {
-  return settings.themeMode === "dark" ? "#020617" : "#edf1f2";
-}
-
-function getSidebarBackground(settings: AppSettings) {
-  return settings.secondaryColor || "#0b2324";
-}
-
-function getActiveNavBackground(settings: AppSettings) {
-  return settings.primaryColor || "#163738";
 }
 
 function buildInvoiceNumber(settings: AppSettings, existingInvoices: Invoice[]) {
@@ -1219,7 +1222,7 @@ function applyMessageTemplate(
 }
 
 function getVisitPaymentReference(settings: AppSettings, customer: Customer) {
-  return settings.bankPaymentReference.trim() || customer.name.trim() || "Grass cut";
+  return settings.bankPaymentReference.trim() || customer.name.trim() || "Service visit";
 }
 
 function getBankPaymentDetails(settings: AppSettings) {
@@ -1316,7 +1319,6 @@ function getCustomerPaymentMethodFromSettings(
   return "Monthly";
 }
 
-const WEEK_OPTIONS: WeekName[] = ["Week 1", "Week 2"];
 const DAY_OPTIONS: DayName[] = [
   "Monday",
   "Tuesday",
@@ -1723,7 +1725,7 @@ function isErrorWithMessage(value: unknown): value is {
 }
 
 function normaliseWeekName(value: unknown): WeekName {
-  return WEEK_OPTIONS.includes(value as WeekName) ? (value as WeekName) : "Week 1";
+  return normalizeWeekNumber(value as WeekName | string | number | null | undefined, 4);
 }
 
 function normaliseDayName(value: unknown): DayName {
@@ -1778,7 +1780,7 @@ function getActiveRoundKey(
 function normalizeStoredRoundStateKey(key: string) {
   const [baseKey, cycleSuffix] = key.split("::");
   const legacyMatch = baseKey.match(
-      /^(Week [12])-(Monday|Tuesday|Wednesday|Thursday|Friday)-(Residential|Commercial)$/
+      /^(Week [1-4])-(Monday|Tuesday|Wednesday|Thursday|Friday)-(Residential|Commercial)$/
   );
 
   if (!legacyMatch) {
@@ -1795,7 +1797,7 @@ function normalizeStoredRoundStateKey(key: string) {
 function normalizeStoredRoundBaseKey(key: string) {
   const baseKey = key.split("::")[0];
   const legacyMatch = baseKey.match(
-      /^(Week [12])-(Monday|Tuesday|Wednesday|Thursday|Friday)-(Residential|Commercial)$/
+      /^(Week [1-4])-(Monday|Tuesday|Wednesday|Thursday|Friday)-(Residential|Commercial)$/
   );
 
   if (!legacyMatch) {
@@ -1805,9 +1807,9 @@ function normalizeStoredRoundBaseKey(key: string) {
   return getBaseRoundKey(legacyMatch[1] as WeekName, legacyMatch[2] as DayName);
 }
 
-function getTodayPanelState(date: Date): TodayPanelState {
+function getTodayPanelState(date: Date, rotationWeeks: RotationWeeks): TodayPanelState {
   const { dayLabel, selectedDay } = getWorkdayFromDate(date);
-  const week = getFortnightWeek(date);
+  const week = getCycleWeek(date, rotationWeeks);
 
   return {
     week,
@@ -2049,6 +2051,13 @@ function formatDatabaseError(error: { code?: string; message: string }) {
       }
       return "Supabase is connected, but one of the new workflow tables is missing. Run the workflow SQL setup script and refresh.";
     default:
+      if (
+          message.includes("default_rotation_weeks") ||
+          message.includes("organizations_default_rotation_weeks_check")
+      ) {
+        return "Supabase is connected, but the organizations table needs the default round rotation column. Run the latest tenant SQL setup script and refresh.";
+      }
+
       if (isVisitRoundMetadataSchemaError(error)) {
         return VISIT_ROUND_METADATA_SETUP_NOTICE;
       }
@@ -2061,6 +2070,10 @@ function formatDatabaseError(error: { code?: string; message: string }) {
               message.includes("email") ||
               message.includes("contact_emails") ||
               message.includes("grass_cut_areas") ||
+              message.includes("rotation_weeks_override") ||
+              message.includes("customers_rotation_weeks_override_check") ||
+              message.includes("customers_week_check") ||
+              message.includes("customers_cut_frequency_check") ||
               message.includes("site_name") ||
               message.includes("site_address") ||
               message.includes("site_town") ||
@@ -2465,6 +2478,10 @@ function normalizeScheduledJobType(value: string): ScheduledJobType {
       : "One Off";
 }
 
+function getScheduledJobTypeLabel(type: ScheduledJobType | string | null | undefined) {
+  return type === "Grass Cut" ? "Service Visit" : type ?? "One Off";
+}
+
 function normalizeScheduledJobStatus(value: string): ScheduledJobStatus {
   return ["Scheduled", "In Progress", "Completed", "Cancelled"].includes(value)
       ? (value as ScheduledJobStatus)
@@ -2810,7 +2827,7 @@ const NAV_SECTIONS: {
     ],
   },
   {
-    title: "Grass Schedule",
+    title: "Service Schedule",
     items: [
       { key: "rounds", label: "Rounds", icon: Repeat },
       { key: "routeEfficiency", label: "Route Insights", icon: Navigation },
@@ -2869,6 +2886,40 @@ function getExpandedNavSections(activeSectionTitle: string | null) {
   return Object.fromEntries(
       NAV_SECTIONS.map((section) => [section.title, section.title === activeSectionTitle])
   ) as Record<string, boolean>;
+}
+
+function getPersonInitials(name: string) {
+  const parts = name
+      .split(/\s+/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+  if (parts.length === 0) {
+    return "RH";
+  }
+
+  return parts
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("");
+}
+
+function getFirstName(name: string) {
+  return name.split(/\s+/).find(Boolean) ?? "there";
+}
+
+function getPageDisplayLabel(page: PageKey) {
+  if (page === "customerProfile") return "Customer profile";
+  if (page === "scheduledJobProfile") return "Scheduled job";
+  if (page === "quoteForm") return "Quote";
+  if (page === "invoiceForm") return "Invoice";
+
+  for (const section of NAV_SECTIONS) {
+    const item = section.items.find((entry) => entry.key === page);
+    if (item) return item.label;
+  }
+
+  return "Dashboard";
 }
 
 function getPageAccessKey(page: PageKey) {
@@ -3361,7 +3412,7 @@ function ScheduledJobProfileSection({
 
               <div className="flex flex-wrap gap-2">
                 <span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/90 ring-1 ring-white/10">
-                  {job.type}
+                  {getScheduledJobTypeLabel(job.type)}
                 </span>
                 <span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/90 ring-1 ring-white/10">
                   {jobTimeRange ?? "No time added"}
@@ -3448,7 +3499,7 @@ function ScheduledJobProfileSection({
                     >
                       <option value="One Off">One Off</option>
                       <option value="Quote Accepted">Quote Accepted</option>
-                      <option value="Grass Cut">Grass Cut</option>
+                      <option value="Grass Cut">Service Visit</option>
                       <option value="Commercial">Commercial</option>
                     </select>
                   </label>
@@ -3609,7 +3660,9 @@ function ScheduledJobProfileSection({
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
             <div className="rounded-2xl border border-slate-200 bg-slate-50/90 p-4 shadow-sm">
               <p className="text-xs text-slate-400">Job Type</p>
-              <p className="mt-2 font-semibold text-slate-900">{job.type}</p>
+              <p className="mt-2 font-semibold text-slate-900">
+                {getScheduledJobTypeLabel(job.type)}
+              </p>
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-slate-50/90 p-4 shadow-sm">
@@ -3992,6 +4045,32 @@ type JobsAppProps = {
   featureAccess?: Partial<CustomerFeatureAccess>;
 };
 
+type HeaderWeatherState = {
+  temperature: number | null;
+  rainChance: number | null;
+  label: string;
+};
+
+const HEADER_WEATHER_FALLBACK_COORDINATES = {
+  latitude: 55.8642,
+  longitude: -4.2518,
+};
+
+const HEADER_WEATHER_LOCATION_LABEL = "East Kilbride";
+
+function getCompactWeatherLabel(weatherCode: number | null) {
+  if (weatherCode === null) return "Forecast";
+  if ([0, 1].includes(weatherCode)) return "Clear";
+  if ([2, 3].includes(weatherCode)) return "Cloudy";
+  if ([45, 48].includes(weatherCode)) return "Fog";
+  if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82].includes(weatherCode)) {
+    return "Rain";
+  }
+  if ([71, 73, 75, 77, 85, 86].includes(weatherCode)) return "Snow";
+  if ([95, 96, 99].includes(weatherCode)) return "Storm";
+  return "Forecast";
+}
+
 export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
   const customerFeatureAccess = useMemo(
       () => normalizeCustomerFeatureAccess(featureAccess),
@@ -4096,10 +4175,15 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
   const [isClearingHistory, setIsClearingHistory] = useState(false);
   const [todayReferenceDate, setTodayReferenceDate] = useState(() => new Date());
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
+  const [currentOrganizationId, setCurrentOrganizationId] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
   const [loggedInStaffName, setLoggedInStaffName] = useState("Staff Member");
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [headerWeather, setHeaderWeather] = useState<HeaderWeatherState | null>(null);
+  const [headerWeatherLoading, setHeaderWeatherLoading] = useState(true);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   const staffSystemReady =
       staffTablesReady.staffMembers && staffTablesReady.rolePermissions;
@@ -4177,13 +4261,26 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
       [customerLeads]
   );
 
+  const defaultRotationWeeks = appSettings.defaultRotationWeeks;
+  const activeRotationWeeks = useMemo(
+      () => getActiveRotationWeeks(customers, defaultRotationWeeks),
+      [customers, defaultRotationWeeks]
+  );
+  const activeWeekOptions = useMemo(
+      () => getWeekOptions(activeRotationWeeks),
+      [activeRotationWeeks]
+  );
+  const selectedCycleLabel = getRotationCycleLabel(
+      selectedWeek,
+      activeRotationWeeks
+  );
   const baseRoundKey = getBaseRoundKey(selectedWeek, selectedDay);
   const activeRoundCycle = getActiveRoundCycle(activeRoundCycles, baseRoundKey);
   const roundKey = getRoundKeyForCycle(baseRoundKey, activeRoundCycle);
   const isLocked = !!lockedRounds[roundKey];
   const todayPanel = useMemo(
-      () => getTodayPanelState(todayReferenceDate),
-      [todayReferenceDate]
+      () => getTodayPanelState(todayReferenceDate, activeRotationWeeks),
+      [activeRotationWeeks, todayReferenceDate]
   );
   const todayRoundKey = todayPanel.selectedDay
       ? getActiveRoundKey(
@@ -4197,6 +4294,12 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
       : false;
 
   useEffect(() => {
+    if (!activeWeekOptions.includes(selectedWeek)) {
+      setSelectedWeek(activeWeekOptions[0] ?? "Week 1");
+    }
+  }, [activeWeekOptions, selectedWeek]);
+
+  useEffect(() => {
     setAppSettings(loadAppSettings());
   }, []);
 
@@ -4207,9 +4310,96 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
   }, [appSettings.primaryColor, appSettings.secondaryColor]);
 
   useEffect(() => {
+    const abortController = new AbortController();
+
+    async function loadHeaderWeather() {
+      setHeaderWeatherLoading(true);
+
+      try {
+        const params = new URLSearchParams({
+          latitude: String(HEADER_WEATHER_FALLBACK_COORDINATES.latitude),
+          longitude: String(HEADER_WEATHER_FALLBACK_COORDINATES.longitude),
+          current: "temperature_2m,weather_code",
+          daily: "precipitation_probability_max",
+          forecast_days: "1",
+          timezone: "auto",
+        });
+        const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`, {
+          signal: abortController.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error("Unable to load weather");
+        }
+
+        const data = (await response.json()) as {
+          current?: {
+            temperature_2m?: number;
+            weather_code?: number;
+          };
+          daily?: {
+            precipitation_probability_max?: Array<number | null>;
+          };
+        };
+        const temperature =
+            typeof data.current?.temperature_2m === "number"
+                ? data.current.temperature_2m
+                : null;
+        const weatherCode =
+            typeof data.current?.weather_code === "number"
+                ? data.current.weather_code
+                : null;
+        const rainChanceValue = data.daily?.precipitation_probability_max?.[0];
+        const rainChance =
+            typeof rainChanceValue === "number" ? rainChanceValue : null;
+
+        if (!abortController.signal.aborted) {
+          setHeaderWeather({
+            temperature,
+            rainChance,
+            label: getCompactWeatherLabel(weatherCode),
+          });
+        }
+      } catch {
+        if (!abortController.signal.aborted) {
+          setHeaderWeather(null);
+        }
+      } finally {
+        if (!abortController.signal.aborted) {
+          setHeaderWeatherLoading(false);
+        }
+      }
+    }
+
+    loadHeaderWeather();
+
+    return () => {
+      abortController.abort();
+    };
+  }, []);
+
+  useEffect(() => {
     const activeSectionTitle = getNavSectionTitle(page);
     setExpandedNavSections(getExpandedNavSections(activeSectionTitle));
   }, [page]);
+
+  useEffect(() => {
+    if (!isUserMenuOpen) {
+      return;
+    }
+
+    function handleOutsideClick(event: MouseEvent) {
+      if (!userMenuRef.current?.contains(event.target as Node)) {
+        setIsUserMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleOutsideClick);
+
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+    };
+  }, [isUserMenuOpen]);
 
   useEffect(() => {
     if (hasPageAccess(page) || !firstAccessiblePage) {
@@ -4289,6 +4479,39 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
 
     try {
       await syncQuoteItemsTable(merged.quoteServices);
+      if (currentOrganizationId) {
+        const supabase = createSupabaseClient();
+        const { error } = await supabase
+            .from("organizations")
+            .update({
+              default_rotation_weeks: merged.defaultRotationWeeks,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", currentOrganizationId);
+
+        if (error) {
+          throw error;
+        }
+      }
+
+      const customersNeedingRotationClamp = customers
+          .filter((customer) => customer.rotationWeeksOverride == null)
+          .map((customer) => ({
+            customer,
+            week: normalizeWeekNumber(customer.week, merged.defaultRotationWeeks),
+          }))
+          .filter(({ customer, week }) => week !== customer.week);
+
+      for (const { customer, week } of customersNeedingRotationClamp) {
+        await saveCustomer({
+          ...customer,
+          week,
+          cutFrequency: getCutFrequencyFromRotationWeeks(
+              merged.defaultRotationWeeks
+          ),
+        });
+      }
+
       setDatabaseError(
           getDatabaseSetupNotice(workflowTablesReady, staffTablesReady)
       );
@@ -4299,7 +4522,13 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
 
       throw error;
     }
-  }, [staffTablesReady, syncQuoteItemsTable, workflowTablesReady]);
+  }, [
+    currentOrganizationId,
+    customers,
+    staffTablesReady,
+    syncQuoteItemsTable,
+    workflowTablesReady,
+  ]);
 
   const buildPersistedAppState = useCallback(
       (overrides: Partial<PersistedAppState> = {}): PersistedAppState => ({
@@ -4470,6 +4699,24 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
         setCurrentUserEmail(user.email ?? null);
         setLoggedInStaffName(getLoggedInStaffName(user));
 
+        const { data: membership, error: membershipError } = await supabase
+            .from("organization_members")
+            .select("organization_id")
+            .eq("user_id", user.id)
+            .eq("status", "active")
+            .limit(1)
+            .maybeSingle();
+
+        if (membershipError) {
+          throw membershipError;
+        }
+
+        const organizationId =
+            typeof membership?.organization_id === "string"
+                ? membership.organization_id
+                : null;
+        setCurrentOrganizationId(organizationId);
+
         const [
           customersResult,
           visitsResult,
@@ -4484,6 +4731,7 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
           appStateResult,
           staffMembersResult,
           rolePermissionsResult,
+          organizationResult,
         ] = await Promise.all([
           supabase
               .from("customers")
@@ -4542,6 +4790,13 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
               .select(ROLE_PERMISSION_SELECT_FIELDS)
               .order("role", { ascending: true })
               .order("page_key", { ascending: true }),
+          organizationId
+              ? supabase
+                    .from("organizations")
+                    .select("default_rotation_weeks")
+                    .eq("id", organizationId)
+                    .maybeSingle()
+              : Promise.resolve({ data: null, error: null }),
         ]);
 
         if (customersResult.error) {
@@ -4632,6 +4887,13 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
             isRecord(rawAppState) &&
             Object.prototype.hasOwnProperty.call(rawAppState, "appSettings");
         const localAppSettings = loadAppSettings();
+        const organizationDefaultRotationWeeks =
+            organizationResult.error || !isRecord(organizationResult.data)
+                ? undefined
+                : normalizeRotationWeeks(
+                    organizationResult.data.default_rotation_weeks,
+                    DEFAULT_ROTATION_WEEKS
+                  );
         let workflowSeedWarning: string | null = null;
         let nextWorkflowTablesReady: WorkflowTablesReady = {
           monthlyPayments: !monthlyPaymentsResult.error,
@@ -4954,6 +5216,11 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
         const resolvedAppSettings = mergeAppSettings({
           ...(hasPersistedAppSettings ? nextState.appSettings : localAppSettings),
           quoteServices: nextQuoteServices,
+          defaultRotationWeeks:
+              organizationDefaultRotationWeeks ??
+              (hasPersistedAppSettings
+                  ? nextState.appSettings.defaultRotationWeeks
+                  : localAppSettings.defaultRotationWeeks),
         });
         setAppSettings(resolvedAppSettings);
         if (typeof window !== "undefined") {
@@ -5347,7 +5614,8 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
       isGrassCuttingCustomer: draft.isGrassCuttingCustomer,
       week: selectedWeek,
       day: normaliseDayName(appSettings.defaultVisitDay),
-      cutFrequency: "Fortnightly",
+      cutFrequency: getCutFrequencyFromRotationWeeks(defaultRotationWeeks),
+      rotationWeeksOverride: null,
       grassCutAmount:
           draft.isGrassCuttingCustomer && draft.customerType === "Residential"
               ? appSettings.defaultGrassCutPrice
@@ -8274,7 +8542,11 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
             (existingCustomer) =>
                 existingCustomer.id !== customer.id &&
                 existingCustomer.isGrassCuttingCustomer &&
-                existingCustomer.week === customerWeek &&
+                isCustomerDueInSelectedWeek(
+                    existingCustomer,
+                    customerWeek,
+                    defaultRotationWeeks
+                ) &&
                 existingCustomer.day === customerDay
         )
         .map((existingCustomer) =>
@@ -8300,7 +8572,10 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
     customer.routeOrder = getNextRouteOrderForCustomer({
       id: typeof customer.id === "number" ? customer.id : -1,
       isGrassCuttingCustomer: true,
-      week: normaliseWeekName(customer.week),
+      week: normalizeWeekNumber(
+          customer.week as WeekName | string | number | null | undefined,
+          getEffectiveRotationWeeks(customer as Partial<Customer> as Customer, defaultRotationWeeks)
+      ),
       day: normaliseDayName(customer.day),
     });
   }
@@ -8315,6 +8590,16 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
     if (!nextCustomer.day || typeof nextCustomer.day !== "string") {
       nextCustomer.day = appSettings.defaultVisitDay;
     }
+
+    const effectiveRotationWeeks = getEffectiveRotationWeeks(
+        nextCustomer as Partial<Customer> as Customer,
+        defaultRotationWeeks
+    );
+    nextCustomer.week = normalizeWeekNumber(
+        nextCustomer.week as WeekName | string | number | null | undefined,
+        effectiveRotationWeeks
+    );
+    nextCustomer.cutFrequency = getCutFrequencyFromRotationWeeks(effectiveRotationWeeks);
 
     if (
         nextCustomer.isGrassCuttingCustomer !== false &&
@@ -8355,6 +8640,16 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
     if (!nextCustomer.day || typeof nextCustomer.day !== "string") {
       nextCustomer.day = appSettings.defaultVisitDay;
     }
+
+    const effectiveRotationWeeks = getEffectiveRotationWeeks(
+        nextCustomer as Partial<Customer> as Customer,
+        defaultRotationWeeks
+    );
+    nextCustomer.week = normalizeWeekNumber(
+        nextCustomer.week as WeekName | string | number | null | undefined,
+        effectiveRotationWeeks
+    );
+    nextCustomer.cutFrequency = getCutFrequencyFromRotationWeeks(effectiveRotationWeeks);
 
     ensureCustomerRouteOrder(nextCustomer);
 
@@ -8407,9 +8702,14 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
 
     const nowIso = new Date().toISOString();
     const isPaid = Boolean(normalizedPaymentDate);
+    const cutDateForWeek = new Date(`${normalizedCutDate}T12:00:00`);
+    const visitWeek = getCycleWeek(
+        Number.isNaN(cutDateForWeek.getTime()) ? new Date() : cutDateForWeek,
+        getEffectiveRotationWeeks(customer, defaultRotationWeeks)
+    );
     const visitRoundCycle = getActiveRoundCycle(
         activeRoundCycles,
-        getBaseRoundKey(customer.week, customer.day)
+        getBaseRoundKey(visitWeek, customer.day)
     );
 
     await persistVisit({
@@ -8422,12 +8722,12 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
       paid: isPaid,
       paidAt: isPaid ? toStoredDateTime(normalizedPaymentDate) : null,
       roundKey: getVisitRoundKey(
-          customer.week,
+          visitWeek,
           customer.day,
           customer.customerType,
           visitRoundCycle
       ),
-      week: customer.week,
+      week: visitWeek,
       day: customer.day,
       customerType: customer.customerType,
       priceAtVisit: Number(customer.grassCutAmount ?? 0),
@@ -8665,7 +8965,7 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
 
   function startNewSelectedRound() {
     const shouldStart = window.confirm(
-        `Start a fresh ${selectedWeek} ${selectedDay} grass cutting round? The locked round will stay in History and Payments, and this screen will reset for the next cycle.`
+        `Start a fresh ${selectedCycleLabel} ${selectedDay} service work round? The locked round will stay in History and Payments, and this screen will reset for the next cycle.`
     );
 
     if (!shouldStart) {
@@ -8718,6 +9018,8 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
   }
 
   function navigateToPage(nextPage: PageKey) {
+    setIsUserMenuOpen(false);
+
     if (!hasPageAccess(nextPage)) {
       if (firstAccessiblePage) {
         setExpandedNavSections(
@@ -8768,6 +9070,32 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
     );
   }
 
+  const staffInitials = getPersonInitials(loggedInStaffName);
+  const staffFirstName = getFirstName(loggedInStaffName);
+  const staffRoleLabel =
+      currentStaffMember?.role ?? (currentUserIsAdmin ? "Administrator" : "Team member");
+  const pageDisplayLabel = getPageDisplayLabel(page);
+  const headerTitle =
+      page === "dashboard" ? `Welcome back, ${staffFirstName}` : pageDisplayLabel;
+  const headerSubtitle =
+      page === "dashboard"
+          ? "Here's what's happening with your business today."
+          : `${todayPanel.week} - ${todayPanel.dayLabel}`;
+  const notificationCount = dashboardAttentionItems.length + newLeadsCount;
+  const weatherTemperatureLabel =
+      headerWeather?.temperature !== null && headerWeather?.temperature !== undefined
+          ? `${Math.round(headerWeather.temperature)}C`
+          : "Weather";
+  const weatherDetailLabel = headerWeather
+      ? `${headerWeather.label}${
+          headerWeather.rainChance !== null && headerWeather.rainChance !== undefined
+              ? ` - ${Math.round(headerWeather.rainChance)}% rain`
+              : ""
+      }`
+      : headerWeatherLoading
+          ? "Loading"
+          : "Unavailable";
+
   if (isHydrating) {
     return (
         <div className="flex min-h-screen items-center justify-center bg-[#edf1f2] p-6">
@@ -8787,117 +9115,102 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
   }
 
   return (
-      <div className="min-h-screen" style={{ background: getBrandPageBackground(appSettings) }}>
+      <div className="min-h-screen bg-[#f7faf9] text-[#071426]">
         <div className="flex min-h-screen">
-          <aside className="flex w-[248px] flex-col px-4 py-5 text-white lg:w-[260px]" style={{ background: getSidebarBackground(appSettings) }}>
-            <div className="mb-5">
-              {appSettings.logoUrl ? (
-                  <img
-                      src={appSettings.logoUrl}
-                      alt={appSettings.businessName || "Business logo"}
-                      className="h-auto max-h-16 w-auto max-w-full object-contain"
-                  />
-              ) : (
-                  <div className="px-1">
-                    <p className="text-xl font-black tracking-tight text-white">
-                      {appSettings.businessName || "Your Business"}
-                    </p>
-                    {(appSettings.businessEmail || appSettings.businessPhone) && (
-                        <p className="mt-1 text-xs text-white/60">
-                          {appSettings.businessEmail || appSettings.businessPhone}
-                        </p>
-                    )}
-                  </div>
-              )}
+          <aside className="hidden w-[280px] shrink-0 flex-col bg-[#003c35] px-4 py-6 text-white shadow-[20px_0_60px_rgba(0,60,53,0.18)] lg:flex">
+            <div className="px-2">
+              <img
+                  src="/roundhq-logo-long-white.png"
+                  alt="RoundHQ"
+                  className="h-auto max-h-12 w-[178px] object-contain"
+              />
             </div>
 
-            <nav className="space-y-5">
-              {accessibleNavSections.map((section) => (
-                  <div key={section.title} className="space-y-2">
-                    {(() => {
-                      const sectionIsActive = getNavSectionTitle(page) === section.title;
-                      const sectionIsExpanded =
-                          expandedNavSections[section.title] ?? sectionIsActive;
-                      const SectionChevron = sectionIsExpanded ? ChevronDown : ChevronRight;
+            <nav className="mt-8 flex-1 space-y-3 overflow-y-auto pr-1">
+              {accessibleNavSections.map((section) => {
+                const activeSection = getNavSectionTitle(page) === section.title;
+                const sectionIsExpanded =
+                    expandedNavSections[section.title] ?? activeSection;
+                const SectionChevron = sectionIsExpanded ? ChevronDown : ChevronRight;
+                const SectionIcon = section.items[0]?.icon ?? LayoutDashboard;
+                const sectionBadgeCount =
+                    section.items.some((item) => item.key === "leads") ? newLeadsCount : 0;
 
-                      return (
-                          <>
-                            <button
-                                type="button"
-                                onClick={() => toggleNavSection(section.title)}
-                                className={`group flex w-full items-center justify-between rounded-xl px-3 py-2 text-left transition ${
-                                    sectionIsActive
-                                        ? "bg-white/8 text-white"
-                                        : "text-white/75 hover:bg-white/5 hover:text-white"
-                                }`}
-                            >
-                              <span className="flex min-w-0 items-center gap-2">
-                                <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-inherit">
-                                  {section.title}
-                                </span>
-                                {section.title === "Dashboard" && newLeadsCount > 0 ? (
-                                    <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-black leading-none text-white shadow-sm">
-                                      {newLeadsCount}
+                return (
+                    <div key={section.title} className="space-y-1.5">
+                      <button
+                          type="button"
+                          onClick={() => toggleNavSection(section.title)}
+                          aria-expanded={sectionIsExpanded}
+                          className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm transition ${
+                              activeSection
+                                  ? "bg-[#20c766]/15 text-white shadow-[inset_0_0_0_1px_rgba(32,199,102,0.2)]"
+                                  : "text-white/72 hover:bg-white/[0.07] hover:text-white"
+                          }`}
+                      >
+                        <span
+                            className={`flex h-9 w-9 items-center justify-center rounded-xl transition ${
+                                activeSection
+                                    ? "bg-[#20c766] text-[#003c35]"
+                                    : "bg-white/[0.07] text-white/70 group-hover:bg-white/[0.12] group-hover:text-white"
+                            }`}
+                        >
+                          <SectionIcon size={18} />
+                        </span>
+                        <span className="min-w-0 flex-1 font-bold">{section.title}</span>
+                        {sectionBadgeCount > 0 ? (
+                            <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-black leading-none text-white shadow-sm">
+                              {sectionBadgeCount}
+                            </span>
+                        ) : null}
+                        <SectionChevron
+                            size={16}
+                            className={`shrink-0 transition ${
+                                sectionIsExpanded ? "rotate-0 text-white" : "text-white/50"
+                            }`}
+                        />
+                      </button>
+
+                      {sectionIsExpanded ? (
+                          <div className="space-y-1 pl-3">
+                            {section.items.map(({ key, label, icon: Icon }) => {
+                              const active = page === key;
+                              const itemBadgeCount = key === "leads" ? newLeadsCount : 0;
+
+                              return (
+                                  <button
+                                      key={key}
+                                      type="button"
+                                      onClick={() => handleSidebarNavigation(key)}
+                                      className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] transition ${
+                                          active
+                                              ? "bg-white/[0.09] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]"
+                                              : "text-white/62 hover:bg-white/[0.06] hover:text-white"
+                                      }`}
+                                  >
+                                    <span
+                                        className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${
+                                            active
+                                                ? "bg-[#20c766]/18 text-[#20c766]"
+                                                : "bg-white/[0.05] text-white/60 group-hover:text-white"
+                                        }`}
+                                    >
+                                      <Icon size={16} />
                                     </span>
-                                ) : null}
-                              </span>
-                              <SectionChevron
-                                  size={16}
-                                  className={`transition ${sectionIsActive ? "text-white" : "text-white/55 group-hover:text-white/80"}`}
-                              />
-                            </button>
-
-                            {sectionIsExpanded ? (
-                                <div className="space-y-1.5 pl-2">
-                                  {section.items.map(({ key, label, icon: Icon }) => {
-                                    const active = page === key;
-                                    const itemBadgeCount =
-                                        key === "leads" ? newLeadsCount : 0;
-
-                                    return (
-                                        <button
-                                            key={key}
-                                            onClick={() => handleSidebarNavigation(key)}
-                                            className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] transition-all ${
-                                                active
-                                                    ? "text-white shadow-[0_8px_24px_rgba(0,0,0,0.18)] ring-1 ring-white/10"
-                                                    : "text-white/70 hover:bg-white/5 hover:text-white"
-                                            }`}
-                                            style={active ? { background: getActiveNavBackground(appSettings) } : undefined}
-                                        >
-                                      <span
-                                          className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${
-                                              active
-                                                  ? "bg-white/10 text-white"
-                                                  : "bg-white/[0.04] text-white/65 group-hover:bg-white/10 group-hover:text-white"
-                                          }`}
-                                      >
-                                        <Icon size={18} />
-                                      </span>
-
-                                          <span className="font-medium">{label}</span>
-
-                                          <span className="ml-auto flex items-center gap-2">
-                                            {itemBadgeCount > 0 ? (
-                                                <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-black leading-none text-white shadow-sm">
-                                                  {itemBadgeCount}
-                                                </span>
-                                            ) : null}
-
-                                            {active && (
-                                                <span className="h-2.5 w-2.5 rounded-full shadow-[0_0_12px_rgba(255,255,255,0.45)]" style={{ background: appSettings.primaryColor }} />
-                                            )}
-                                          </span>
-                                        </button>
-                                    );
-                                  })}
-                                </div>
-                            ) : null}
-                          </>
-                      );
-                    })()}
-                  </div>
-              ))}
+                                    <span className="min-w-0 flex-1 font-semibold">{label}</span>
+                                    {itemBadgeCount > 0 ? (
+                                        <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-black leading-none text-white shadow-sm">
+                                          {itemBadgeCount}
+                                        </span>
+                                    ) : null}
+                                  </button>
+                              );
+                            })}
+                          </div>
+                      ) : null}
+                    </div>
+                );
+              })}
 
               {accessibleNavSections.length === 0 ? (
                   <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-3 text-sm text-white/65">
@@ -8908,89 +9221,216 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
 
           </aside>
 
-          <main className="flex-1 p-4 lg:p-5">
-            <div className="h-full rounded-[28px] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] lg:p-5" style={{ background: getBrandSurface(appSettings) }}>
-              <section className="mb-5 rounded-3xl border border-slate-200/80 bg-white px-4 py-3.5 shadow-sm">
-                <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-                  <div className="flex min-w-0 flex-wrap items-center gap-2.5">
-                    <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
-                      Today
-                    </span>
-
-                    <span className="rounded-full bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-900">
-                      {todayPanel.week} - {todayPanel.dayLabel}
-                    </span>
-
-                    <span
-                      className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
-                        todayPanel.selectedDay
-                          ? isTodayLocked
-                            ? "bg-rose-100 text-rose-700"
-                            : "bg-emerald-100 text-emerald-700"
-                          : "bg-slate-100 text-slate-600"
-                      }`}
-                    >
-                      {todayPanel.selectedDay
-                        ? isTodayLocked
-                          ? "Round is locked"
-                          : "Round is active"
-                        : "No round scheduled today"}
-                    </span>
-
-                    <select
-                      value={selectedWeek}
-                      onChange={(e) => setSelectedWeek(e.target.value as WeekName)}
-                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 outline-none transition hover:bg-slate-50"
-                    >
-                      {WEEK_OPTIONS.map((week) => (
-                        <option key={week} value={week}>
-                          {week}
-                        </option>
-                      ))}
-                    </select>
-
-                    <select
-                      value={selectedDay}
-                      onChange={(e) => setSelectedDay(e.target.value as DayName)}
-                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 outline-none transition hover:bg-slate-50"
-                    >
-                      {DAY_OPTIONS.map((day) => (
-                        <option key={day} value={day}>
-                          {day}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-start gap-2.5 xl:justify-end">
-                    <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
-                      Logged In As
-                    </span>
-
-                    <span className="rounded-full bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-900">
-                      {loggedInStaffName}
-                    </span>
-
-                    <a
-                      href="/billing"
-                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-                    >
-                      <CreditCard size={14} />
-                      Billing
-                    </a>
-
-                    <button
-                      type="button"
-                      onClick={handleLogout}
-                      disabled={isLoggingOut}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <LogOut size={14} />
-                      {isLoggingOut ? "Signing out..." : "Logout"}
-                    </button>
+          <main className="min-w-0 flex-1 bg-[#f7faf9]">
+            <div className="mx-auto flex min-h-screen w-full max-w-[1680px] flex-col px-4 py-5 sm:px-6 lg:px-8">
+              <div className="mb-5 rounded-2xl bg-[#003c35] px-4 py-4 text-white shadow-[0_18px_45px_rgba(0,60,53,0.18)] lg:hidden">
+                <div className="flex items-center justify-between gap-4">
+                  <img
+                      src="/roundhq-logo-long-white.png"
+                      alt="RoundHQ"
+                      className="h-auto max-h-10 w-[150px] object-contain"
+                  />
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#20c766] text-sm font-black">
+                    {staffInitials}
                   </div>
                 </div>
-              </section>
+                <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+                  {accessibleNavSections.flatMap((section) =>
+                      section.items.map(({ key, label, icon: Icon }) => {
+                        const active = page === key;
+                        return (
+                            <button
+                                key={key}
+                                type="button"
+                                onClick={() => handleSidebarNavigation(key)}
+                                className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold ${
+                                    active
+                                        ? "bg-[#20c766] text-[#003c35]"
+                                        : "bg-white/[0.08] text-white/75"
+                                }`}
+                            >
+                              <Icon size={16} />
+                              {label}
+                            </button>
+                        );
+                      })
+                  )}
+                </div>
+              </div>
+
+              <header className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                <div>
+                  <h1 className="text-3xl font-black tracking-tight text-[#071426]">
+                    {headerTitle}
+                  </h1>
+                  <p className="mt-1 text-sm font-medium text-[#667085]">
+                    {headerSubtitle}
+                  </p>
+                  {page !== "dashboard" ? (
+                      <div className="mt-4 flex flex-wrap items-center gap-2">
+                        <span
+                            className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                                todayPanel.selectedDay
+                                    ? isTodayLocked
+                                        ? "bg-rose-100 text-rose-700"
+                                        : "bg-emerald-100 text-emerald-700"
+                                    : "bg-slate-100 text-slate-600"
+                            }`}
+                        >
+                          {todayPanel.selectedDay
+                              ? isTodayLocked
+                                  ? "Round is locked"
+                                  : "Round is active"
+                              : "No round scheduled today"}
+                        </span>
+                        <select
+                            value={selectedWeek}
+                            onChange={(e) => setSelectedWeek(e.target.value as WeekName)}
+                            className="rounded-xl border border-[#e5e7eb] bg-white px-3 py-2 text-xs font-semibold text-[#071426] outline-none transition hover:bg-[#f7faf9]"
+                        >
+                          {activeWeekOptions.map((week) => (
+                              <option key={week} value={week}>
+                                {getRotationCycleLabel(week, activeRotationWeeks)}
+                              </option>
+                          ))}
+                        </select>
+                        <select
+                            value={selectedDay}
+                            onChange={(e) => setSelectedDay(e.target.value as DayName)}
+                            className="rounded-xl border border-[#e5e7eb] bg-white px-3 py-2 text-xs font-semibold text-[#071426] outline-none transition hover:bg-[#f7faf9]"
+                        >
+                          {DAY_OPTIONS.map((day) => (
+                              <option key={day} value={day}>
+                                {day}
+                              </option>
+                          ))}
+                        </select>
+                      </div>
+                  ) : null}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div
+                      className="hidden h-11 items-center gap-2 rounded-full border border-[#d7efe5] bg-white px-3 text-[#071426] shadow-[0_10px_24px_rgba(7,20,38,0.05)] sm:flex"
+                      title={`Weather overview for ${HEADER_WEATHER_LOCATION_LABEL}`}
+                      aria-label={`Weather overview for ${HEADER_WEATHER_LOCATION_LABEL}`}
+                  >
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
+                      <CloudSun size={17} />
+                    </span>
+                    <span className="leading-none">
+                      <span className="block text-xs font-black text-[#071426]">
+                        {weatherTemperatureLabel}
+                      </span>
+                      <span className="mt-1 block text-[11px] font-semibold text-[#667085]">
+                        {weatherDetailLabel}
+                      </span>
+                    </span>
+                  </div>
+                  <button
+                      type="button"
+                      aria-label="Notifications"
+                      title="Notifications"
+                      onClick={() => navigateToPage(newLeadsCount > 0 ? "leads" : "actions")}
+                      className="relative flex h-11 w-11 items-center justify-center rounded-full border border-[#e5e7eb] bg-white text-[#071426] shadow-[0_10px_24px_rgba(7,20,38,0.05)] transition hover:-translate-y-0.5 hover:text-emerald-700"
+                  >
+                    <Bell size={19} />
+                    {notificationCount > 0 ? (
+                        <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-[#20c766] ring-2 ring-white" />
+                    ) : null}
+                  </button>
+                  <div ref={userMenuRef} className="relative">
+                    <button
+                        type="button"
+                        onClick={() => setIsUserMenuOpen((open) => !open)}
+                        aria-haspopup="menu"
+                        aria-expanded={isUserMenuOpen}
+                        className="flex items-center gap-3 rounded-full border border-[#e5e7eb] bg-white py-1.5 pl-1.5 pr-4 shadow-[0_10px_24px_rgba(7,20,38,0.05)] transition hover:-translate-y-0.5 hover:border-emerald-200"
+                    >
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#20c766] text-sm font-black text-white">
+                        {staffInitials}
+                      </div>
+                      <div className="hidden min-w-0 text-left sm:block">
+                        <p className="truncate text-sm font-bold text-[#071426]">
+                          {loggedInStaffName}
+                        </p>
+                        <p className="truncate text-xs font-medium text-[#667085]">
+                          {staffRoleLabel}
+                        </p>
+                      </div>
+                      <ChevronDown
+                          size={16}
+                          className={`hidden text-[#667085] transition sm:block ${
+                              isUserMenuOpen ? "rotate-180" : ""
+                          }`}
+                      />
+                    </button>
+
+                    {isUserMenuOpen ? (
+                        <div
+                            role="menu"
+                            className="absolute right-0 z-50 mt-2 w-64 overflow-hidden rounded-2xl border border-[#e5e7eb] bg-white p-2 shadow-[0_22px_55px_rgba(7,20,38,0.14)]"
+                        >
+                          <a
+                              href="/support"
+                              role="menuitem"
+                              onClick={() => setIsUserMenuOpen(false)}
+                              className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-[#071426] transition hover:bg-[#f7faf9] hover:text-emerald-700"
+                          >
+                            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+                              <HelpCircle size={17} />
+                            </span>
+                            <span>
+                              <span className="block">Help and support</span>
+                              <span className="text-xs font-medium text-[#667085]">
+                                View guides and raise tickets
+                              </span>
+                            </span>
+                          </a>
+                          <a
+                              href="/billing"
+                              role="menuitem"
+                              onClick={() => setIsUserMenuOpen(false)}
+                              className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-[#071426] transition hover:bg-[#f7faf9] hover:text-emerald-700"
+                          >
+                            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+                              <CreditCard size={17} />
+                            </span>
+                            <span>
+                              <span className="block">Billing</span>
+                              <span className="text-xs font-medium text-[#667085]">
+                                Manage plan and invoices
+                              </span>
+                            </span>
+                          </a>
+                          <div className="my-2 border-t border-[#e5e7eb]" />
+                          <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                setIsUserMenuOpen(false);
+                                void handleLogout();
+                              }}
+                              disabled={isLoggingOut}
+                              className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-[#071426] transition hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-50 text-rose-600">
+                              <LogOut size={17} />
+                            </span>
+                            <span>
+                              <span className="block">
+                                {isLoggingOut ? "Signing out..." : "Log out"}
+                              </span>
+                              <span className="text-xs font-medium text-[#667085]">
+                                End this session
+                              </span>
+                            </span>
+                          </button>
+                        </div>
+                    ) : null}
+                  </div>
+                </div>
+              </header>
 
               {databaseError && (
                   <section className="mb-5 rounded-3xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm">
@@ -9011,9 +9451,9 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                             onChange={(e) => setSelectedWeek(e.target.value as WeekName)}
                             className="rounded-xl border px-3 py-2"
                         >
-                          {WEEK_OPTIONS.map((week) => (
+                          {activeWeekOptions.map((week) => (
                               <option key={week} value={week}>
-                                {week}
+                                {getRotationCycleLabel(week, activeRotationWeeks)}
                               </option>
                           ))}
                         </select>
@@ -9065,6 +9505,8 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                       roundCycle={activeRoundCycle}
                       selectedWeek={selectedWeek}
                       selectedDay={selectedDay}
+                      defaultRotationWeeks={defaultRotationWeeks}
+                      activeRotationWeeks={activeRotationWeeks}
                       isLocked={isLocked}
                       showWeatherWidget={appSettings.showWeatherWidget}
                       showRevenueWidget={appSettings.showRevenueWidget}
@@ -9081,6 +9523,10 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                       onGoToSchedule={() => navigateToPage("schedule")}
                       onGoToPayments={() => navigateToPage("payments")}
                       onGoToCustomerProfit={() => navigateToPage("customerProfit")}
+                      weekOptions={activeWeekOptions}
+                      dayOptions={DAY_OPTIONS}
+                      onWeekChange={(week) => setSelectedWeek(week as WeekName)}
+                      onDayChange={(day) => setSelectedDay(day as DayName)}
                       onOpenCustomer={openCustomerProfile}
                       onOpenQuote={openEditQuoteForm}
                       onOpenInvoice={openEditInvoiceForm}
@@ -9095,6 +9541,8 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                       customers={customers as any}
                       grassCutSeasonStart={appSettings.grassCutSeasonStart}
                       grassCutSeasonEnd={appSettings.grassCutSeasonEnd}
+                      defaultRotationWeeks={defaultRotationWeeks}
+                      activeRotationWeeks={activeRotationWeeks}
                       onAddJob={addScheduledJob as any}
                       pendingQuoteSchedule={pendingQuoteSchedule}
                       onScheduleQuote={scheduleQuoteFromCalendar}
@@ -9144,6 +9592,8 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                       visits={visitLogs as any}
                       selectedWeek={selectedWeek}
                       selectedDay={selectedDay}
+                      defaultRotationWeeks={defaultRotationWeeks}
+                      activeRotationWeeks={activeRotationWeeks}
                       isLocked={isLocked}
                       onMarkVisit={markVisit as any}
                       onSetPaidStatus={setVisitPaidStatus}
@@ -9159,6 +9609,8 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                       customers={customers}
                       selectedWeek={selectedWeek}
                       selectedDay={selectedDay}
+                      defaultRotationWeeks={defaultRotationWeeks}
+                      weekOptions={activeWeekOptions}
                       ignoredMoveSuggestionIds={ignoredMoveSuggestionIds}
                       routeChangeHistory={routeChangeHistory}
                       routeNotes={routeNotes}
@@ -9180,6 +9632,7 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                       monthlyPayments={monthlyPayments}
                       grassCutSeasonStart={appSettings.grassCutSeasonStart}
                       grassCutSeasonEnd={appSettings.grassCutSeasonEnd}
+                      defaultRotationWeeks={defaultRotationWeeks}
                       onAdd={addCustomer as any}
                       onUpdate={updateCustomer as any}
                       onDelete={deleteCustomer}
@@ -9194,6 +9647,7 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                       monthlyPayments={monthlyPayments}
                       grassCutSeasonStart={appSettings.grassCutSeasonStart}
                       grassCutSeasonEnd={appSettings.grassCutSeasonEnd}
+                      defaultRotationWeeks={defaultRotationWeeks}
                       onOpenCustomer={openCustomerProfile}
                   />
               )}
@@ -9203,6 +9657,9 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                       customers={customers}
                       visits={visitLogs}
                       monthlyPayments={monthlyPayments}
+                      defaultRotationWeeks={defaultRotationWeeks}
+                      activeRotationWeeks={activeRotationWeeks}
+                      weekOptions={activeWeekOptions}
                       grassCutSeasonStart={appSettings.grassCutSeasonStart}
                       grassCutSeasonEnd={appSettings.grassCutSeasonEnd}
                       monthlyPaymentsReady={workflowTablesReady.monthlyPayments}
@@ -9223,11 +9680,43 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                       commercialRamsDocuments={commercialRamsDocuments.filter(
                           (document) => document.customerId === selectedCustomer.id
                       )}
+                      invoices={invoices as any}
+                      invoiceHistory={invoiceHistory}
+                      businessDetails={{
+                        businessName: appSettings.businessName,
+                        tradingName: appSettings.tradingName,
+                        businessEmail: appSettings.businessEmail,
+                        businessPhone: appSettings.businessPhone,
+                        website: appSettings.website,
+                        addressLine1: appSettings.addressLine1,
+                        addressLine2: appSettings.addressLine2,
+                        townCity: appSettings.townCity,
+                        county: appSettings.county,
+                        postcode: appSettings.postcode,
+                        termsAndConditionsUrl: appSettings.termsAndConditionsUrl,
+                        defaultInvoiceTerms: appSettings.defaultInvoiceTerms,
+                        bankAccountName: appSettings.bankAccountName,
+                        bankSortCode: appSettings.bankSortCode,
+                        bankAccountNumber: appSettings.bankAccountNumber,
+                        bankPaymentReference: appSettings.bankPaymentReference,
+                        logoUrl: appSettings.logoUrl || "/logo.png",
+                        primaryColor: appSettings.primaryColor,
+                        secondaryColor: appSettings.secondaryColor,
+                        emailFromName: appSettings.emailFromName,
+                        emailFromAddress: appSettings.emailFromAddress,
+                        emailReplyTo: appSettings.emailReplyTo,
+                        smtpHost: appSettings.smtpHost,
+                        smtpPort: appSettings.smtpPort,
+                        smtpSecure: appSettings.smtpSecure,
+                        smtpUsername: appSettings.smtpUsername,
+                        smtpPassword: appSettings.smtpPassword,
+                      }}
                       lastVisit={selectedCustomerLastVisit}
                       totalSpent={selectedCustomerTotalSpent}
                       outstanding={selectedCustomerOutstanding}
                       grassCutSeasonStart={appSettings.grassCutSeasonStart}
                       grassCutSeasonEnd={appSettings.grassCutSeasonEnd}
+                      defaultRotationWeeks={defaultRotationWeeks}
                       onBack={goBackToCustomers}
                       onOpenPayments={() => navigateToPage("payments")}
                       onTogglePaid={togglePaid}
@@ -9236,6 +9725,8 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                       onCreateInvoice={(customerId: number) =>
                           openNewInvoiceForm(customerId)
                       }
+                      onOpenInvoice={openEditInvoiceForm}
+                      onMarkInvoiceSent={markInvoiceSent}
                   />
               )}
 
@@ -9279,6 +9770,8 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                       visits={visitLogs as any}
                       selectedWeek={selectedWeek}
                       selectedDay={selectedDay}
+                      defaultRotationWeeks={defaultRotationWeeks}
+                      activeRotationWeeks={activeRotationWeeks}
                       isLocked={isLocked}
                       getCurrentVisit={getCurrentVisit as any}
                       onUpdateCustomer={updateCustomer as any}

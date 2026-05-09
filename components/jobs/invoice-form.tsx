@@ -669,7 +669,7 @@ export default function InvoiceForm({
                                             onChange={(e) =>
                                                 updateItem(item.id, "description", e.target.value)
                                             }
-                                            placeholder="e.g. Grass cutting, hedge trimming, materials"
+                                            placeholder="e.g. Routine service, hedge trimming, materials"
                                             className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
                                         />
                                     </div>

@@ -6,7 +6,12 @@ import {
   getMonthlyPlanCharge,
   isDateInSeasonRange,
 } from "./helpers";
-import type { Customer, MonthlyPayment, VisitLog } from "./types";
+import {
+  DEFAULT_ROTATION_WEEKS,
+  getEffectiveRotationWeeks,
+  getRotationCycleLabel,
+} from "./rotation";
+import type { Customer, MonthlyPayment, RotationWeeks, VisitLog } from "./types";
 
 export type CustomerProfitRow = {
   customerId: number;
@@ -37,6 +42,7 @@ type BuildCustomerProfitRowsOptions = {
   monthlyPayments: MonthlyPayment[];
   grassCutSeasonStart: string;
   grassCutSeasonEnd: string;
+  defaultRotationWeeks?: RotationWeeks;
   referenceDate?: Date;
   includeNonGrassCustomers?: boolean;
 };
@@ -119,14 +125,14 @@ export function getCustomerProfitStatus(row: {
 
   if (row.notCutCount > 0) {
     return {
-      label: "Missed cuts",
+      label: "Missed visits",
       className: "bg-sky-100 text-sky-700",
     };
   }
 
   if (row.completedVisitCount === 0) {
     return {
-      label: "No cuts logged",
+      label: "No visits logged",
       className: "bg-slate-100 text-slate-600",
     };
   }
@@ -143,6 +149,7 @@ export function buildCustomerProfitRows({
   monthlyPayments,
   grassCutSeasonStart,
   grassCutSeasonEnd,
+  defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
   referenceDate = new Date(),
   includeNonGrassCustomers = false,
 }: BuildCustomerProfitRowsOptions) {
@@ -259,7 +266,10 @@ export function buildCustomerProfitRows({
         customerType: customer.customerType,
         address: getCustomerDisplayAddress(customer),
         routeLabel: isGrassCuttingCustomer
-          ? `${customer.week} ${customer.day}`
+          ? `${getRotationCycleLabel(
+              customer.week,
+              getEffectiveRotationWeeks(customer, defaultRotationWeeks)
+            )} ${customer.day}`
           : customer.customerType,
         paymentMethod,
         isGrassCuttingCustomer,

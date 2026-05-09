@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronLeft,
@@ -20,12 +20,30 @@ import {
   getSeasonLabel,
   isDateInSeasonRange,
 } from "./helpers";
-import type { Customer, DayName, MonthlyPayment, VisitLog, WeekNumber } from "./types";
+import {
+  DEFAULT_ROTATION_WEEKS,
+  getEffectiveRotationWeeks,
+  getRotationCycleLabel,
+  getWeekOptions,
+  isCustomerDueInSelectedWeek,
+  normalizeRotationWeeks,
+} from "./rotation";
+import type {
+  Customer,
+  DayName,
+  MonthlyPayment,
+  RotationWeeks,
+  VisitLog,
+  WeekNumber,
+} from "./types";
 
 type Props = {
   customers: Customer[];
   visits: VisitLog[];
   monthlyPayments: MonthlyPayment[];
+  defaultRotationWeeks?: RotationWeeks;
+  activeRotationWeeks?: RotationWeeks;
+  weekOptions?: WeekNumber[];
   grassCutSeasonStart: string;
   grassCutSeasonEnd: string;
   monthlyPaymentsReady: boolean;
@@ -53,7 +71,6 @@ type Props = {
 };
 
 const PAY_ON_DAY_PAYMENT_METHODS = new Set(["Cash", "On Day Transfer"]);
-const WEEK_FILTER_OPTIONS: WeekNumber[] = ["Week 1", "Week 2"];
 const DAY_FILTER_OPTIONS: DayName[] = [
   "Monday",
   "Tuesday",
@@ -186,6 +203,9 @@ export default function PaymentsPage({
   customers,
   visits,
   monthlyPayments,
+  defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
+  activeRotationWeeks,
+  weekOptions,
   grassCutSeasonStart,
   grassCutSeasonEnd,
   monthlyPaymentsReady,
@@ -209,6 +229,18 @@ export default function PaymentsPage({
   const [removingVisitId, setRemovingVisitId] = useState<string | null>(null);
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
   const normalizedSearch = getNormalizedQuery(search);
+  const normalizedDefaultRotationWeeks = normalizeRotationWeeks(defaultRotationWeeks);
+  const routeRotationWeeks = normalizeRotationWeeks(
+    activeRotationWeeks ?? normalizedDefaultRotationWeeks
+  );
+  const weekFilterOptions =
+    weekOptions?.length ? weekOptions : getWeekOptions(routeRotationWeeks);
+
+  useEffect(() => {
+    if (weekFilter !== "all" && !weekFilterOptions.includes(weekFilter)) {
+      setWeekFilter("all");
+    }
+  }, [weekFilter, weekFilterOptions]);
 
   const seasonDateRange = useMemo(
     () =>
@@ -231,11 +263,19 @@ export default function PaymentsPage({
     () =>
       [...customers]
         .filter((customer) => customer.isGrassCuttingCustomer)
-        .filter((customer) => weekFilter === "all" || customer.week === weekFilter)
+        .filter(
+          (customer) =>
+            weekFilter === "all" ||
+            isCustomerDueInSelectedWeek(
+              customer,
+              weekFilter,
+              normalizedDefaultRotationWeeks
+            )
+        )
         .filter((customer) => dayFilter === "all" || customer.day === dayFilter)
         .filter((customer) => matchesSearch(customer, search))
         .sort((left, right) => left.name.localeCompare(right.name)),
-    [customers, dayFilter, search, weekFilter]
+    [customers, dayFilter, normalizedDefaultRotationWeeks, search, weekFilter]
   );
   const hasRouteFilter = weekFilter !== "all" || dayFilter !== "all";
 
@@ -267,9 +307,14 @@ export default function PaymentsPage({
   const routeFilterLabel =
     weekFilter === "all" && dayFilter === "all"
       ? "all customers"
-      : `${weekFilter === "all" ? "all weeks" : weekFilter}, ${
+      : `${weekFilter === "all" ? "all weeks" : getRotationCycleLabel(weekFilter, routeRotationWeeks)}, ${
           dayFilter === "all" ? "all days" : dayFilter
         }`;
+  const getCustomerRouteLabel = (customer: Customer) =>
+    `${getRotationCycleLabel(
+      customer.week,
+      getEffectiveRotationWeeks(customer, normalizedDefaultRotationWeeks)
+    )} ${customer.day}`;
 
   const seasonVisitsByCustomer = useMemo(() => {
     const byCustomer = new Map<number, VisitLog[]>();
@@ -376,7 +421,7 @@ export default function PaymentsPage({
       rows.push({
         customerId: customer.id,
         customerName: customer.name,
-        routeLabel: `${customer.week} ${customer.day}`,
+        routeLabel: getCustomerRouteLabel(customer),
         method: customer.paymentMethod ?? "Monthly",
         amount: missingMonths.length * monthlyCharge,
         dueFrom: missingMonths[0]?.dueFrom ?? todayValue,
@@ -392,7 +437,7 @@ export default function PaymentsPage({
       const unpaidVisits = (seasonVisitsByCustomer.get(customer.id) ?? [])
         .filter((visit) => !getInputDateValue(visit.paidAt))
         .map((visit) => ({
-          label: `Cut ${formatStoredDate(visit.visitDate)}`,
+          label: `Visit ${formatStoredDate(visit.visitDate)}`,
           dueFrom: getInputDateValue(visit.visitDate),
           amount: Number(visit.priceAtVisit ?? customer.grassCutAmount ?? 0),
         }));
@@ -404,15 +449,15 @@ export default function PaymentsPage({
       rows.push({
         customerId: customer.id,
         customerName: customer.name,
-        routeLabel: `${customer.week} ${customer.day}`,
+        routeLabel: getCustomerRouteLabel(customer),
         method: customer.paymentMethod ?? "On Day Transfer",
         amount: unpaidVisits.reduce((total, visit) => total + visit.amount, 0),
         dueFrom: unpaidVisits[0]?.dueFrom ?? todayValue,
         missingItems: unpaidVisits.map((visit) => visit.label),
         detail:
           unpaidVisits.length === 1
-            ? "1 unpaid cut"
-            : `${unpaidVisits.length} unpaid cuts`,
+            ? "1 unpaid visit"
+            : `${unpaidVisits.length} unpaid visits`,
       });
     });
 
@@ -428,6 +473,7 @@ export default function PaymentsPage({
   }, [
     monthlyCustomers,
     monthlyPaymentLookup,
+    normalizedDefaultRotationWeeks,
     paymentYearMonths,
     payOnDayCustomers,
     seasonVisitsByCustomer,
@@ -573,7 +619,7 @@ export default function PaymentsPage({
     customerName: string
   ) {
     const shouldRemove = window.confirm(
-      `Remove the cut recorded for ${customerName} on ${formatStoredDate(
+      `Remove the visit recorded for ${customerName} on ${formatStoredDate(
         visit.visitDate
       )}? This will delete the visit from Payments and History.`
     );
@@ -784,7 +830,7 @@ export default function PaymentsPage({
             </h2>
             <p className="mt-1 text-sm text-slate-500">
               Expand a customer to see the full 12-month payment year starting
-              from your configured season start month, with cuts logged above
+              from your configured season start month, with visits logged above
               the payment date for each month.
             </p>
           </div>
@@ -851,7 +897,7 @@ export default function PaymentsPage({
                       </span>
 
                       <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-                        {customerVisits.length} cuts logged
+                        {customerVisits.length} visits logged
                       </span>
 
                       <button
@@ -930,7 +976,7 @@ export default function PaymentsPage({
 
                               <div className="mt-4">
                                 <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                                  Cuts This Month
+                                  Visits This Month
                                 </p>
 
                                 {monthVisits.length > 0 ? (
@@ -943,7 +989,7 @@ export default function PaymentsPage({
                                         <div className="flex items-start justify-between gap-3">
                                           <div>
                                             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                                              Logged Cut
+                                              Logged Visit
                                             </p>
                                             <p className="mt-1 text-sm font-semibold text-slate-900">
                                               {formatStoredDate(visit.visitDate)}
@@ -964,12 +1010,12 @@ export default function PaymentsPage({
                                           >
                                             {removingVisitId === String(visit.id)
                                               ? "Removing..."
-                                              : "Remove Cut"}
+                                              : "Remove Visit"}
                                           </button>
                                         </div>
 
                                         <label className="mt-3 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                                          Cut Date
+                                          Visit Date
                                         </label>
                                         <input
                                           type="date"
@@ -997,7 +1043,7 @@ export default function PaymentsPage({
                                         <p className="mt-2 text-[11px] text-slate-400">
                                           {savingKey === `cut-${visit.id}`
                                             ? "Saving..."
-                                            : `Cut logged ${formatStoredDate(
+                                            : `Visit logged ${formatStoredDate(
                                                 draftCutDates[`cut-${visit.id}`] ??
                                                   visit.visitDate
                                               )}`}
@@ -1007,14 +1053,14 @@ export default function PaymentsPage({
                                   </div>
                                 ) : (
                                   <p className="mt-2 min-h-8 text-sm text-slate-500">
-                                    No cuts logged yet
+                                    No visits logged yet
                                   </p>
                                 )}
 
                                 {canAddCutInMonth && (
                                   <>
                                     <label className="mt-3 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                                      Add Cut Date
+                                      Add Visit Date
                                     </label>
                                     <input
                                       type="date"
@@ -1039,7 +1085,7 @@ export default function PaymentsPage({
                                     <p className="mt-2 text-[11px] text-slate-400">
                                       {savingKey === newCutDateKey
                                         ? "Saving..."
-                                        : "Enter a cut date to log a completed visit"}
+                                        : "Enter a visit date to log a completed visit"}
                                     </p>
                                   </>
                                 )}
@@ -1117,7 +1163,7 @@ export default function PaymentsPage({
                 seasonVisitsByCustomer.get(customer.id) ?? []
               );
               const cutSlotCount = getSeasonCutSlotCount(
-                customer.cutFrequency,
+                getEffectiveRotationWeeks(customer, normalizedDefaultRotationWeeks),
                 seasonStartYear,
                 grassCutSeasonStart,
                 grassCutSeasonEnd
@@ -1179,7 +1225,7 @@ export default function PaymentsPage({
                       </span>
 
                       <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-                        {limitedCustomerVisits.length}/{cutSlotCount} cuts logged
+                        {limitedCustomerVisits.length}/{cutSlotCount} visits logged
                       </span>
 
                       {pendingSlotIndex !== -1 && (
@@ -1192,7 +1238,7 @@ export default function PaymentsPage({
                         onClick={() => toggleCustomerCard(cardKey)}
                         className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                       >
-                        {isExpanded ? "Hide Cuts" : "Show Cuts"}
+                        {isExpanded ? "Hide Visits" : "Show Visits"}
                         {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                       </button>
                     </div>
@@ -1243,14 +1289,14 @@ export default function PaymentsPage({
                               <div className="flex items-start justify-between gap-3">
                                 <div>
                                   <p className="text-sm font-black text-slate-900">
-                                    Cut {index + 1}
+                                    Visit {index + 1}
                                   </p>
                                   <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                                     {isPendingRouteSlot
                                       ? "Route payment selected"
                                       : visit
                                       ? "Completed visit"
-                                      : "Waiting for cut"}
+                                      : "Waiting for visit"}
                                   </p>
                                 </div>
 
@@ -1279,7 +1325,7 @@ export default function PaymentsPage({
                                 <div className="flex items-start justify-between gap-3">
                                   <div className="min-w-0">
                                     <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-                                      Cut Date
+                                      Visit Date
                                     </p>
                                   </div>
 
@@ -1294,7 +1340,7 @@ export default function PaymentsPage({
                                       disabled={isRemoving}
                                       className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
-                                      {isRemoving ? "Removing..." : "Remove Cut"}
+                                      {isRemoving ? "Removing..." : "Remove Visit"}
                                     </button>
                                   )}
                                 </div>
@@ -1322,7 +1368,7 @@ export default function PaymentsPage({
                                     <p className="mt-2 text-[11px] text-slate-400">
                                       {savingKey === cutDateKey
                                         ? "Saving..."
-                                        : `Cut logged ${formatStoredDate(
+                                        : `Visit logged ${formatStoredDate(
                                             currentCutDate
                                           )}`}
                                     </p>
@@ -1356,8 +1402,8 @@ export default function PaymentsPage({
                                       {savingKey === newCutDateKey
                                         ? "Saving..."
                                         : isPendingRouteSlot
-                                        ? "Enter the cut date to create the cut and attach this payment"
-                                        : "Enter the cut date to log this cut"}
+                                        ? "Enter the visit date to create the visit and attach this payment"
+                                        : "Enter the visit date to log this visit"}
                                     </p>
                                   </>
                                 )}
@@ -1389,9 +1435,9 @@ export default function PaymentsPage({
                                 {!visit && pendingValue
                                   ? `Selected on route for ${formatStoredDate(
                                       pendingValue
-                                    )}. This attaches after the cut is logged.`
+                                    )}. This attaches after the visit is logged.`
                                   : !visit
-                                  ? "Payment date unlocks after the cut is logged"
+                                  ? "Payment date unlocks after the visit is logged"
                                   : savingKey === slotKey
                                   ? "Saving..."
                                   : currentValue
@@ -1426,7 +1472,7 @@ export default function PaymentsPage({
             </h1>
             <p className="mt-2 text-sm text-white/75">
               Track monthly-plan payments by month and pay-on-day customers by
-              each completed cut.
+              each completed visit.
             </p>
           </div>
 
@@ -1468,9 +1514,9 @@ export default function PaymentsPage({
                 className="w-full rounded-xl border border-white/15 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 outline-none transition focus:border-white sm:w-32"
               >
                 <option value="all">All weeks</option>
-                {WEEK_FILTER_OPTIONS.map((week) => (
+                {weekFilterOptions.map((week) => (
                   <option key={week} value={week}>
-                    {week}
+                    {getRotationCycleLabel(week, routeRotationWeeks)}
                   </option>
                 ))}
               </select>
@@ -1593,8 +1639,8 @@ export default function PaymentsPage({
           <p className="mt-2 text-sm text-slate-500">
             Monthly plans use 12 payment months starting from the configured
             season start month.
-            Pay-on-day customers use cut slots based on the season length and
-            their cut frequency.
+            Pay-on-day customers use visit slots based on the season length and
+            their service frequency.
           </p>
         </div>
       </div>
@@ -1604,7 +1650,7 @@ export default function PaymentsPage({
       {renderPayOnDaySection(
         "transfer",
         "On Day Transfer Customers",
-        "Expand a customer to see each cut date and the transfer payment date beside it.",
+        "Expand a customer to see each visit date and the transfer payment date beside it.",
         onDayTransferCustomers,
         "No On Day Transfer customers match the current filter."
       )}
@@ -1612,7 +1658,7 @@ export default function PaymentsPage({
       {renderPayOnDaySection(
         "cash",
         "Cash Customers",
-        "Expand a customer to see each cut, the cash collection date, and any route payment selected before the cut is logged.",
+        "Expand a customer to see each visit, the cash collection date, and any route payment selected before the visit is logged.",
         cashCustomers,
         "No Cash customers match the current filter.",
         pendingCashPaymentDates

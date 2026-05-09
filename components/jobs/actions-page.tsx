@@ -54,7 +54,7 @@ export default function ActionsPage({
                 <div className="flex flex-wrap gap-2 text-sm">
                   {visit.status === "not_cut" && (
                     <span className="rounded-full bg-red-100 px-3 py-1 text-red-700">
-                      Not Cut
+                      Not Completed
                     </span>
                   )}
 

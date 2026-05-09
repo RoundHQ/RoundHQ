@@ -3,34 +3,63 @@
 import { useMemo, useState } from "react";
 import { getCustomerEmailAddresses, normalizeGrassCutAreas } from "./helpers";
 import {
+    DEFAULT_ROTATION_WEEKS,
+    ROTATION_WEEK_OPTIONS,
+    getCutFrequencyFromRotationWeeks,
+    getEffectiveRotationWeeks,
+    getRotationCycleLabel,
+    getRotationLabel,
+    getWeekOptions,
+    normalizeNullableRotationWeeks,
+    normalizeRotationWeeks,
+    normalizeWeekNumber,
+} from "./rotation";
+import {
     GRASS_CUT_AREA_OPTIONS,
     type Customer,
     type CustomerType,
-    type CutFrequency,
     type DayName,
     type GrassCutArea,
     type PaymentMethod,
+    type RotationWeeks,
     type WeekNumber,
 } from "./types";
 import AddressAutocompleteInput from "./address-autocomplete-input";
 
 type Props = {
     existing?: Customer;
+    defaultRotationWeeks?: RotationWeeks;
     onSave: (customer: Customer) => void;
     onCancel: () => void;
 };
 
-function buildInitialCustomer(existing?: Customer): Customer {
+function buildInitialCustomer(
+    existing: Customer | undefined,
+    defaultRotationWeeks: RotationWeeks
+): Customer {
     if (existing) {
+        const effectiveRotationWeeks = getEffectiveRotationWeeks(
+            existing,
+            defaultRotationWeeks
+        );
+
         return {
             ...existing,
             contactEmails: getCustomerEmailAddresses(existing),
+            rotationWeeksOverride: normalizeNullableRotationWeeks(
+                existing.rotationWeeksOverride
+            ),
+            cutFrequency: getCutFrequencyFromRotationWeeks(effectiveRotationWeeks),
+            week: normalizeWeekNumber(existing.week, effectiveRotationWeeks),
             grassCutAreas: normalizeGrassCutAreas(
                 existing.grassCutAreas,
                 existing.isGrassCuttingCustomer
             ),
         };
     }
+
+    const normalizedDefaultRotationWeeks =
+        normalizeRotationWeeks(defaultRotationWeeks);
 
     return {
         id: Date.now(),
@@ -42,7 +71,8 @@ function buildInitialCustomer(existing?: Customer): Customer {
         email: "",
         contactEmails: [],
         customerType: "Residential",
-        cutFrequency: "Fortnightly",
+        cutFrequency: getCutFrequencyFromRotationWeeks(normalizedDefaultRotationWeeks),
+        rotationWeeksOverride: null,
         isGrassCuttingCustomer: true,
         grassCutAreas: ["All"],
         grassCutAmount: 0,
@@ -50,7 +80,7 @@ function buildInitialCustomer(existing?: Customer): Customer {
         siteAddress: "",
         siteTown: "",
         sitePostcode: "",
-        week: "Week 1",
+        week: normalizeWeekNumber("Week 1", normalizedDefaultRotationWeeks),
         day: "Monday",
         notes: "",
         accessNotes: "",
@@ -73,10 +103,15 @@ function normalizeContactEmails(emails: string[] | undefined) {
 
 export default function CustomerForm({
     existing,
+    defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
     onSave,
     onCancel,
 }: Props) {
-    const [form, setForm] = useState<Customer>(() => buildInitialCustomer(existing));
+    const normalizedDefaultRotationWeeks =
+        normalizeRotationWeeks(defaultRotationWeeks);
+    const [form, setForm] = useState<Customer>(() =>
+        buildInitialCustomer(existing, normalizedDefaultRotationWeeks)
+    );
 
     const [postcodeLocked, setPostcodeLocked] = useState(
         Boolean(existing?.postcode)
@@ -130,6 +165,14 @@ export default function CustomerForm({
         form.grassCutAreas,
         form.isGrassCuttingCustomer
     );
+    const effectiveRotationWeeks = getEffectiveRotationWeeks(
+        form,
+        normalizedDefaultRotationWeeks
+    );
+    const weekOptions = getWeekOptions(effectiveRotationWeeks);
+    const businessDefaultLabel = getRotationLabel(normalizedDefaultRotationWeeks);
+    const rotationSelectValue =
+        form.rotationWeeksOverride == null ? "default" : String(form.rotationWeeksOverride);
     const commercialEmailInputs =
         form.contactEmails && form.contactEmails.length > 0 ? form.contactEmails : [""];
 
@@ -189,7 +232,29 @@ export default function CustomerForm({
         });
     }
 
+    function updateServiceRotation(value: string) {
+        setForm((prev) => {
+            const rotationWeeksOverride =
+                value === "default"
+                    ? null
+                    : normalizeNullableRotationWeeks(value);
+            const nextRotationWeeks =
+                rotationWeeksOverride ?? normalizedDefaultRotationWeeks;
+
+            return {
+                ...prev,
+                rotationWeeksOverride,
+                cutFrequency: getCutFrequencyFromRotationWeeks(nextRotationWeeks),
+                week: normalizeWeekNumber(prev.week, nextRotationWeeks),
+            };
+        });
+    }
+
     function handleSave() {
+        const saveEffectiveRotationWeeks = getEffectiveRotationWeeks(
+            form,
+            normalizedDefaultRotationWeeks
+        );
         const cleanedPrimaryEmail = form.email?.trim() || "";
         const cleanedContactEmails = isCommercialCustomer
             ? normalizeContactEmails(form.contactEmails)
@@ -205,6 +270,11 @@ export default function CustomerForm({
                 ? cleanedContactEmails[0] ?? undefined
                 : cleanedPrimaryEmail || undefined,
             contactEmails: isCommercialCustomer ? cleanedContactEmails : undefined,
+            rotationWeeksOverride: normalizeNullableRotationWeeks(
+                form.rotationWeeksOverride
+            ),
+            cutFrequency: getCutFrequencyFromRotationWeeks(saveEffectiveRotationWeeks),
+            week: normalizeWeekNumber(form.week, saveEffectiveRotationWeeks),
             grassCutAreas: form.isGrassCuttingCustomer
                 ? normalizeGrassCutAreas(form.grassCutAreas, true)
                 : [],
@@ -264,7 +334,7 @@ export default function CustomerForm({
 
                         <div>
                             <label className="mb-2 block text-sm font-medium text-slate-700">
-                                Grass Cutting Round
+                                Service Round
                             </label>
                             <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
                                 <input
@@ -275,7 +345,7 @@ export default function CustomerForm({
                                     }
                                     className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
                                 />
-                                This customer is on the grass cutting round
+                                This customer is on the service round
                             </label>
                         </div>
 
@@ -510,29 +580,40 @@ export default function CustomerForm({
                         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                             <div>
                                 <label className="mb-2 block text-sm font-medium text-slate-700">
-                                    Cut Frequency
+                                    Service rotation
                                 </label>
                                 <select
                                     className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
-                                    value={form.cutFrequency}
-                                    onChange={(e) =>
-                                        update("cutFrequency", e.target.value as CutFrequency)
-                                    }
+                                    value={rotationSelectValue}
+                                    onChange={(e) => updateServiceRotation(e.target.value)}
                                 >
-                                    <option value="Fortnightly">Fortnightly</option>
-                                    <option value="3 Weekly">3 Weekly</option>
-                                    <option value="Monthly">Monthly</option>
+                                    <option value="default">
+                                        Use business default: {businessDefaultLabel}
+                                    </option>
+                                    {ROTATION_WEEK_OPTIONS.map((rotationWeeks) => (
+                                        <option key={rotationWeeks} value={rotationWeeks}>
+                                            {getRotationLabel(rotationWeeks)}
+                                        </option>
+                                    ))}
                                 </select>
+                                <p className="mt-2 text-xs text-slate-400">
+                                    Uses your business default unless changed for this customer.
+                                </p>
+                                {form.rotationWeeksOverride != null ? (
+                                    <p className="mt-1 text-xs font-semibold text-emerald-700">
+                                        Custom rotation for this customer.
+                                    </p>
+                                ) : null}
                             </div>
 
                             <div>
                                 <label className="mb-2 block text-sm font-medium text-slate-700">
-                                    Grass Cut Amount
+                                    Service Amount
                                 </label>
                                 <input
                                     type="number"
                                     className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
-                                    placeholder="Price per cut"
+                                    placeholder="Price per visit"
                                     value={form.grassCutAmount ?? ""}
                                     onChange={(e) =>
                                         update(
@@ -550,10 +631,24 @@ export default function CustomerForm({
                                 <select
                                     className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
                                     value={form.week}
-                                    onChange={(e) => update("week", e.target.value as WeekNumber)}
+                                    onChange={(e) =>
+                                        update(
+                                            "week",
+                                            normalizeWeekNumber(
+                                                e.target.value as WeekNumber,
+                                                effectiveRotationWeeks
+                                            )
+                                        )
+                                    }
                                 >
-                                    <option value="Week 1">Week 1</option>
-                                    <option value="Week 2">Week 2</option>
+                                    {weekOptions.map((week) => (
+                                        <option key={week} value={week}>
+                                            {getRotationCycleLabel(
+                                                week,
+                                                effectiveRotationWeeks
+                                            )}
+                                        </option>
+                                    ))}
                                 </select>
                             </div>
 
@@ -593,7 +688,7 @@ export default function CustomerForm({
 
                             <div className="md:col-span-2 lg:col-span-3">
                                 <label className="mb-2 block text-sm font-medium text-slate-700">
-                                    Grass Areas To Cut
+                                    Service Areas
                                 </label>
                                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                                     {GRASS_CUT_AREA_OPTIONS.map((area) => (

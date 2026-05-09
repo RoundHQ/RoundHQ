@@ -143,8 +143,8 @@ export type CommercialRamsWriteRow = {
 };
 
 const WORK_TYPES: RamsWorkType[] = [
-  "Grass Cutting",
-  "Hedge Cutting",
+  "Grounds Maintenance",
+  "Hedge Trimming",
   "Pressure Washing",
   "Gutter Cleaning",
   "Grounds Maintenance",

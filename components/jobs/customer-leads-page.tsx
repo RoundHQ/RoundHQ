@@ -1313,7 +1313,7 @@ export default function CustomerLeadsPage({
                             }
                             className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500"
                           />
-                          Add to grass cutting rounds
+                          Add to service rounds
                         </label>
                       </div>
 

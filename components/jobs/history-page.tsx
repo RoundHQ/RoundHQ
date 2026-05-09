@@ -59,11 +59,11 @@ export default function HistoryPage({
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/65">
-                Grass Schedule
+                Service Schedule
               </p>
               <h1 className="mt-2 text-3xl font-black tracking-tight">History</h1>
               <p className="mt-2 text-sm text-white/75">
-                View completed and not cut visits, payment status, and notes.
+                View completed and not completed visits, payment status, and notes.
               </p>
             </div>
 
@@ -111,9 +111,9 @@ export default function HistoryPage({
 
                     const statusLabel =
                         visit.status === "completed"
-                            ? "Cut"
+                            ? "Completed"
                             : visit.status === "not_cut"
-                                ? `Not Cut${visit.notCutReason ? ` - ${visit.notCutReason}` : ""}`
+                                ? `Not Completed${visit.notCutReason ? ` - ${visit.notCutReason}` : ""}`
                                 : visit.status;
 
                     return (

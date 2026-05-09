@@ -42,15 +42,7 @@ type RamsMethodRow = {
 export const RAMS_YES_NO_OPTIONS: RamsYesNo[] = ["Yes", "No"];
 
 export const RAMS_WORK_TYPE_PRESETS: Record<RamsWorkType, WorkTypePreset> = {
-  "Grass Cutting": {
-    scope:
-      "Grass cutting, edging, litter pick and tidy-down of the designated external areas.",
-    equipment:
-      "Pedestrian or ride-on mower, strimmer, blower, hand tools.",
-    method:
-      "Cut grass systematically, trim edges, keep an exclusion zone around machinery and remove arisings as agreed.",
-  },
-  "Hedge Cutting": {
+  "Hedge Trimming": {
     scope:
       "Hedge trimming, shaping and removal of green waste from the working area.",
     equipment:
@@ -76,7 +68,7 @@ export const RAMS_WORK_TYPE_PRESETS: Record<RamsWorkType, WorkTypePreset> = {
   },
   "Grounds Maintenance": {
     scope:
-      "General grounds maintenance including grass, borders, weeds, pruning and seasonal external upkeep.",
+      "General grounds maintenance including borders, weeds, pruning and seasonal external upkeep.",
     equipment:
       "Mixed grounds maintenance kit including mower, strimmer, hedge tools and hand tools.",
     method:
@@ -358,8 +350,8 @@ export function getRamsRiskMatrix(document: CommercialRamsDocument): RamsMatrixR
       hazard: "Powered machinery / equipment",
       harm:
         document.poweredMachinery === "Yes"
-          ? "Cuts, flying debris, entanglement, noise or vibration related injury."
-          : "Minor cuts, bruises or pinch injuries.",
+          ? "Flying debris, entanglement, noise or vibration related injury."
+          : "Minor abrasions, bruises or pinch injuries.",
       harmed: "Operatives and nearby persons.",
       controls:
         document.poweredMachinery === "Yes"

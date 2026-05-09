@@ -1090,7 +1090,7 @@ export default function QuoteForm({
                                             onChange={(e) =>
                                                 updateItem(item.id, "description", e.target.value)
                                             }
-                                            placeholder="e.g. Grass cutting, hedge trimming, bark mulch"
+                                            placeholder="e.g. Routine service, hedge trimming, bark mulch"
                                             className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
                                         />
                                     </div>

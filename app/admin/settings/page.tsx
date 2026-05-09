@@ -1,5 +1,18 @@
 import Link from "next/link";
-import { BadgeCheck, Mail, ServerCog } from "lucide-react";
+import type { ReactNode } from "react";
+import {
+  BadgeCheck,
+  CalendarClock,
+  Eye,
+  FileText,
+  Flag,
+  LifeBuoy,
+  Mail,
+  Paperclip,
+  Receipt,
+  ServerCog,
+  Tags,
+} from "lucide-react";
 import {
   AdminHeroShell,
   AdminSetupNotice,
@@ -9,7 +22,18 @@ import {
   isPlatformEmailConfigured,
 } from "@/lib/admin/email-settings";
 import { getAdminAccess } from "@/lib/admin/guard";
-import { updateAdminEmailSettingsAction } from "./actions";
+import {
+  getSupportDeskSettingsData,
+  type SupportCategoryOption,
+  type SupportPriorityOption,
+} from "@/lib/support/helpdesk";
+import {
+  saveSupportCategoryAction,
+  saveSupportPriorityAction,
+  updateAdminEmailSettingsAction,
+  updateAdminHelpdeskSettingsAction,
+  updateAdminInvoiceSettingsAction,
+} from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -94,6 +118,274 @@ function SettingStat({
   );
 }
 
+function SettingsTabLink({
+  href,
+  isActive,
+  icon,
+  label,
+}: {
+  href: string;
+  isActive: boolean;
+  icon: ReactNode;
+  label: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className={`inline-flex items-center gap-2 rounded-md px-4 py-3 text-sm font-bold transition ${
+        isActive
+          ? "bg-[#19c653] text-white shadow-[0_14px_34px_rgba(25,198,83,0.2)]"
+          : "border border-slate-200 bg-white text-slate-700 hover:border-[#19c653]/40 hover:bg-[#f2fbf5]"
+      }`}
+    >
+      {icon}
+      {label}
+    </Link>
+  );
+}
+
+function TemplateVariable({
+  name,
+  detail,
+}: {
+  name: string;
+  detail: string;
+}) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+      <code className="text-xs font-bold text-slate-950">{name}</code>
+      <p className="mt-1 text-xs leading-5 text-slate-500">{detail}</p>
+    </div>
+  );
+}
+
+function InvoicePdfPreview({
+  settings,
+}: {
+  settings: Awaited<ReturnType<typeof getPlatformEmailSettings>>;
+}) {
+  const dueDate = new Date();
+  dueDate.setDate(dueDate.getDate() + 7);
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-950 p-4 shadow-[0_18px_46px_rgba(15,23,42,0.16)] sm:p-6">
+      <div className="mb-4 flex items-center justify-between gap-3 text-white">
+        <div className="flex items-center gap-2">
+          <Eye aria-hidden="true" className="size-4 text-[#19c653]" />
+          <p className="text-sm font-extrabold">PDF preview</p>
+        </div>
+        <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-white/80">
+          Attached to invoice emails
+        </span>
+      </div>
+
+      <div className="mx-auto max-w-[520px] rounded-md bg-white p-6 text-slate-950 shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 pb-5">
+          <div>
+            <p className="text-2xl font-black tracking-normal">RoundHQ</p>
+            <p className="mt-1 text-xs font-bold uppercase tracking-[0.12em] text-[#19c653]">
+              Invoice
+            </p>
+          </div>
+          <div className="text-right text-xs leading-5 text-slate-500">
+            <p className="font-bold text-slate-950">INV-1042</p>
+            <p>Issued 09 May 2026</p>
+            <p>Due {dueDate.toLocaleDateString("en-GB")}</p>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-4 text-sm sm:grid-cols-2">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
+              From
+            </p>
+            <p className="mt-2 font-bold">RoundHQ Maintenance</p>
+            <p className="text-slate-500">hello@roundhq.co.uk</p>
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
+              To
+            </p>
+            <p className="mt-2 font-bold">Green Acre Gardens</p>
+            <p className="text-slate-500">accounts@example.com</p>
+          </div>
+        </div>
+
+        <div className="mt-6 overflow-hidden rounded-md border border-slate-200">
+          <div className="grid grid-cols-[1fr_80px] bg-slate-50 px-4 py-3 text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
+            <span>Description</span>
+            <span className="text-right">Total</span>
+          </div>
+          {[
+            ["Monthly grounds maintenance", "£195.00"],
+            ["Waste removal", "£45.00"],
+            ["VAT", "£48.00"],
+          ].map(([label, value]) => (
+            <div
+              key={label}
+              className="grid grid-cols-[1fr_80px] border-t border-slate-100 px-4 py-3 text-sm"
+            >
+              <span>{label}</span>
+              <span className="text-right font-bold">{value}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-5 flex justify-end">
+          <div className="w-full max-w-[220px] rounded-md bg-[#e7f9ed] p-4">
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-bold text-slate-600">Amount due</span>
+              <span className="text-2xl font-black text-slate-950">£288.00</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4 text-xs leading-5 text-slate-600">
+          <p className="font-bold text-slate-950">Payment details</p>
+          <p className="mt-1">
+            Please use the invoice number as your payment reference.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-md border border-white/10 bg-white/5 p-4 text-sm leading-6 text-white/75">
+        Email subject preview:{" "}
+        <span className="font-semibold text-white">
+          {settings.invoiceSubjectTemplate
+            .replace("{{invoiceNumber}}", "INV-1042")
+            .replace("{{businessName}}", "RoundHQ Maintenance")}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function SupportCategoryEditor({
+  category,
+}: {
+  category?: SupportCategoryOption;
+}) {
+  return (
+    <form
+      action={saveSupportCategoryAction}
+      className="rounded-md border border-slate-200 bg-slate-50 p-4"
+    >
+      {category ? (
+        <input type="hidden" name="category_id" value={category.id} />
+      ) : null}
+      <div className="grid gap-4 sm:grid-cols-[1fr_1fr_90px]">
+        <TextInput
+          label="Label"
+          name="label"
+          defaultValue={category?.label ?? ""}
+          placeholder="Technical issue"
+          required
+        />
+        <TextInput
+          label="Slug"
+          name="slug"
+          defaultValue={category?.slug ?? ""}
+          placeholder="technical_issue"
+        />
+        <TextInput
+          label="Sort"
+          name="sort_order"
+          type="number"
+          defaultValue={category?.sortOrder ?? 50}
+        />
+      </div>
+      <div className="mt-4">
+        <TextArea
+          label="Description"
+          name="description"
+          defaultValue={category?.description ?? ""}
+          rows={3}
+        />
+      </div>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <label className="flex items-center gap-3 text-sm font-bold text-slate-700">
+          <input
+            type="checkbox"
+            name="is_active"
+            defaultChecked={category?.isActive ?? true}
+            className="size-4 accent-[#19c653]"
+          />
+          Active
+        </label>
+        <button className="rounded-md bg-slate-950 px-4 py-2 text-sm font-bold text-white transition hover:bg-slate-800">
+          {category ? "Update category" : "Add category"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function SupportPriorityEditor({
+  priority,
+}: {
+  priority?: SupportPriorityOption;
+}) {
+  return (
+    <form
+      action={saveSupportPriorityAction}
+      className="rounded-md border border-slate-200 bg-slate-50 p-4"
+    >
+      {priority ? (
+        <input type="hidden" name="priority_id" value={priority.id} />
+      ) : null}
+      <div className="grid gap-4 sm:grid-cols-[1fr_1fr_100px_90px]">
+        <TextInput
+          label="Label"
+          name="label"
+          defaultValue={priority?.label ?? ""}
+          placeholder="Critical"
+          required
+        />
+        <TextInput
+          label="Slug"
+          name="slug"
+          defaultValue={priority?.slug ?? ""}
+          placeholder="critical"
+        />
+        <TextInput
+          label="Target hrs"
+          name="response_target_hours"
+          type="number"
+          defaultValue={priority?.responseTargetHours ?? 24}
+        />
+        <TextInput
+          label="Sort"
+          name="sort_order"
+          type="number"
+          defaultValue={priority?.sortOrder ?? 50}
+        />
+      </div>
+      <div className="mt-4">
+        <TextArea
+          label="Description"
+          name="description"
+          defaultValue={priority?.description ?? ""}
+          rows={3}
+        />
+      </div>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <label className="flex items-center gap-3 text-sm font-bold text-slate-700">
+          <input
+            type="checkbox"
+            name="is_active"
+            defaultChecked={priority?.isActive ?? true}
+            className="size-4 accent-[#19c653]"
+          />
+          Active
+        </label>
+        <button className="rounded-md bg-slate-950 px-4 py-2 text-sm font-bold text-white transition hover:bg-slate-800">
+          {priority ? "Update priority" : "Add priority"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export default async function AdminSettingsPage({
   searchParams,
 }: {
@@ -111,8 +403,13 @@ export default async function AdminSettingsPage({
 
   const params = (await searchParams) ?? {};
   const settings = await getPlatformEmailSettings();
+  const supportSettings = await getSupportDeskSettingsData();
   const emailReady = isPlatformEmailConfigured(settings);
   const saved = params.saved === "1";
+  const activeTab =
+    params.tab === "invoices" || params.tab === "helpdesk"
+      ? params.tab
+      : "email";
 
   return (
     <main className="min-h-screen bg-white text-slate-950">
@@ -142,18 +439,33 @@ export default async function AdminSettingsPage({
       <section className="bg-white px-5 py-10 sm:px-8 lg:py-14">
         <div className="mx-auto max-w-7xl">
           <div className="mb-6 flex flex-wrap gap-2">
-            <Link
+            <SettingsTabLink
               href="/admin/settings?tab=email"
-              className="inline-flex items-center gap-2 rounded-md bg-[#19c653] px-4 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.2)]"
-            >
-              <Mail aria-hidden="true" className="size-4" />
-              Email
-            </Link>
+              isActive={activeTab === "email"}
+              icon={<Mail aria-hidden="true" className="size-4" />}
+              label="Email"
+            />
+            <SettingsTabLink
+              href="/admin/settings?tab=invoices"
+              isActive={activeTab === "invoices"}
+              icon={<Receipt aria-hidden="true" className="size-4" />}
+              label="Invoices"
+            />
+            <SettingsTabLink
+              href="/admin/settings?tab=helpdesk"
+              isActive={activeTab === "helpdesk"}
+              icon={<LifeBuoy aria-hidden="true" className="size-4" />}
+              label="Helpdesk"
+            />
           </div>
 
           {saved && (
             <div className="mb-6 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
-              Email settings saved.
+              {activeTab === "invoices"
+                ? "Invoice settings saved."
+                : activeTab === "helpdesk"
+                  ? "Helpdesk settings saved."
+                : "Email settings saved."}
             </div>
           )}
 
@@ -169,10 +481,23 @@ export default async function AdminSettingsPage({
             </div>
           )}
 
-          <form
-            action={updateAdminEmailSettingsAction}
-            className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]"
-          >
+          {activeTab === "helpdesk" && supportSettings.schemaError && (
+            <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+              <span className="font-bold">Helpdesk database setup needed:</span>{" "}
+              Run <code>supabase/helpdesk_schema.sql</code> or the latest{" "}
+              <code>supabase/roundhq_tenant_schema.sql</code> before saving
+              helpdesk settings.
+              <div className="mt-2 text-xs text-amber-800">
+                {supportSettings.schemaError}
+              </div>
+            </div>
+          )}
+
+          {activeTab === "email" ? (
+            <form
+              action={updateAdminEmailSettingsAction}
+              className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]"
+            >
             <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
               <div className="mb-6 flex items-start gap-3">
                 <div className="flex size-11 shrink-0 items-center justify-center rounded-md bg-[#e7f9ed] text-[#168b43]">
@@ -298,43 +623,25 @@ export default async function AdminSettingsPage({
 
               <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
                 <h2 className="text-xl font-extrabold tracking-normal text-slate-950">
-                  Automated invoices
+                  Email delivery status
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                  The daily automation sends invoices from recurring invoice
-                  templates before the saved payment due date.
+                  Invoice PDF attachments, signup verification, and customer
+                  messages all use this sender once SMTP is configured.
                 </p>
 
-                <div className="mt-6 space-y-5">
-                  <label className="flex items-center gap-3 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700">
-                    <input
-                      type="checkbox"
-                      name="invoice_automation_enabled"
-                      defaultChecked={settings.invoiceAutomationEnabled}
-                      className="size-4 accent-[#19c653]"
+                <div className="mt-6 grid gap-3">
+                  <div className="flex items-center gap-3 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700">
+                    <Mail aria-hidden="true" className="size-4 text-[#168b43]" />
+                    {emailReady ? "SMTP is ready to send" : "SMTP setup is incomplete"}
+                  </div>
+                  <div className="flex items-center gap-3 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700">
+                    <Paperclip
+                      aria-hidden="true"
+                      className="size-4 text-[#168b43]"
                     />
-                    Automatically send recurring invoices
-                  </label>
-
-                  <TextInput
-                    label="Send invoices this many days before due date"
-                    name="invoice_days_before_due"
-                    type="number"
-                    defaultValue={settings.invoiceDaysBeforeDue}
-                    required
-                  />
-                  <TextInput
-                    label="Invoice email subject"
-                    name="invoice_subject_template"
-                    defaultValue={settings.invoiceSubjectTemplate}
-                    required
-                  />
-                  <TextArea
-                    label="Invoice email body"
-                    name="invoice_message_template"
-                    defaultValue={settings.invoiceMessageTemplate}
-                    rows={8}
-                  />
+                    Invoice emails attach the generated PDF automatically
+                  </div>
                 </div>
               </div>
 
@@ -346,7 +653,304 @@ export default async function AdminSettingsPage({
                 Save email settings
               </button>
             </section>
-          </form>
+            </form>
+          ) : activeTab === "invoices" ? (
+            <form
+              action={updateAdminInvoiceSettingsAction}
+              className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]"
+            >
+              <section className="space-y-6">
+                <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
+                  <div className="mb-6 flex items-start gap-3">
+                    <div className="flex size-11 shrink-0 items-center justify-center rounded-md bg-[#e7f9ed] text-[#168b43]">
+                      <CalendarClock aria-hidden="true" className="size-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-extrabold tracking-normal text-slate-950">
+                        Invoice automation
+                      </h2>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">
+                        Send recurring invoices before the customer payment due
+                        date. Each email includes the invoice PDF attachment.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-5">
+                    <label className="flex items-center gap-3 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700">
+                      <input
+                        type="checkbox"
+                        name="invoice_automation_enabled"
+                        defaultChecked={settings.invoiceAutomationEnabled}
+                        className="size-4 accent-[#19c653]"
+                      />
+                      Automatically send recurring invoices
+                    </label>
+
+                    <TextInput
+                      label="Send invoices this many days before due date"
+                      name="invoice_days_before_due"
+                      type="number"
+                      defaultValue={settings.invoiceDaysBeforeDue}
+                      required
+                    />
+
+                    <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-900">
+                      Invoices are queued from recurring invoice templates and
+                      sent once per due cycle. The generated PDF is attached to
+                      the email automatically.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
+                  <div className="mb-6 flex items-start gap-3">
+                    <div className="flex size-11 shrink-0 items-center justify-center rounded-md bg-[#e7f9ed] text-[#168b43]">
+                      <FileText aria-hidden="true" className="size-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-extrabold tracking-normal text-slate-950">
+                        Invoice email
+                      </h2>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">
+                        The email body sits alongside the PDF attachment and
+                        can use invoice variables.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-5">
+                    <TextInput
+                      label="Invoice email subject"
+                      name="invoice_subject_template"
+                      defaultValue={settings.invoiceSubjectTemplate}
+                      required
+                    />
+                    <TextArea
+                      label="Invoice email body"
+                      name="invoice_message_template"
+                      defaultValue={settings.invoiceMessageTemplate}
+                      rows={9}
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={Boolean(settings.schemaError)}
+                  className="inline-flex w-full items-center justify-center rounded-md bg-[#19c653] px-5 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.2)] transition hover:bg-[#22d861] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Save invoice settings
+                </button>
+              </section>
+
+              <section className="space-y-6">
+                <InvoicePdfPreview settings={settings} />
+
+                <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
+                  <h2 className="text-xl font-extrabold tracking-normal text-slate-950">
+                    Template variables
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    Use these placeholders in the subject or message. RoundHQ
+                    swaps them with the invoice details before sending.
+                  </p>
+                  <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                    <TemplateVariable
+                      name="{{invoiceNumber}}"
+                      detail="The invoice reference shown on the PDF."
+                    />
+                    <TemplateVariable
+                      name="{{customerName}}"
+                      detail="The customer or business name."
+                    />
+                    <TemplateVariable
+                      name="{{businessName}}"
+                      detail="Your business name from the invoice sender."
+                    />
+                    <TemplateVariable
+                      name="{{invoiceTotal}}"
+                      detail="The total amount due."
+                    />
+                    <TemplateVariable
+                      name="{{dueDate}}"
+                      detail="The invoice payment due date."
+                    />
+                    <TemplateVariable
+                      name="{{paymentLink}}"
+                      detail="A hosted payment link when one is available."
+                    />
+                  </div>
+                </div>
+              </section>
+            </form>
+          ) : (
+            <div className="grid gap-6 lg:grid-cols-[0.92fr_1.08fr]">
+              <section className="space-y-6">
+                <form
+                  action={updateAdminHelpdeskSettingsAction}
+                  className="rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8"
+                >
+                  <div className="mb-6 flex items-start gap-3">
+                    <div className="flex size-11 shrink-0 items-center justify-center rounded-md bg-[#e7f9ed] text-[#168b43]">
+                      <LifeBuoy aria-hidden="true" className="size-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-extrabold tracking-normal text-slate-950">
+                        Helpdesk defaults
+                      </h2>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">
+                        Set owner notification routing, default ticket
+                        ownership, customer acknowledgements, and attachment
+                        limits.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-5">
+                    <TextInput
+                      label="Default assigned admin email"
+                      name="default_assigned_admin_email"
+                      type="email"
+                      defaultValue={
+                        supportSettings.settings.defaultAssignedAdminEmail
+                      }
+                      placeholder="support@roundhq.co.uk"
+                    />
+                    <TextArea
+                      label="Notify admin emails"
+                      name="notify_admin_emails"
+                      defaultValue={supportSettings.settings.notifyAdminEmails}
+                      rows={3}
+                    />
+                    <TextInput
+                      label="Maximum attachment size (MB)"
+                      name="max_attachment_mb"
+                      type="number"
+                      defaultValue={supportSettings.settings.maxAttachmentMb}
+                    />
+                    <label className="flex items-center gap-3 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700">
+                      <input
+                        type="checkbox"
+                        name="auto_acknowledge_enabled"
+                        defaultChecked={
+                          supportSettings.settings.autoAcknowledgeEnabled
+                        }
+                        className="size-4 accent-[#19c653]"
+                      />
+                      Send customer auto-acknowledgement on new tickets
+                    </label>
+                    <TextInput
+                      label="Auto-acknowledgement subject"
+                      name="auto_acknowledge_subject"
+                      defaultValue={
+                        supportSettings.settings.autoAcknowledgeSubject
+                      }
+                    />
+                    <TextArea
+                      label="Auto-acknowledgement message"
+                      name="auto_acknowledge_message"
+                      defaultValue={
+                        supportSettings.settings.autoAcknowledgeMessage
+                      }
+                      rows={8}
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={Boolean(supportSettings.schemaError)}
+                    className="mt-6 inline-flex w-full items-center justify-center rounded-md bg-[#19c653] px-5 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.2)] transition hover:bg-[#22d861] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Save helpdesk settings
+                  </button>
+                </form>
+
+                <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
+                  <div className="mb-6 flex items-start gap-3">
+                    <div className="flex size-11 shrink-0 items-center justify-center rounded-md bg-[#e7f9ed] text-[#168b43]">
+                      <Flag aria-hidden="true" className="size-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-extrabold tracking-normal text-slate-950">
+                        Priorities
+                      </h2>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">
+                        Control which priorities customers can choose and set
+                        internal response targets.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    {supportSettings.priorities.map((priority) => (
+                      <SupportPriorityEditor
+                        key={priority.id}
+                        priority={priority}
+                      />
+                    ))}
+                    <SupportPriorityEditor />
+                  </div>
+                </section>
+              </section>
+
+              <section className="space-y-6">
+                <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
+                  <div className="mb-6 flex items-start gap-3">
+                    <div className="flex size-11 shrink-0 items-center justify-center rounded-md bg-[#e7f9ed] text-[#168b43]">
+                      <Tags aria-hidden="true" className="size-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-extrabold tracking-normal text-slate-950">
+                        Categories
+                      </h2>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">
+                        Add and edit categories used by customer tickets and
+                        canned replies.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    {supportSettings.categories.map((category) => (
+                      <SupportCategoryEditor
+                        key={category.id}
+                        category={category}
+                      />
+                    ))}
+                    <SupportCategoryEditor />
+                  </div>
+                </section>
+
+                <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
+                  <h2 className="text-xl font-extrabold tracking-normal text-slate-950">
+                    Helpdesk template variables
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    Use these placeholders in acknowledgement messages.
+                  </p>
+                  <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                    <TemplateVariable
+                      name="{{customerName}}"
+                      detail="The logged-in customer's name or workspace."
+                    />
+                    <TemplateVariable
+                      name="{{workspaceName}}"
+                      detail="The customer workspace name."
+                    />
+                    <TemplateVariable
+                      name="{{ticketSubject}}"
+                      detail="The new support ticket subject."
+                    />
+                    <TemplateVariable
+                      name="{{ticketId}}"
+                      detail="The support ticket reference."
+                    />
+                  </div>
+                </section>
+              </section>
+            </div>
+          )}
         </div>
       </section>
     </main>

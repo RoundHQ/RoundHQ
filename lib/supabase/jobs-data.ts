@@ -5,6 +5,7 @@ import type {
   DayName,
   NotCutReason,
   PaymentMethod,
+  RotationWeeks,
   VisitLog,
   WeekNumber,
 } from "@/components/jobs/types";
@@ -13,6 +14,12 @@ import {
   normalizeGrassCutAreas,
   parseEmailAddresses,
 } from "@/components/jobs/helpers";
+import {
+  getCutFrequencyFromRotationWeeks,
+  getRotationWeeksFromCutFrequency,
+  normalizeNullableRotationWeeks,
+  normalizeWeekNumber,
+} from "@/components/jobs/rotation";
 
 export type CustomerRow = {
   id: number;
@@ -29,6 +36,7 @@ export type CustomerRow = {
   day: string | null;
   customer_type: string | null;
   cut_frequency: string | null;
+  rotation_weeks_override?: number | null;
   site_name: string | null;
   site_address: string | null;
   site_town: string | null;
@@ -44,7 +52,7 @@ export type CustomerRow = {
   lng: number | null;
 };
 
-type DatabaseWeekNumber = 1 | 2;
+type DatabaseWeekNumber = 1 | 2 | 3 | 4;
 
 export type CustomerWriteRow = {
   name: string;
@@ -60,6 +68,7 @@ export type CustomerWriteRow = {
   day: DayName;
   customer_type: CustomerType;
   cut_frequency: CutFrequency;
+  rotation_weeks_override: RotationWeeks | null;
   site_name: string | null;
   site_address: string | null;
   site_town: string | null;
@@ -123,7 +132,12 @@ const DAY_OPTIONS: DayName[] = [
   "Friday",
 ];
 const CUSTOMER_TYPES: CustomerType[] = ["Residential", "Commercial"];
-const CUT_FREQUENCIES: CutFrequency[] = ["Fortnightly", "3 Weekly", "Monthly"];
+const CUT_FREQUENCIES: CutFrequency[] = [
+  "Weekly",
+  "Fortnightly",
+  "3 Weekly",
+  "Monthly",
+];
 const PAYMENT_METHODS: PaymentMethod[] = ["Monthly", "On Day Transfer", "Cash"];
 const NOT_CUT_REASONS: NotCutReason[] = [
   "Too Wet",
@@ -137,27 +151,13 @@ const NOT_CUT_REASONS: NotCutReason[] = [
 ];
 
 function normalizeWeek(value: string | number | null | undefined): WeekNumber {
-  if (value === 2) {
-    return "Week 2";
-  }
-
-  const normalizedValue = String(value ?? "").trim().toLowerCase();
-
-  if (normalizedValue === "2" || normalizedValue === "week 2") {
-    return "Week 2";
-  }
-
-  return "Week 1";
+  return normalizeWeekNumber(value, 4);
 }
 
 function serializeWeek(value: WeekNumber | number | null | undefined): DatabaseWeekNumber {
-  if (value === 2) {
-    return 2;
-  }
-
-  const normalizedValue = String(value ?? "").trim().toLowerCase();
-
-  return normalizedValue === "2" || normalizedValue === "week 2" ? 2 : 1;
+  const match = String(value ?? "").match(/(\d+)/);
+  const parsed = Number(match?.[1] ?? value ?? 1);
+  return ([1, 2, 3, 4].includes(parsed) ? parsed : 1) as DatabaseWeekNumber;
 }
 
 function serializeRouteOrder(value: number | null | undefined) {
@@ -209,6 +209,12 @@ export function mapCustomerRowToCustomer(row: CustomerRow): Customer {
   const contactEmails = Array.isArray(row.contact_emails)
       ? row.contact_emails
       : parseEmailAddresses(row.email);
+  const rotationWeeksOverride = normalizeNullableRotationWeeks(
+    row.rotation_weeks_override
+  );
+  const cutFrequency = rotationWeeksOverride
+    ? getCutFrequencyFromRotationWeeks(rotationWeeksOverride)
+    : normalizeCutFrequency(row.cut_frequency);
 
   return {
     id: row.id,
@@ -227,7 +233,8 @@ export function mapCustomerRowToCustomer(row: CustomerRow): Customer {
     week: normalizeWeek(row.week),
     day: normalizeDay(row.day),
     customerType: normalizeCustomerType(row.customer_type),
-    cutFrequency: normalizeCutFrequency(row.cut_frequency),
+    cutFrequency,
+    rotationWeeksOverride,
     grassCutAmount: Number(row.price ?? 0),
     siteName: row.site_name ?? undefined,
     siteAddress: row.site_address ?? undefined,
@@ -246,6 +253,11 @@ export function mapCustomerRowToCustomer(row: CustomerRow): Customer {
 
 export function mapCustomerToRow(customer: Customer): CustomerWriteRow {
   const contactEmails = getCustomerEmailAddresses(customer);
+  const rotationWeeksOverride = normalizeNullableRotationWeeks(
+    customer.rotationWeeksOverride
+  );
+  const legacyRotationWeeks =
+    rotationWeeksOverride ?? getRotationWeeksFromCutFrequency(customer.cutFrequency);
 
   return {
     name: customer.name.trim(),
@@ -263,7 +275,8 @@ export function mapCustomerToRow(customer: Customer): CustomerWriteRow {
     week: serializeWeek(customer.week),
     day: customer.day,
     customer_type: customer.customerType,
-    cut_frequency: customer.cutFrequency,
+    cut_frequency: getCutFrequencyFromRotationWeeks(legacyRotationWeeks),
+    rotation_weeks_override: rotationWeeksOverride,
     site_name: customer.siteName?.trim() || null,
     site_address: customer.siteAddress?.trim() || null,
     site_town: customer.siteTown?.trim() || null,

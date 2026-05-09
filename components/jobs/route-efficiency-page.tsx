@@ -34,12 +34,19 @@ import {
   type RouteNotes,
   type RouteSummary,
 } from "./route-efficiency";
-import type { Customer, DayName, WeekNumber } from "./types";
+import {
+  DEFAULT_ROTATION_WEEKS,
+  isCustomerDueInSelectedWeek,
+  normalizeRotationWeeks,
+} from "./rotation";
+import type { Customer, DayName, RotationWeeks, WeekNumber } from "./types";
 
 type Props = {
   customers: Customer[];
   selectedWeek: WeekNumber;
   selectedDay: DayName;
+  defaultRotationWeeks?: RotationWeeks;
+  weekOptions?: WeekNumber[];
   ignoredMoveSuggestionIds: string[];
   routeChangeHistory: RouteChangeRecord[];
   routeNotes: RouteNotes;
@@ -134,7 +141,8 @@ function getCustomerSnapshot(customer: Customer): RouteCustomerSnapshot {
 
 function getMoveNextRouteOrder(
   customers: Customer[],
-  suggestion: MoveCustomerSuggestion
+  suggestion: MoveCustomerSuggestion,
+  defaultRotationWeeks: RotationWeeks
 ) {
   return (
     Math.max(
@@ -143,7 +151,11 @@ function getMoveNextRouteOrder(
         .filter(
           (entry) =>
             entry.isGrassCuttingCustomer &&
-            entry.week === suggestion.toWeek &&
+            isCustomerDueInSelectedWeek(
+              entry,
+              suggestion.toWeek,
+              defaultRotationWeeks
+            ) &&
             entry.day === suggestion.toDay
         )
         .map((entry) =>
@@ -193,6 +205,8 @@ export default function RouteEfficiencyPage({
   customers,
   selectedWeek,
   selectedDay,
+  defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
+  weekOptions,
   ignoredMoveSuggestionIds,
   routeChangeHistory,
   routeNotes,
@@ -219,9 +233,15 @@ export default function RouteEfficiencyPage({
     () => new Set(ignoredMoveSuggestionIds),
     [ignoredMoveSuggestionIds]
   );
+  const normalizedDefaultRotationWeeks = normalizeRotationWeeks(defaultRotationWeeks);
   const routeSummaries = useMemo(
-    () => buildRouteSummaries(customers),
-    [customers]
+    () =>
+      buildRouteSummaries(
+        customers,
+        normalizedDefaultRotationWeeks,
+        weekOptions
+      ),
+    [customers, normalizedDefaultRotationWeeks, weekOptions]
   );
   const selectedRoute =
     getSelectedRoute(routeSummaries, selectedRouteKey) ?? routeSummaries[0] ?? null;
@@ -316,7 +336,11 @@ export default function RouteEfficiencyPage({
       type: "move",
       suggestion,
       customer,
-      nextRouteOrder: getMoveNextRouteOrder(customers, suggestion),
+      nextRouteOrder: getMoveNextRouteOrder(
+        customers,
+        suggestion,
+        normalizedDefaultRotationWeeks
+      ),
       reason: `Moved because the customer sits closer to ${suggestion.toRouteLabel}.`,
     });
     setStatusMessage(null);
@@ -538,14 +562,14 @@ export default function RouteEfficiencyPage({
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/65">
-              Grass Schedule
+              Service Schedule
             </p>
             <h1 className="mt-2 text-3xl font-black tracking-tight">
               Route Efficiency
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-white/75">
               Review route order, mileage, far-away customers, and move
-              suggestions across all grass cutting rounds.
+              suggestions across all service work rounds.
             </p>
           </div>
 

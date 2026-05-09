@@ -14,6 +14,7 @@ export default function ScheduledJobProfilePage({
   customers,
   onBack,
 }: Props) {
+  const jobTypeLabel = job.type === "Grass Cut" ? "Service Visit" : job.type;
   const customer =
     job.customerId != null
       ? customers.find((c) => c.id === job.customerId) ?? null
@@ -74,7 +75,7 @@ export default function ScheduledJobProfilePage({
         <div className="mt-6 grid gap-4 md:grid-cols-2">
           <div className="rounded-2xl bg-slate-50 p-4">
             <p className="text-xs text-slate-400">Job Type</p>
-            <p className="mt-2 font-semibold text-slate-900">{job.type}</p>
+            <p className="mt-2 font-semibold text-slate-900">{jobTypeLabel}</p>
           </div>
 
           <div className="rounded-2xl bg-slate-50 p-4">

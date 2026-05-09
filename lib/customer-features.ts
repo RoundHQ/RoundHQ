@@ -33,7 +33,7 @@ export const CUSTOMER_FEATURES = [
     key: "history",
     label: "Visit history",
     section: "Operations",
-    description: "Completed visits, not-cut notes, and historic records.",
+    description: "Completed visits, missed-visit notes, and historic records.",
   },
   {
     key: "map",

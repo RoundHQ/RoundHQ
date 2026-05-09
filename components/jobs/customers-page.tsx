@@ -9,7 +9,22 @@ import {
   getCustomerTotals,
   parseEmailAddresses,
 } from "./helpers";
-import type { Customer, MonthlyPayment, VisitLog } from "./types";
+import {
+  DEFAULT_ROTATION_WEEKS,
+  getCutFrequencyFromRotationWeeks,
+  getRotationWeeksFromCutFrequency,
+  normalizeNullableRotationWeeks,
+  normalizeRotationWeeks,
+  normalizeWeekNumber,
+} from "./rotation";
+import type {
+  Customer,
+  CutFrequency,
+  MonthlyPayment,
+  RotationWeeks,
+  VisitLog,
+  WeekNumber,
+} from "./types";
 
 type Props = {
   customers: Customer[];
@@ -17,6 +32,7 @@ type Props = {
   monthlyPayments: MonthlyPayment[];
   grassCutSeasonStart: string;
   grassCutSeasonEnd: string;
+  defaultRotationWeeks?: RotationWeeks;
   onAdd: (customer: Customer) => void;
   onUpdate: (customer: Customer) => void;
   onDelete: (customerId: number) => void;
@@ -36,10 +52,11 @@ type ImportRow = {
   contactEmails: string[];
   customerType: "Residential" | "Commercial";
   isGrassCuttingCustomer: boolean;
-  cutFrequency: "Fortnightly" | "3 Weekly" | "Monthly";
+  cutFrequency: CutFrequency;
+  rotationWeeksOverride: RotationWeeks | null;
   grassCutAmount: number;
   paymentMethod: "Monthly" | "On Day Transfer" | "Cash";
-  week: "Week 1" | "Week 2";
+  week: WeekNumber;
   day: "Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday";
   notes: string;
   accessNotes: string;
@@ -107,10 +124,13 @@ function normaliseCustomerType(
 
 function normaliseFrequency(
     value: string
-): "Fortnightly" | "3 Weekly" | "Monthly" {
+): CutFrequency {
   const lower = value.toLowerCase();
   if (lower.includes("3")) return "3 Weekly";
-  if (lower.includes("month")) return "Monthly";
+  if (lower.includes("month") || lower.includes("4")) return "Monthly";
+  if ((lower.includes("weekly") || lower.includes("week")) && !lower.includes("fortnight")) {
+    return "Weekly";
+  }
   return "Fortnightly";
 }
 
@@ -123,8 +143,8 @@ function normalisePaymentMethod(
   return "Monthly";
 }
 
-function normaliseWeek(value: string): "Week 1" | "Week 2" {
-  return value.toLowerCase().includes("2") ? "Week 2" : "Week 1";
+function normaliseWeek(value: string, rotationWeeks: RotationWeeks): WeekNumber {
+  return normalizeWeekNumber(value, rotationWeeks);
 }
 
 function normaliseDay(
@@ -223,7 +243,8 @@ function findDuplicateCustomer(
 
 function parseImportRows(
     workbookRows: Record<string, unknown>[],
-    existingCustomers: Customer[]
+    existingCustomers: Customer[],
+    defaultRotationWeeks: RotationWeeks
 ): ImportRow[] {
   return workbookRows.map((row, index) => {
     const name = getText(row, ["Name", "Customer Name"]);
@@ -238,21 +259,26 @@ function parseImportRows(
     );
     const isGrassCuttingCustomer = getBoolean(
         row,
-        ["Grass Cutting Customer", "Grass Customer", "On Grass Round"],
+        ["Service Customer", "Grass Customer", "On Grass Round"],
         true
     );
-    const cutFrequency = normaliseFrequency(
-        getText(row, ["Cut Frequency", "Frequency"]) || "Fortnightly"
+    const frequencyText = getText(row, ["Service Rotation", "Frequency"]);
+    const rotationWeeksOverride = frequencyText
+        ? getRotationWeeksFromCutFrequency(normaliseFrequency(frequencyText))
+        : null;
+    const effectiveRotationWeeks = normalizeRotationWeeks(
+        rotationWeeksOverride ?? defaultRotationWeeks
     );
+    const cutFrequency = getCutFrequencyFromRotationWeeks(effectiveRotationWeeks);
     const grassCutAmount = getNumber(row, [
-      "Grass Cut Amount",
-      "Grass Cut Price",
+      "Service Amount",
+      "Service Price",
       "Price",
     ]);
     const paymentMethod = normalisePaymentMethod(
         getText(row, ["Payment Type", "Payment Method"]) || "Monthly"
     );
-    const week = normaliseWeek(getText(row, ["Week"]) || "Week 1");
+    const week = normaliseWeek(getText(row, ["Week"]) || "Week 1", effectiveRotationWeeks);
     const day = normaliseDay(getText(row, ["Day"]) || "Monday");
     const notes = getText(row, ["Notes"]);
     const accessNotes = getText(row, ["Access Notes"]);
@@ -285,6 +311,7 @@ function parseImportRows(
       customerType,
       isGrassCuttingCustomer,
       cutFrequency,
+      rotationWeeksOverride,
       grassCutAmount,
       paymentMethod,
       week,
@@ -306,10 +333,12 @@ function parseImportRows(
 
 function CustomerModal({
                          existingCustomer,
+                         defaultRotationWeeks,
                          onClose,
                          onSave,
                        }: {
   existingCustomer?: Customer;
+  defaultRotationWeeks: RotationWeeks;
   onClose: () => void;
   onSave: (customer: Customer) => void;
 }) {
@@ -318,6 +347,7 @@ function CustomerModal({
         <div className="max-h-[90vh] w-full max-w-4xl overflow-auto rounded-[24px] bg-white shadow-2xl">
           <CustomerForm
               existing={existingCustomer}
+              defaultRotationWeeks={defaultRotationWeeks}
               onSave={onSave}
               onCancel={onClose}
           />
@@ -332,6 +362,7 @@ export default function CustomersPage({
                                         monthlyPayments,
                                         grassCutSeasonStart,
                                         grassCutSeasonEnd,
+                                        defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
                                         onAdd,
                                         onUpdate,
                                         onDelete,
@@ -352,6 +383,8 @@ export default function CustomersPage({
 
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const normalizedDefaultRotationWeeks =
+      normalizeRotationWeeks(defaultRotationWeeks);
 
   const filteredCustomers = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -433,7 +466,11 @@ export default function CustomersPage({
         return name || address;
       });
 
-      const parsedRows = parseImportRows(meaningfulRows, customers);
+      const parsedRows = parseImportRows(
+          meaningfulRows,
+          customers,
+          normalizedDefaultRotationWeeks
+      );
 
       setImportRows(parsedRows);
       setImportFileName(file.name);
@@ -493,6 +530,9 @@ export default function CustomersPage({
         isGrassCuttingCustomer: row.isGrassCuttingCustomer,
         customerType: row.customerType,
         cutFrequency: row.cutFrequency,
+        rotationWeeksOverride: normalizeNullableRotationWeeks(
+            row.rotationWeeksOverride
+        ),
         grassCutAmount: row.grassCutAmount,
         paymentMethod: row.paymentMethod,
         week: row.week,
@@ -704,6 +744,7 @@ export default function CustomersPage({
         {isCustomerModalOpen && (
             <CustomerModal
                 existingCustomer={editingCustomer ?? undefined}
+                defaultRotationWeeks={normalizedDefaultRotationWeeks}
                 onClose={closeCustomerModal}
                 onSave={saveCustomerModal}
             />
