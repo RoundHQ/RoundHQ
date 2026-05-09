@@ -131,14 +131,14 @@ export function mapPlatformEmailSettingsRow(
   }
 
   const emailSettings = normalizeDocumentEmailSettings({
-    emailFromName: row.email_from_name,
-    emailFromAddress: row.email_from_address,
-    emailReplyTo: row.email_reply_to,
-    smtpHost: row.smtp_host,
+    emailFromName: row.email_from_name ?? undefined,
+    emailFromAddress: row.email_from_address ?? undefined,
+    emailReplyTo: row.email_reply_to ?? undefined,
+    smtpHost: row.smtp_host ?? undefined,
     smtpPort: row.smtp_port ?? 587,
     smtpSecure: Boolean(row.smtp_secure),
-    smtpUsername: row.smtp_username,
-    smtpPassword: row.smtp_password,
+    smtpUsername: row.smtp_username ?? undefined,
+    smtpPassword: row.smtp_password ?? undefined,
   });
 
   return getDefaultPlatformEmailSettings({
