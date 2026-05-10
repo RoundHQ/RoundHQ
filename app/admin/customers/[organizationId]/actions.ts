@@ -10,6 +10,8 @@ import {
   CUSTOMER_FEATURES,
   type CustomerFeatureAccess,
 } from "@/lib/customer-features";
+import { normalizePlanKey } from "@/lib/billing/plans";
+import { isMissingSubscriptionPlanColumn } from "@/lib/billing/subscriptions";
 import { requireAdminAccess } from "@/lib/admin/guard";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 
@@ -52,9 +54,10 @@ export async function updateCustomerAccountAction(
   );
   const disabledReason = getText(formData, "disabled_reason");
   const internalNotes = getText(formData, "internal_notes");
+  const subscriptionPlan = normalizePlanKey(getText(formData, "subscription_plan"));
   const supabase = createServiceRoleClient();
 
-  const { error } = await supabase.from("customer_account_settings").upsert(
+  const { error: settingsError } = await supabase.from("customer_account_settings").upsert(
     {
       organization_id: organizationId,
       account_status: accountStatus,
@@ -69,8 +72,41 @@ export async function updateCustomerAccountAction(
     }
   );
 
-  if (error) {
-    throw new Error(error.message);
+  if (settingsError) {
+    throw new Error(settingsError.message);
+  }
+
+  let { error: subscriptionError } = await supabase
+    .from("subscriptions")
+    .upsert(
+      {
+        organization_id: organizationId,
+        plan: subscriptionPlan,
+        updated_at: new Date().toISOString(),
+      },
+      {
+        onConflict: "organization_id",
+      }
+    );
+
+  if (isMissingSubscriptionPlanColumn(subscriptionError)) {
+    const legacySubscriptionResult = await supabase
+      .from("subscriptions")
+      .upsert(
+        {
+          organization_id: organizationId,
+          updated_at: new Date().toISOString(),
+        },
+        {
+          onConflict: "organization_id",
+        }
+      );
+
+    subscriptionError = legacySubscriptionResult.error;
+  }
+
+  if (subscriptionError) {
+    throw new Error(subscriptionError.message);
   }
 
   revalidatePath("/admin");

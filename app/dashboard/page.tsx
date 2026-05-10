@@ -64,5 +64,10 @@ export default async function DashboardPage() {
     );
   }
 
-  return <JobsApp featureAccess={accountSettings.featureAccess} />;
+  return (
+    <JobsApp
+      featureAccess={accountSettings.featureAccess}
+      subscriptionPlan={subscription.plan}
+    />
+  );
 }

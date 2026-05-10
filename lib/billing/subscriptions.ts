@@ -1,7 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  DEFAULT_SUBSCRIPTION_PLAN,
+  normalizePlanKey,
+  type SubscriptionPlanKey,
+} from "@/lib/billing/plans";
+import { isMissingColumnError } from "@/lib/supabase/errors";
 
 export type SubscriptionRow = {
   organization_id: string;
+  plan: SubscriptionPlanKey;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
   stripe_price_id: string | null;
@@ -10,6 +17,32 @@ export type SubscriptionRow = {
   current_period_end: string | null;
   cancel_at_period_end: boolean;
 };
+
+export const SUBSCRIPTION_SELECT =
+  "organization_id, plan, stripe_customer_id, stripe_subscription_id, stripe_price_id, status, trial_ends_at, current_period_end, cancel_at_period_end";
+export const LEGACY_SUBSCRIPTION_SELECT =
+  "organization_id, stripe_customer_id, stripe_subscription_id, stripe_price_id, status, trial_ends_at, current_period_end, cancel_at_period_end";
+
+type RawSubscriptionRow = Omit<SubscriptionRow, "plan"> & {
+  plan?: string | null;
+};
+
+export function normalizeSubscriptionRow(
+  subscription: RawSubscriptionRow | null | undefined
+): SubscriptionRow | null {
+  if (!subscription) {
+    return null;
+  }
+
+  return {
+    ...subscription,
+    plan: normalizePlanKey(subscription.plan),
+  };
+}
+
+export function isMissingSubscriptionPlanColumn(error: unknown) {
+  return isMissingColumnError(error, "plan");
+}
 
 export function hasDashboardAccess(subscription: SubscriptionRow | null) {
   if (!subscription) {
@@ -38,39 +71,64 @@ export async function ensureSubscriptionRow(
   supabase: SupabaseClient,
   organizationId: string
 ) {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("subscriptions")
-    .select(
-      "organization_id, stripe_customer_id, stripe_subscription_id, stripe_price_id, status, trial_ends_at, current_period_end, cancel_at_period_end"
-    )
+    .select(SUBSCRIPTION_SELECT)
     .eq("organization_id", organizationId)
     .limit(1);
+
+  if (isMissingSubscriptionPlanColumn(error)) {
+    const legacyResult = await supabase
+      .from("subscriptions")
+      .select(LEGACY_SUBSCRIPTION_SELECT)
+      .eq("organization_id", organizationId)
+      .limit(1);
+
+    data = legacyResult.data as typeof data;
+    error = legacyResult.error;
+  }
 
   if (error) {
     throw error;
   }
 
-  const existingSubscription = data?.[0] as SubscriptionRow | undefined;
+  const existingSubscription = normalizeSubscriptionRow(
+    data?.[0] as RawSubscriptionRow | undefined
+  );
 
   if (existingSubscription) {
     return existingSubscription;
   }
 
-  const { data: insertedData, error: insertError } = await supabase
+  let { data: insertedData, error: insertError } = await supabase
     .from("subscriptions")
     .insert({
       organization_id: organizationId,
+      plan: DEFAULT_SUBSCRIPTION_PLAN,
       status: "incomplete",
     })
-    .select(
-      "organization_id, stripe_customer_id, stripe_subscription_id, stripe_price_id, status, trial_ends_at, current_period_end, cancel_at_period_end"
-    )
+    .select(SUBSCRIPTION_SELECT)
     .limit(1);
+
+  if (isMissingSubscriptionPlanColumn(insertError)) {
+    const legacyInsertResult = await supabase
+      .from("subscriptions")
+      .insert({
+        organization_id: organizationId,
+        status: "incomplete",
+      })
+      .select(LEGACY_SUBSCRIPTION_SELECT)
+      .limit(1);
+
+    insertedData = legacyInsertResult.data as typeof insertedData;
+    insertError = legacyInsertResult.error;
+  }
 
   if (insertError) {
     throw insertError;
   }
 
-  return insertedData?.[0] as SubscriptionRow;
+  return normalizeSubscriptionRow(
+    insertedData?.[0] as RawSubscriptionRow
+  ) as SubscriptionRow;
 }
-

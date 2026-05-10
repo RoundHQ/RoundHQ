@@ -55,6 +55,7 @@ type Props = {
     customers: Customer[];
     quotes: Quote[];
     invoices: Invoice[];
+    allowCommercialTools?: boolean;
     onOpenJob: (jobId: string) => void;
     onOpenCustomer: (customerId: number) => void;
 };
@@ -167,6 +168,7 @@ export default function JobsPage({
     customers,
     quotes,
     invoices,
+    allowCommercialTools = true,
     onOpenJob,
     onOpenCustomer,
 }: Props) {
@@ -409,7 +411,9 @@ export default function JobsPage({
                             <option value="One Off">One Off</option>
                             <option value="Quote Accepted">Quote Accepted</option>
                             <option value="Grass Cut">Service Visit</option>
-                            <option value="Commercial">Commercial</option>
+                            {allowCommercialTools ? (
+                                <option value="Commercial">Commercial</option>
+                            ) : null}
                         </select>
                     </div>
                 </div>

@@ -50,6 +50,7 @@ on public.organization_members (user_id);
 
 create table if not exists public.subscriptions (
   organization_id uuid primary key references public.organizations(id) on delete cascade,
+  plan text not null default 'starter' check (plan in ('starter', 'growth')),
   stripe_customer_id text null,
   stripe_subscription_id text null,
   stripe_price_id text null,
@@ -71,6 +72,26 @@ create table if not exists public.subscriptions (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.subscriptions
+add column if not exists plan text default 'starter';
+
+update public.subscriptions
+set plan = 'starter'
+where plan is null or plan not in ('starter', 'growth');
+
+alter table public.subscriptions
+alter column plan set default 'starter';
+
+alter table public.subscriptions
+alter column plan set not null;
+
+alter table public.subscriptions
+drop constraint if exists subscriptions_plan_check;
+
+alter table public.subscriptions
+add constraint subscriptions_plan_check
+check (plan in ('starter', 'growth'));
 
 alter table public.subscriptions
 alter column status set default 'incomplete';
@@ -157,16 +178,18 @@ Each feature is built around daily field work: quick scheduling, clear route vis
   (
     'pricing',
     'Pricing',
-    'Simple pricing',
-    'One monthly price. Everything included.',
-    'RoundHQ is GBP 30 per month for each business account, with no setup fees and no complicated feature tiers.',
-    'The full platform is included from day one: unlimited customers, jobs and quotes, invoicing, payments, route planning, staff accounts, reminders, and reports.
+    'Launch pricing',
+    'Starter and Growth plans for running your rounds.',
+    'Starter is GBP 30 per business / month for solo operators. Growth is GBP 60 per business / month for teams that need staff permissions, RAMS, and deeper reporting.',
+    'Starter includes leads, CRM, quotes, invoices, scheduling, recurring rounds, route map, payment tracking, visit history, notes, one staff account, up to 250 customers, and a basic dashboard.
+
+Growth includes everything in Starter, plus up to 5 staff accounts, staff permissions, RAMS generator, advanced dashboard insights, customer profitability, commercial customer tools, quote conversion workflows, operational reporting, and up to 1,500 customers.
 
 Start with a 14-day free trial. No card is required for the trial, and you can cancel whenever you need to.',
     jsonb_build_array(
-      'GBP 30 per month per business account',
-      '14-day free trial with no card required',
-      'All current RoundHQ features included'
+      'Starter: GBP 30 per business / month',
+      'Growth: GBP 60 per business / month',
+      '14-day free trial with no card required'
     ),
     'Start free trial',
     '/signup',
@@ -230,7 +253,18 @@ Use this page for contact details, support information, demo requests, or any la
     50,
     true
   )
-on conflict (slug) do nothing;
+on conflict (slug) do update set
+  nav_label = excluded.nav_label,
+  eyebrow = excluded.eyebrow,
+  title = excluded.title,
+  summary = excluded.summary,
+  body = excluded.body,
+  highlights = excluded.highlights,
+  primary_cta_label = excluded.primary_cta_label,
+  primary_cta_href = excluded.primary_cta_href,
+  sort_order = excluded.sort_order,
+  is_published = excluded.is_published,
+  updated_at = now();
 
 create or replace function public.current_organization_id()
 returns uuid
@@ -802,7 +836,6 @@ grant execute on function public.is_organization_member(uuid) to authenticated;
 grant execute on function public.is_organization_admin(uuid) to authenticated;
 grant select on public.site_pages to anon, authenticated;
 grant select on public.customer_account_settings to authenticated;
-
 grant select, insert, update, delete on all tables in schema public to authenticated;
 grant usage, select on all sequences in schema public to authenticated;
 
@@ -1149,6 +1182,54 @@ alter table public.platform_email_settings
   add column if not exists updated_at timestamptz not null default now();
 
 alter table public.platform_email_settings enable row level security;
+
+create table if not exists public.platform_announcements (
+  id text primary key default 'primary',
+  title text not null default 'RoundHQ updates',
+  message text not null default '',
+  cta_label text not null default '',
+  cta_href text not null default '',
+  tone text not null default 'info' check (tone in ('info', 'success', 'warning')),
+  is_active boolean not null default false,
+  published_at timestamptz null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.platform_announcements
+  add column if not exists title text not null default 'RoundHQ updates',
+  add column if not exists message text not null default '',
+  add column if not exists cta_label text not null default '',
+  add column if not exists cta_href text not null default '',
+  add column if not exists tone text not null default 'info',
+  add column if not exists is_active boolean not null default false,
+  add column if not exists published_at timestamptz null,
+  add column if not exists created_at timestamptz not null default now(),
+  add column if not exists updated_at timestamptz not null default now();
+
+alter table public.platform_announcements
+drop constraint if exists platform_announcements_tone_check;
+
+alter table public.platform_announcements
+add constraint platform_announcements_tone_check
+check (tone in ('info', 'success', 'warning'));
+
+grant select on public.platform_announcements to authenticated;
+
+alter table public.platform_announcements enable row level security;
+
+drop policy if exists "Authenticated users can read active platform announcements"
+on public.platform_announcements;
+
+create policy "Authenticated users can read active platform announcements"
+on public.platform_announcements
+for select
+to authenticated
+using (is_active = true);
+
+insert into public.platform_announcements (id)
+values ('primary')
+on conflict (id) do nothing;
 
 create table if not exists public.support_tickets (
   id uuid primary key default gen_random_uuid(),

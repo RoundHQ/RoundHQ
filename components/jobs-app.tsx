@@ -18,7 +18,6 @@ import {
   CheckCircle2,
   Mail,
   MapPin,
-  MessageSquare,
   Navigation,
   Pencil,
   Phone,
@@ -82,9 +81,7 @@ import {
   normalizeWeekNumber,
 } from "@/components/jobs/rotation";
 import {
-  buildTextMessageUrl,
   sendCustomerEmailMessage,
-  sendCustomerTextMessage,
 } from "@/components/jobs/document-delivery";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import {
@@ -116,6 +113,24 @@ import {
   type CustomerFeatureAccess,
   type CustomerFeatureKey,
 } from "@/lib/customer-features";
+import {
+  getPlanFeatureAccess,
+  getSubscriptionPlan,
+  hasGrowthFeatures,
+  type SubscriptionPlanKey,
+} from "@/lib/billing/plans";
+import {
+  DEFAULT_CURRENCY_CODE,
+  formatCurrencyAmount,
+  normalizeCurrencyCode,
+  type CurrencyCode,
+} from "@/components/jobs/currency";
+import {
+  PLATFORM_ANNOUNCEMENT_SELECT,
+  mapPlatformAnnouncementRow,
+  type PlatformAnnouncement,
+  type PlatformAnnouncementRow,
+} from "@/lib/platform-announcements";
 
 import {
   type CommercialRamsDocument,
@@ -156,7 +171,7 @@ type QuoteService = {
   buyPrice: number;
 };
 
-type WorkflowMessageMethod = DocumentDeliveryMethod | "both";
+type WorkflowMessageMethod = DocumentDeliveryMethod;
 
 type AppSettings = {
   businessName: string;
@@ -176,6 +191,7 @@ type AppSettings = {
   secondaryColor: string;
   themeMode: "light" | "dark" | "system";
   compactMode: boolean;
+  currencyCode: CurrencyCode;
 
   defaultGrassCutPrice: number;
   defaultHedgeCutPrice: number;
@@ -746,6 +762,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   secondaryColor: "#0f172a",
   themeMode: "light",
   compactMode: false,
+  currencyCode: DEFAULT_CURRENCY_CODE,
 
   defaultGrassCutPrice: 15,
   defaultHedgeCutPrice: 40,
@@ -929,19 +946,14 @@ const DEFAULT_ROLE_PAGE_ACCESS: Record<Exclude<StaffRole, "Admin">, StaffPageAcc
 };
 
 function mergeAppSettings(value?: Partial<AppSettings> | null): AppSettings {
-  const quoteFollowUpMethod =
-      value?.quoteFollowUpMethod === "text" || value?.quoteFollowUpMethod === "both"
-          ? value.quoteFollowUpMethod
-          : "email";
-  const invoiceReminderMethod =
-      value?.invoiceReminderMethod === "text" || value?.invoiceReminderMethod === "both"
-          ? value.invoiceReminderMethod
-          : "email";
+  const quoteFollowUpMethod = "email";
+  const invoiceReminderMethod = "email";
 
   return {
     ...DEFAULT_APP_SETTINGS,
     ...(value || {}),
     defaultRotationWeeks: normalizeRotationWeeks(value?.defaultRotationWeeks),
+    currencyCode: normalizeCurrencyCode(value?.currencyCode),
     quoteFollowUpMethod,
     invoiceReminderMethod,
     quoteServices: normalizeQuoteServices(value?.quoteServices),
@@ -1203,8 +1215,11 @@ function formatIsoDateLabel(value: string) {
   });
 }
 
-function formatTemplateCurrency(value: number) {
-  return `GBP ${roundCurrency(value).toFixed(2)}`;
+function formatTemplateCurrency(
+  value: number,
+  currencyCode: CurrencyCode | string = DEFAULT_CURRENCY_CODE
+) {
+  return formatCurrencyAmount(roundCurrency(value), currencyCode);
 }
 
 function getBusinessDisplayName(settings: Pick<AppSettings, "tradingName" | "businessName">) {
@@ -1219,54 +1234,6 @@ function applyMessageTemplate(
     const value = values[key];
     return value == null ? "" : String(value);
   });
-}
-
-function getVisitPaymentReference(settings: AppSettings, customer: Customer) {
-  return settings.bankPaymentReference.trim() || customer.name.trim() || "Service visit";
-}
-
-function getBankPaymentDetails(settings: AppSettings) {
-  const details = [
-    settings.bankAccountName.trim()
-        ? `Account name: ${settings.bankAccountName.trim()}`
-        : "",
-    settings.bankSortCode.trim()
-        ? `Sort code: ${settings.bankSortCode.trim()}`
-        : "",
-    settings.bankAccountNumber.trim()
-        ? `Account: ${settings.bankAccountNumber.trim()}`
-        : "",
-  ].filter(Boolean);
-
-  return details.length > 0
-      ? `Bank details: ${details.join(", ")}.`
-      : "Please pay by bank transfer.";
-}
-
-function buildVisitCompletionText(
-    settings: AppSettings,
-    customer: Customer,
-    visit: VisitLog
-) {
-  const template =
-      settings.visitCompletionTextTemplate.trim() ||
-      DEFAULT_APP_SETTINGS.visitCompletionTextTemplate;
-  const visitDate = new Date(visit.visitDate).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-
-  return applyMessageTemplate(template, {
-    customerName: customer.name,
-    businessName: getBusinessDisplayName(settings),
-    amount: formatTemplateCurrency(
-        Number(visit.priceAtVisit ?? customer.grassCutAmount ?? 0)
-    ),
-    visitDate,
-    paymentDetails: getBankPaymentDetails(settings),
-    paymentReference: getVisitPaymentReference(settings, customer),
-  }).replace(/\s+/g, " ").trim();
 }
 
 function addMonthsToIsoDate(value: string, monthsToAdd: number) {
@@ -2363,7 +2330,7 @@ function normalizeRecurringInvoiceFrequency(
 function normalizeDocumentDeliveryMethod(
     value: string | null | undefined
 ): DocumentDeliveryMethod | undefined {
-  return value === "email" || value === "text" ? value : undefined;
+  return value === "email" ? value : undefined;
 }
 
 function getRecurringInvoiceDefaultStatus(status: Invoice["status"]) {
@@ -3094,7 +3061,6 @@ function ScheduledJobProfileSection({
   const phoneValue = linkedCustomer?.phone?.trim() ?? "";
   const phoneActionValue = phoneValue.replace(/[^\d+]/g, "");
   const phoneHref = phoneActionValue ? `tel:${phoneActionValue}` : null;
-  const textHref = phoneActionValue ? `sms:${phoneActionValue}` : null;
   const emailHref = primaryContactEmail ? `mailto:${primaryContactEmail}` : null;
   const sortedRelatedQuotes = [...relatedQuotes].sort((left, right) => {
     const priorities: Record<QuoteStatus, number> = {
@@ -3155,13 +3121,6 @@ function ScheduledJobProfileSection({
       detail: phoneValue || "No phone",
       href: phoneHref,
       icon: Phone,
-    },
-    {
-      key: "text",
-      label: "Text",
-      detail: phoneValue || "No mobile",
-      href: textHref,
-      icon: MessageSquare,
     },
     {
       key: "navigate",
@@ -4043,6 +4002,7 @@ function ScheduledJobProfileSection({
 
 type JobsAppProps = {
   featureAccess?: Partial<CustomerFeatureAccess>;
+  subscriptionPlan?: SubscriptionPlanKey;
 };
 
 type HeaderWeatherState = {
@@ -4071,11 +4031,23 @@ function getCompactWeatherLabel(weatherCode: number | null) {
   return "Forecast";
 }
 
-export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
+export default function JobsApp({
+  featureAccess,
+  subscriptionPlan,
+}: JobsAppProps = {}) {
   const customerFeatureAccess = useMemo(
       () => normalizeCustomerFeatureAccess(featureAccess),
       [featureAccess]
   );
+  const activeSubscriptionPlan = useMemo(
+      () => getSubscriptionPlan(subscriptionPlan),
+      [subscriptionPlan]
+  );
+  const planFeatureAccess = useMemo(
+      () => getPlanFeatureAccess(subscriptionPlan),
+      [subscriptionPlan]
+  );
+  const hasGrowthPlan = hasGrowthFeatures(subscriptionPlan);
   const [page, setPage] = useState<PageKey>("dashboard");
   const [expandedNavSections, setExpandedNavSections] = useState<Record<string, boolean>>(
       () => getExpandedNavSections(getNavSectionTitle("dashboard"))
@@ -4175,6 +4147,8 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
   const [isClearingHistory, setIsClearingHistory] = useState(false);
   const [todayReferenceDate, setTodayReferenceDate] = useState(() => new Date());
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
+  const [platformAnnouncement, setPlatformAnnouncement] =
+      useState<PlatformAnnouncement | null>(null);
   const [currentOrganizationId, setCurrentOrganizationId] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
@@ -4226,7 +4200,17 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
   }, [currentStaffMember, currentUserIsAdmin, rolePermissions, staffSystemReady]);
   const hasPageAccess = useCallback(
       (nextPage: PageKey) => {
-        if (!customerFeatureAccess[getCustomerFeatureKey(nextPage)]) {
+        const featureKey = getCustomerFeatureKey(nextPage);
+
+        if (!planFeatureAccess[featureKey]) {
+          return false;
+        }
+
+        if (!customerFeatureAccess[featureKey]) {
+          return false;
+        }
+
+        if (!hasGrowthPlan && !currentUserIsAdmin) {
           return false;
         }
 
@@ -4242,7 +4226,14 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
 
         return allowedRolePages.has(accessKey);
       },
-      [allowedRolePages, currentUserIsAdmin, customerFeatureAccess, staffSystemReady]
+      [
+        allowedRolePages,
+        currentUserIsAdmin,
+        customerFeatureAccess,
+        hasGrowthPlan,
+        planFeatureAccess,
+        staffSystemReady,
+      ]
   );
   const accessibleNavSections = useMemo(
       () =>
@@ -4750,11 +4741,13 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
               .select(MONTHLY_PAYMENT_SELECT_FIELDS)
               .order("payment_month", { ascending: true })
               .order("customer_id", { ascending: true }),
-          supabase
-              .from("commercial_rams_documents")
-              .select(COMMERCIAL_RAMS_SELECT_FIELDS)
-              .order("updated_at", { ascending: false })
-              .order("created_at", { ascending: false }),
+          hasGrowthPlan
+              ? supabase
+                    .from("commercial_rams_documents")
+                    .select(COMMERCIAL_RAMS_SELECT_FIELDS)
+                    .order("updated_at", { ascending: false })
+                    .order("created_at", { ascending: false })
+              : Promise.resolve({ data: [], error: null }),
           supabase
               .from("items")
               .select("id,title,category,item_type,price,buy_price,created_at,updated_at")
@@ -5264,7 +5257,65 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
     return () => {
       isCancelled = true;
     };
-  }, []);
+  }, [hasGrowthPlan]);
+
+  useEffect(() => {
+    if (!currentUserId) {
+      setPlatformAnnouncement(null);
+      return;
+    }
+
+    let isCancelled = false;
+
+    async function loadPlatformAnnouncement() {
+      try {
+        const supabase = createSupabaseClient();
+        const { data, error } = await supabase
+            .from("platform_announcements")
+            .select(PLATFORM_ANNOUNCEMENT_SELECT)
+            .eq("is_active", true)
+            .order("published_at", { ascending: false, nullsFirst: false })
+            .order("updated_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        if (isCancelled) {
+          return;
+        }
+
+        if (error) {
+          if (!isMissingTableError(error)) {
+            console.error("Unable to load platform announcement:", error.message);
+          }
+          setPlatformAnnouncement(null);
+          return;
+        }
+
+        const announcement = mapPlatformAnnouncementRow(
+            data as PlatformAnnouncementRow | null
+        );
+
+        setPlatformAnnouncement(
+            announcement.isActive && announcement.message.trim()
+                ? announcement
+                : null
+        );
+      } catch (error) {
+        if (isCancelled) {
+          return;
+        }
+
+        console.error("Unable to load platform announcement:", error);
+        setPlatformAnnouncement(null);
+      }
+    }
+
+    loadPlatformAnnouncement();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [currentUserId]);
 
   useEffect(() => {
     if (isHydrating || !isDatabaseReady || !canSyncAppState) {
@@ -5296,6 +5347,17 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
   ]);
 
   async function createCustomer(customer: Customer) {
+    if (customers.length >= activeSubscriptionPlan.customerLimit) {
+      const limitHelp =
+          activeSubscriptionPlan.key === "starter"
+              ? " Upgrade to Growth to add more."
+              : "";
+
+      throw new Error(
+          `${activeSubscriptionPlan.name} allows up to ${activeSubscriptionPlan.customerLimit.toLocaleString()} customers.${limitHelp}`
+      );
+    }
+
     const supabase = createSupabaseClient();
     const { data, error } = await supabase
         .from("customers")
@@ -6452,7 +6514,7 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
         quoteId,
         createDocumentHistoryEntry(
             "sent",
-            `${metadata.method === "text" ? "Sent by text" : "Sent by email"}${
+            `Sent by email${
                 metadata.recipient ? ` to ${metadata.recipient.trim()}` : ""
             }.`,
             metadata
@@ -6491,7 +6553,7 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
         invoiceId,
         createDocumentHistoryEntry(
             "sent",
-            `${metadata.method === "text" ? "Sent by text" : "Sent by email"}${
+            `Sent by email${
                 metadata.recipient ? ` to ${metadata.recipient.trim()}` : ""
             }.`,
             metadata
@@ -7214,6 +7276,16 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
       throw new Error("Only the current account can stay as Admin.");
     }
 
+    const activeStaffCount = staffMembers.filter(
+        (staffMember) => staffMember.isActive
+    ).length;
+
+    if (values.isActive && activeStaffCount >= activeSubscriptionPlan.staffLimit) {
+      throw new Error(
+          `${activeSubscriptionPlan.name} allows up to ${activeSubscriptionPlan.staffLimit} active staff account${activeSubscriptionPlan.staffLimit === 1 ? "" : "s"}.`
+      );
+    }
+
     const supabase = createSupabaseClient();
     const { data, error } = await supabase
         .from("staff_members")
@@ -7260,6 +7332,20 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
     const nextEmail = existingStaffMember.isSystemAdmin
         ? existingStaffMember.email
         : values.email;
+
+    const activeStaffCountExcludingCurrent = staffMembers.filter(
+        (staffMember) => staffMember.isActive && staffMember.id !== staffMemberId
+    ).length;
+
+    if (
+        nextIsActive &&
+        !existingStaffMember.isSystemAdmin &&
+        activeStaffCountExcludingCurrent >= activeSubscriptionPlan.staffLimit
+    ) {
+      throw new Error(
+          `${activeSubscriptionPlan.name} allows up to ${activeSubscriptionPlan.staffLimit} active staff account${activeSubscriptionPlan.staffLimit === 1 ? "" : "s"}.`
+      );
+    }
 
     const supabase = createSupabaseClient();
     const { data, error } = await supabase
@@ -7595,7 +7681,7 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
         customerName: activeWorkflowQuote.customerName,
         businessName: brandName,
         documentNumber: activeWorkflowQuote.quoteNumber,
-        total: formatTemplateCurrency(activeWorkflowQuote.total),
+        total: formatTemplateCurrency(activeWorkflowQuote.total, appSettings.currencyCode),
         quoteDate: formatIsoDateLabel(activeWorkflowQuote.date),
         daysSinceQuote,
         followUpNumber: followUpCount,
@@ -7636,7 +7722,7 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
         customerName: activeWorkflowInvoice.customerName,
         businessName: brandName,
         documentNumber: activeWorkflowInvoice.invoiceNumber,
-        total: formatTemplateCurrency(activeWorkflowInvoice.total),
+        total: formatTemplateCurrency(activeWorkflowInvoice.total, appSettings.currencyCode),
         dueDate: formatIsoDateLabel(dueDate),
         daysOverdue,
         reminderNumber: reminderCount,
@@ -7709,22 +7795,16 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
       return;
     }
 
-    if ((payload.method === "email" || payload.method === "both") && !payload.emailRecipient) {
+    if (!payload.emailRecipient) {
       throw new Error("Choose an email recipient before sending.");
     }
 
-    if ((payload.method === "text" || payload.method === "both") && !payload.textRecipient) {
-      throw new Error("Choose a mobile number before sending.");
-    }
-
-    if (payload.method === "email" || payload.method === "both") {
-      await sendCustomerEmailMessage({
-        recipient: payload.emailRecipient,
-        subject: payload.emailSubject,
-        message: payload.emailMessage,
-        businessDetails: appSettings,
-      });
-    }
+    await sendCustomerEmailMessage({
+      recipient: payload.emailRecipient,
+      subject: payload.emailSubject,
+      message: payload.emailMessage,
+      businessDetails: appSettings,
+    });
 
     if (workflowMessageTarget.kind === "quote_follow_up") {
       await logQuoteFollowUpSent(workflowMessageTarget.quoteId);
@@ -7734,12 +7814,6 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
 
     setWorkflowMessageTarget(null);
 
-    if (payload.method === "text" || payload.method === "both") {
-      const textUrl = buildTextMessageUrl(payload.textRecipient, payload.textMessage);
-      window.setTimeout(() => {
-        window.location.href = textUrl;
-      }, 150);
-    }
   }
 
   useEffect(() => {
@@ -7969,6 +8043,10 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
   }
 
   function beginQuoteScheduling(quoteId: string) {
+    if (!hasGrowthPlan) {
+      return;
+    }
+
     const context = getQuoteSchedulingContext(quoteId);
 
     if (!context) {
@@ -8121,6 +8199,10 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
   }
 
   async function addScheduledJob(job: ScheduledJob) {
+    if (!hasGrowthPlan && job.type === "Commercial") {
+      throw new Error("Commercial job tools are available on Growth.");
+    }
+
     return Boolean(await createScheduledJobRecord(job));
   }
 
@@ -8473,6 +8555,10 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
   }
 
   async function convertQuoteToInvoice(quoteId: string) {
+    if (!hasGrowthPlan) {
+      return;
+    }
+
     const quote = quotes.find((q) => q.id === quoteId);
     if (!quote) return;
 
@@ -8816,44 +8902,6 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
     return matchingVisits[0] ?? null;
   }
 
-  async function sendVisitCompletionTextIfNeeded(
-      customer: Customer,
-      visit: VisitLog,
-      previousStatus?: VisitLog["status"]
-  ) {
-    if (
-        !appSettings.autoSendVisitCompletionTexts ||
-        customer.paymentMethod !== "On Day Transfer" ||
-        visit.status !== "completed" ||
-        previousStatus === "completed"
-    ) {
-      return;
-    }
-
-    const recipient = customer.phone?.trim();
-
-    if (!recipient) {
-      setDatabaseError(
-          `Visit saved for ${customer.name}, but no mobile number is saved for the automatic payment text.`
-      );
-      return;
-    }
-
-    try {
-      await sendCustomerTextMessage({
-        recipient,
-        message: buildVisitCompletionText(appSettings, customer, visit),
-      });
-      setDatabaseError(`Visit saved and payment text sent to ${customer.name}.`);
-    } catch (error) {
-      const message =
-          error instanceof Error && error.message.trim()
-              ? error.message
-              : "Unable to send the automatic payment text.";
-      setDatabaseError(`Visit saved for ${customer.name}, but the text was not sent. ${message}`);
-    }
-  }
-
   async function markVisit(
       customerId: number,
       status: "cut" | "not_cut",
@@ -8901,11 +8949,6 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
         setPendingCashPayment(customerId, false);
       }
 
-      await sendVisitCompletionTextIfNeeded(
-          customer,
-          persistedVisit,
-          existingVisit.status
-      );
       return;
     }
 
@@ -8946,7 +8989,6 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
       setPendingCashPayment(customerId, false);
     }
 
-    await sendVisitCompletionTextIfNeeded(customer, persistedVisit);
   }
 
   async function setVisitPaidStatus(visitId: number | string, paid: boolean) {
@@ -9095,7 +9137,6 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
       : headerWeatherLoading
           ? "Loading"
           : "Unavailable";
-
   if (isHydrating) {
     return (
         <div className="flex min-h-screen items-center justify-center bg-[#edf1f2] p-6">
@@ -9124,6 +9165,30 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                   alt="RoundHQ"
                   className="h-auto max-h-12 w-[178px] object-contain"
               />
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-left">
+              <span className="block text-xs font-black uppercase tracking-[0.16em] text-[#20c766]">
+                {activeSubscriptionPlan.name} plan
+              </span>
+              <span className="mt-1 block text-sm font-semibold text-white/78">
+                {activeSubscriptionPlan.priceLabel} per business / month
+              </span>
+              {activeSubscriptionPlan.key === "starter" ? (
+                  <a
+                      href="/billing"
+                      className="mt-3 inline-flex w-full items-center justify-center rounded-xl bg-[#20c766] px-3 py-2 text-xs font-black text-[#003c35] shadow-[0_12px_28px_rgba(32,199,102,0.24)] transition hover:bg-[#2ee074]"
+                  >
+                    Upgrade to Growth
+                  </a>
+              ) : (
+                  <a
+                      href="/billing"
+                      className="mt-3 inline-flex w-full items-center justify-center rounded-xl border border-white/10 bg-white/[0.07] px-3 py-2 text-xs font-black text-white/80 transition hover:bg-white/[0.12] hover:text-white"
+                  >
+                    Manage billing
+                  </a>
+              )}
             </div>
 
             <nav className="mt-8 flex-1 space-y-3 overflow-y-auto pr-1">
@@ -9399,7 +9464,7 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                             <span>
                               <span className="block">Billing</span>
                               <span className="text-xs font-medium text-[#667085]">
-                                Manage plan and invoices
+                                {activeSubscriptionPlan.name} plan - manage billing
                               </span>
                             </span>
                           </a>
@@ -9499,6 +9564,8 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                       visits={visitLogs}
                       customers={customers}
                       scheduledJobs={scheduledJobs}
+                      quotes={quotes}
+                      invoices={invoices}
                       monthlyPayments={monthlyPayments}
                       grassCutSeasonStart={appSettings.grassCutSeasonStart}
                       grassCutSeasonEnd={appSettings.grassCutSeasonEnd}
@@ -9507,22 +9574,31 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                       selectedDay={selectedDay}
                       defaultRotationWeeks={defaultRotationWeeks}
                       activeRotationWeeks={activeRotationWeeks}
+                      currencyCode={appSettings.currencyCode}
                       isLocked={isLocked}
                       showWeatherWidget={appSettings.showWeatherWidget}
                       showRevenueWidget={appSettings.showRevenueWidget}
                       showJobsWidget={appSettings.showJobsWidget}
                       showUnpaidWidget={appSettings.showUnpaidWidget}
                       showRecentActivityWidget={appSettings.showRecentActivityWidget}
+                      showAdvancedInsights={hasGrowthPlan}
+                      announcement={platformAnnouncement}
                       attentionItems={dashboardAttentionItems}
                       onGoToRounds={() => navigateToPage("rounds")}
-                      onGoToActions={() => navigateToPage("actions")}
+                      onGoToActions={
+                          hasGrowthPlan ? () => navigateToPage("actions") : undefined
+                      }
                       onGoToMap={() => navigateToPage("map")}
                       onGoToCustomers={() => navigateToPage("customers")}
                       onGoToQuoteForm={() => openNewQuoteForm()}
                       onGoToInvoiceForm={() => openNewInvoiceForm()}
                       onGoToSchedule={() => navigateToPage("schedule")}
                       onGoToPayments={() => navigateToPage("payments")}
-                      onGoToCustomerProfit={() => navigateToPage("customerProfit")}
+                      onGoToCustomerProfit={
+                          hasGrowthPlan
+                              ? () => navigateToPage("customerProfit")
+                              : undefined
+                      }
                       weekOptions={activeWeekOptions}
                       dayOptions={DAY_OPTIONS}
                       onWeekChange={(week) => setSelectedWeek(week as WeekName)}
@@ -9530,8 +9606,12 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                       onOpenCustomer={openCustomerProfile}
                       onOpenQuote={openEditQuoteForm}
                       onOpenInvoice={openEditInvoiceForm}
-                      onSendQuoteFollowUp={openQuoteFollowUpDialog}
-                      onSendInvoiceReminder={openInvoiceReminderDialog}
+                      onSendQuoteFollowUp={
+                          hasGrowthPlan ? openQuoteFollowUpDialog : undefined
+                      }
+                      onSendInvoiceReminder={
+                          hasGrowthPlan ? openInvoiceReminderDialog : undefined
+                      }
                   />
               )}
 
@@ -9543,6 +9623,7 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                       grassCutSeasonEnd={appSettings.grassCutSeasonEnd}
                       defaultRotationWeeks={defaultRotationWeeks}
                       activeRotationWeeks={activeRotationWeeks}
+                      allowCommercialTools={hasGrowthPlan}
                       onAddJob={addScheduledJob as any}
                       pendingQuoteSchedule={pendingQuoteSchedule}
                       onScheduleQuote={scheduleQuoteFromCalendar}
@@ -9557,6 +9638,7 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                       customers={customers as any}
                       quotes={quotes as any}
                       invoices={invoices as any}
+                      allowCommercialTools={hasGrowthPlan}
                       onOpenJob={(jobId) => openScheduledJob(jobId, "jobs")}
                       onOpenCustomer={openCustomerProfile}
                   />
@@ -9633,6 +9715,8 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                       grassCutSeasonStart={appSettings.grassCutSeasonStart}
                       grassCutSeasonEnd={appSettings.grassCutSeasonEnd}
                       defaultRotationWeeks={defaultRotationWeeks}
+                      customerLimit={activeSubscriptionPlan.customerLimit}
+                      allowCommercialTools={hasGrowthPlan}
                       onAdd={addCustomer as any}
                       onUpdate={updateCustomer as any}
                       onDelete={deleteCustomer}
@@ -9717,6 +9801,7 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                       grassCutSeasonStart={appSettings.grassCutSeasonStart}
                       grassCutSeasonEnd={appSettings.grassCutSeasonEnd}
                       defaultRotationWeeks={defaultRotationWeeks}
+                      allowCommercialTools={hasGrowthPlan}
                       onBack={goBackToCustomers}
                       onOpenPayments={() => navigateToPage("payments")}
                       onTogglePaid={togglePaid}
@@ -9817,6 +9902,7 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                       onDelete={deleteQuoteRecord}
                       onConvertToSchedule={beginQuoteScheduling}
                       onConvertToInvoice={convertQuoteToInvoice}
+                      allowQuoteConversionWorkflows={hasGrowthPlan}
                       onMarkSent={markQuoteSent}
                   />
                 )}
@@ -9880,6 +9966,7 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                       initialItems={pendingLeadQuoteDraft?.initialItems}
                       savedServices={appSettings.quoteServices}
                       pressureWashRatePerSquareMetre={appSettings.defaultPressureWashRate}
+                      allowCommercialTools={hasGrowthPlan}
                       onSave={addQuote as any}
                       onBack={() => {
                         setPendingLeadQuoteDraft(null);
@@ -9973,6 +10060,7 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
                       defaultPaymentTermsDays={appSettings.paymentTermsDays}
                       defaultVatRegistered={appSettings.vatRegistered}
                       defaultVatRate={appSettings.vatRate}
+                      allowCommercialTools={hasGrowthPlan}
                       onSave={addInvoice as any}
                       onBack={() => navigateToPage("invoices")}
                   />
@@ -10003,6 +10091,7 @@ export default function JobsApp({ featureAccess }: JobsAppProps = {}) {
               {page === "settings" && (
                   <SettingsPage
                       initialSettings={appSettings}
+                      showGrowthSettings={hasGrowthPlan}
                       onSave={handleSaveSettings}
                   />
               )}

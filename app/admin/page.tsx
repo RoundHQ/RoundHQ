@@ -20,6 +20,11 @@ import {
   getAdminCustomerWorkspaces,
   type AdminCustomerWorkspace,
 } from "@/lib/admin/customers";
+import {
+  getPlanUsagePercent,
+  getSubscriptionPlan,
+  SUBSCRIPTION_PLANS,
+} from "@/lib/billing/plans";
 import { isAdminAccessConfigured, isAdminEmail } from "@/lib/admin/access";
 import { createClient } from "@/lib/supabase/server";
 import { isSupabaseServiceRoleConfigured } from "@/lib/supabase/admin";
@@ -143,6 +148,35 @@ function StatTile({
         </div>
       </div>
       <p className="mt-4 text-sm leading-6 text-slate-600">{detail}</p>
+    </div>
+  );
+}
+
+function UsageMiniBar({
+  label,
+  used,
+  limit,
+}: {
+  label: string;
+  used: number;
+  limit: number;
+}) {
+  const percent = getPlanUsagePercent(used, limit);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
+        <span>{label}</span>
+        <span className="font-bold text-slate-700">
+          {used.toLocaleString("en-GB")} / {limit.toLocaleString("en-GB")}
+        </span>
+      </div>
+      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100">
+        <div
+          className="h-full rounded-full bg-[#19c653]"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
     </div>
   );
 }
@@ -340,6 +374,58 @@ export default async function AdminPage({
 
       <section className="bg-white px-5 py-8 sm:px-8 lg:py-10">
         <div className="mx-auto max-w-7xl">
+          <section className="mb-6 grid gap-5 lg:grid-cols-2">
+            {SUBSCRIPTION_PLANS.map((plan) => (
+              <article
+                key={plan.key}
+                className={`rounded-lg border bg-white p-5 shadow-[0_18px_46px_rgba(15,23,42,0.08)] ${
+                  plan.key === "growth"
+                    ? "border-[#19c653] ring-1 ring-[#19c653]/20"
+                    : "border-slate-200"
+                }`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-xl font-extrabold text-slate-950">
+                        {plan.name}
+                      </h2>
+                      {plan.badge ? (
+                        <span className="rounded-full bg-[#19c653] px-2.5 py-1 text-xs font-extrabold text-white">
+                          {plan.badge}
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-2 text-sm text-slate-600">
+                      {plan.description}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-2xl font-extrabold text-slate-950">
+                      {plan.priceLabel}
+                    </p>
+                    <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#168b43]">
+                      {plan.billingLabel}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                  {plan.summaryLimits.map((limit) => (
+                    <div
+                      key={limit}
+                      className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700"
+                    >
+                      {limit}
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-4 text-sm font-semibold text-slate-500">
+                  {stats.planCounts[plan.key]} customer workspaces on this plan
+                </p>
+              </article>
+            ))}
+          </section>
+
           <div className="rounded-lg border border-slate-200 bg-white shadow-[0_18px_46px_rgba(15,23,42,0.08)]">
             <div className="border-b border-slate-200 p-4 sm:p-5">
               <form className="grid gap-3 lg:grid-cols-[1fr_220px_auto]">
@@ -385,6 +471,7 @@ export default async function AdminPage({
                     <th className="px-4 py-4 font-bold">Customer</th>
                     <th className="px-4 py-4 font-bold">Owner</th>
                     <th className="px-4 py-4 font-bold">Subscription</th>
+                    <th className="px-4 py-4 font-bold">Plan</th>
                     <th className="px-4 py-4 font-bold">Usage</th>
                     <th className="px-4 py-4 font-bold">Joined</th>
                     <th className="px-4 py-4 font-bold">Stripe</th>
@@ -396,6 +483,7 @@ export default async function AdminPage({
                     const stripeCustomerUrl = getStripeCustomerUrl(
                       workspace.stripeCustomerId
                     );
+                    const plan = getSubscriptionPlan(workspace.subscriptionPlan);
 
                     return (
                       <tr
@@ -446,11 +534,31 @@ export default async function AdminPage({
                             </div>
                           )}
                         </td>
-                        <td className="px-4 py-4 text-sm text-slate-700">
-                          <div>{workspace.appCustomerCount} app customers</div>
-                          <div className="mt-1 text-xs text-slate-500">
-                            {workspace.memberCount} members,{" "}
-                            {workspace.activeStaffCount} active staff
+                        <td className="px-4 py-4">
+                          <div className="font-extrabold text-slate-950">
+                            {plan.name}
+                          </div>
+                          <div className="mt-1 text-xs font-semibold text-[#168b43]">
+                            {plan.priceLabel} {plan.billingLabel}
+                          </div>
+                          {plan.badge ? (
+                            <span className="mt-2 inline-flex rounded-full bg-[#19c653] px-2 py-0.5 text-[0.68rem] font-extrabold text-white">
+                              {plan.badge}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="min-w-[190px] px-4 py-4 text-sm text-slate-700">
+                          <div className="space-y-3">
+                            <UsageMiniBar
+                              label="Customers"
+                              used={workspace.appCustomerCount}
+                              limit={plan.customerLimit}
+                            />
+                            <UsageMiniBar
+                              label="Staff"
+                              used={workspace.activeStaffCount}
+                              limit={plan.staffLimit}
+                            />
                           </div>
                         </td>
                         <td className="px-4 py-4 text-sm text-slate-700">

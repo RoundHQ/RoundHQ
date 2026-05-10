@@ -170,7 +170,7 @@ export const RECURRING_INVOICE_FREQUENCY_OPTIONS = [
 export type RecurringInvoiceFrequency =
   (typeof RECURRING_INVOICE_FREQUENCY_OPTIONS)[number];
 
-export const DOCUMENT_DELIVERY_METHOD_OPTIONS = ["email", "text"] as const;
+export const DOCUMENT_DELIVERY_METHOD_OPTIONS = ["email"] as const;
 
 export type DocumentDeliveryMethod =
   (typeof DOCUMENT_DELIVERY_METHOD_OPTIONS)[number];

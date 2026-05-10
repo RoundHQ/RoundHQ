@@ -72,6 +72,7 @@ type Props = {
   grassCutSeasonEnd: string;
   defaultRotationWeeks?: RotationWeeks;
   activeRotationWeeks?: RotationWeeks;
+  allowCommercialTools?: boolean;
   onAddJob: (job: ScheduledJob) => void | boolean | Promise<void | boolean>;
   pendingQuoteSchedule: PendingQuoteSchedule | null;
   onScheduleQuote: (details: {
@@ -325,6 +326,7 @@ export default function SchedulePage({
   grassCutSeasonEnd,
   defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
   activeRotationWeeks,
+  allowCommercialTools = true,
   onAddJob,
   pendingQuoteSchedule,
   onScheduleQuote,
@@ -922,7 +924,9 @@ export default function SchedulePage({
                       <option value="One Off">One Off</option>
                       <option value="Quote Accepted">Quote Accepted</option>
                       <option value="Grass Cut">Service Visit</option>
-                      <option value="Commercial">Commercial</option>
+                      {allowCommercialTools ? (
+                        <option value="Commercial">Commercial</option>
+                      ) : null}
                     </select>
                   </div>
 

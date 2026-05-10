@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   getDefaultCustomerAccountSettings,
   mapCustomerAccountSettingsRow,
@@ -7,6 +8,15 @@ import {
   type CustomerAccountStatus,
   type CustomerSupportPriority,
 } from "@/lib/customer-account";
+import {
+  normalizePlanKey,
+  type SubscriptionPlanKey,
+} from "@/lib/billing/plans";
+import {
+  isMissingSubscriptionPlanColumn,
+  LEGACY_SUBSCRIPTION_SELECT,
+  SUBSCRIPTION_SELECT,
+} from "@/lib/billing/subscriptions";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 
 type OrganizationRow = {
@@ -31,6 +41,7 @@ type OrganizationMemberRow = {
 
 type SubscriptionRow = {
   organization_id: string;
+  plan: string | null;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
   stripe_price_id: string | null;
@@ -92,6 +103,9 @@ type ScheduledJobRow = {
   created_at: string | null;
 };
 
+const ADMIN_SUBSCRIPTION_SELECT = `${SUBSCRIPTION_SELECT}, created_at, updated_at`;
+const ADMIN_LEGACY_SUBSCRIPTION_SELECT = `${LEGACY_SUBSCRIPTION_SELECT}, created_at, updated_at`;
+
 export type AdminCustomerWorkspace = {
   id: string;
   name: string;
@@ -101,6 +115,7 @@ export type AdminCustomerWorkspace = {
   memberCount: number;
   appCustomerCount: number;
   activeStaffCount: number;
+  subscriptionPlan: SubscriptionPlanKey;
   subscriptionStatus: string;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
@@ -121,6 +136,7 @@ export type AdminCustomerStats = {
   pastDueSubscriptions: number;
   disabledAccounts: number;
   totalAppCustomers: number;
+  planCounts: Record<SubscriptionPlanKey, number>;
 };
 
 export type AdminCustomerMember = {
@@ -204,6 +220,7 @@ function buildWorkspace({
     memberCount,
     appCustomerCount,
     activeStaffCount,
+    subscriptionPlan: normalizePlanKey(subscription?.plan),
     subscriptionStatus: subscription?.status ?? "missing",
     stripeCustomerId: subscription?.stripe_customer_id ?? null,
     stripeSubscriptionId: subscription?.stripe_subscription_id ?? null,
@@ -238,6 +255,41 @@ function throwIfError(result: { error: unknown }) {
   }
 }
 
+async function selectSubscriptionRows(supabase: SupabaseClient) {
+  const result = await supabase
+    .from("subscriptions")
+    .select(ADMIN_SUBSCRIPTION_SELECT);
+
+  if (!isMissingSubscriptionPlanColumn(result.error)) {
+    return result;
+  }
+
+  return supabase
+    .from("subscriptions")
+    .select(ADMIN_LEGACY_SUBSCRIPTION_SELECT);
+}
+
+async function selectSubscriptionRow(
+  supabase: SupabaseClient,
+  organizationId: string
+) {
+  const result = await supabase
+    .from("subscriptions")
+    .select(ADMIN_SUBSCRIPTION_SELECT)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+
+  if (!isMissingSubscriptionPlanColumn(result.error)) {
+    return result;
+  }
+
+  return supabase
+    .from("subscriptions")
+    .select(ADMIN_LEGACY_SUBSCRIPTION_SELECT)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+}
+
 export async function getAdminCustomerWorkspaces() {
   const supabase = createServiceRoleClient();
 
@@ -256,11 +308,7 @@ export async function getAdminCustomerWorkspaces() {
     supabase
       .from("organization_members")
       .select("organization_id, user_id, email, full_name, role, status, created_at"),
-    supabase
-      .from("subscriptions")
-      .select(
-        "organization_id, stripe_customer_id, stripe_subscription_id, stripe_price_id, status, trial_ends_at, current_period_end, cancel_at_period_end, created_at, updated_at"
-      ),
+    selectSubscriptionRows(supabase),
     supabase.from("customers").select("organization_id"),
     supabase
       .from("staff_members")
@@ -337,6 +385,14 @@ export async function getAdminCustomerWorkspaces() {
       (workspace) => workspace.accountStatus === "disabled"
     ).length,
     totalAppCustomers: customers.length,
+    planCounts: {
+      starter: workspaces.filter(
+        (workspace) => workspace.subscriptionPlan === "starter"
+      ).length,
+      growth: workspaces.filter(
+        (workspace) => workspace.subscriptionPlan === "growth"
+      ).length,
+    },
   };
 
   return { workspaces, stats };
@@ -367,13 +423,7 @@ export async function getAdminCustomerProfile(organizationId: string) {
       .select("organization_id, user_id, email, full_name, role, status, created_at")
       .eq("organization_id", organizationId)
       .order("created_at", { ascending: true }),
-    supabase
-      .from("subscriptions")
-      .select(
-        "organization_id, stripe_customer_id, stripe_subscription_id, stripe_price_id, status, trial_ends_at, current_period_end, cancel_at_period_end, created_at, updated_at"
-      )
-      .eq("organization_id", organizationId)
-      .maybeSingle(),
+    selectSubscriptionRow(supabase, organizationId),
     supabase
       .from("customer_account_settings")
       .select(

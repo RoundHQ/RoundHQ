@@ -15,6 +15,7 @@ import {
   DEFAULT_SUPPORT_AUTO_ACKNOWLEDGE_MESSAGE,
   DEFAULT_SUPPORT_AUTO_ACKNOWLEDGE_SUBJECT,
 } from "@/lib/support/helpdesk";
+import { normalizeAnnouncementTone } from "@/lib/platform-announcements";
 
 function getText(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -179,6 +180,41 @@ export async function updateAdminHelpdeskSettingsAction(formData: FormData) {
 
   revalidatePath("/admin/settings");
   redirect("/admin/settings?tab=helpdesk&saved=1");
+}
+
+export async function updatePlatformAnnouncementAction(formData: FormData) {
+  await requireAdminAccess("/admin/settings?tab=announcements");
+
+  const title = getText(formData, "announcement_title") || "RoundHQ updates";
+  const message = getText(formData, "announcement_message");
+  const isActive = formData.get("announcement_active") === "on";
+  const now = new Date().toISOString();
+  const supabase = createServiceRoleClient();
+
+  const { error } = await supabase.from("platform_announcements").upsert(
+    {
+      id: "primary",
+      title,
+      message,
+      cta_label: getText(formData, "announcement_cta_label"),
+      cta_href: getText(formData, "announcement_cta_href"),
+      tone: normalizeAnnouncementTone(getText(formData, "announcement_tone")),
+      is_active: isActive,
+      published_at: isActive ? now : null,
+      updated_at: now,
+    },
+    {
+      onConflict: "id",
+    }
+  );
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/admin/settings");
+  revalidatePath("/dashboard");
+  redirect("/admin/settings?tab=announcements&saved=1");
 }
 
 export async function saveSupportCategoryAction(formData: FormData) {

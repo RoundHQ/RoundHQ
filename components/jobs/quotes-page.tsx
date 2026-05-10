@@ -7,7 +7,6 @@ import {
   Download,
   History as HistoryIcon,
   Mail,
-  MessageSquare,
   Pencil,
   Trash2,
 } from "lucide-react";
@@ -82,6 +81,7 @@ type Props = {
   onDelete: (quoteId: string) => void;
   onConvertToSchedule: (quoteId: string) => void;
   onConvertToInvoice: (quoteId: string) => void;
+  allowQuoteConversionWorkflows?: boolean;
   onMarkSent: (
     quoteId: string,
     metadata?: DocumentSendMetadata
@@ -90,7 +90,7 @@ type Props = {
 
 type SendTarget = {
   quoteId: string;
-  method: "email" | "text";
+  method: "email";
 } | null;
 
 type DocumentSendMetadata = {
@@ -211,18 +211,6 @@ function getQuoteEmailMessage(
     .join("\n");
 }
 
-function getQuoteTextMessage(
-  quote: Quote,
-  businessDetails: Props["businessDetails"]
-) {
-  return [
-    `Hi ${quote.customerName},`,
-    `your quote ${quote.quoteNumber} from ${getBrandName(businessDetails)} is ready.`,
-    `Total: ${formatCurrency(quote.total)}.`,
-    "I have prepared the PDF for you as well.",
-  ].join(" ");
-}
-
 export default function QuotesPage({
   quotes,
   customers,
@@ -233,6 +221,7 @@ export default function QuotesPage({
   onDelete,
   onConvertToSchedule,
   onConvertToInvoice,
+  allowQuoteConversionWorkflows = true,
   onMarkSent,
 }: Props) {
   const [sendTarget, setSendTarget] = useState<SendTarget>(null);
@@ -271,10 +260,6 @@ export default function QuotesPage({
     () => (activeCustomer ? getCustomerEmailAddresses(activeCustomer) : []),
     [activeCustomer]
   );
-  const textRecipients = useMemo(() => {
-    const phone = activeCustomer?.phone?.trim();
-    return phone ? [phone] : [];
-  }, [activeCustomer]);
   const filteredQuotes = useMemo(() => {
     if (activeFilter === "All") {
       return quotes;
@@ -322,7 +307,7 @@ export default function QuotesPage({
             </p>
             <h1 className="mt-2 text-3xl font-black tracking-tight">Quotes</h1>
             <p className="mt-2 text-sm text-white/75">
-              Create, manage, export, send, and convert quotes into jobs or invoices.
+              Create, manage, export, and send quotes.
             </p>
           </div>
 
@@ -467,30 +452,24 @@ export default function QuotesPage({
                           Email
                         </button>
 
-                        <button
-                          onClick={() =>
-                            setSendTarget({ quoteId: quote.id, method: "text" })
-                          }
-                          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-                        >
-                          <MessageSquare size={14} />
-                          Text
-                        </button>
+                        {allowQuoteConversionWorkflows ? (
+                          <>
+                            <button
+                              onClick={() => onConvertToSchedule(quote.id)}
+                              className="inline-flex items-center gap-2 rounded-lg bg-[#0f2343] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#1a325b]"
+                            >
+                              <Calendar size={14} />
+                              Add to Schedule
+                            </button>
 
-                        <button
-                          onClick={() => onConvertToSchedule(quote.id)}
-                          className="inline-flex items-center gap-2 rounded-lg bg-[#0f2343] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#1a325b]"
-                        >
-                          <Calendar size={14} />
-                          Add to Schedule
-                        </button>
-
-                        <button
-                          onClick={() => onConvertToInvoice(quote.id)}
-                          className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700"
-                        >
-                          Create Invoice
-                        </button>
+                            <button
+                              onClick={() => onConvertToInvoice(quote.id)}
+                              className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700"
+                            >
+                              Create Invoice
+                            </button>
+                          </>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -548,7 +527,7 @@ export default function QuotesPage({
                   <p className="mt-2 text-sm text-slate-600">{entry.summary}</p>
                   {entry.recipient ? (
                     <p className="mt-1 text-xs text-slate-400">
-                      {entry.method === "text" ? "Text" : "Email"}: {entry.recipient}
+                      Email: {entry.recipient}
                     </p>
                   ) : null}
                 </div>
@@ -565,21 +544,11 @@ export default function QuotesPage({
         <DocumentSendDialog
           isOpen
           method={sendTarget.method}
-          title={`${sendTarget.method === "email" ? "Email" : "Text"} ${activeQuote.quoteNumber}`}
-          recipientOptions={
-            sendTarget.method === "email" ? emailRecipients : textRecipients
-          }
-          initialRecipient={
-            sendTarget.method === "email"
-              ? emailRecipients[0]
-              : textRecipients[0]
-          }
+          title={`Email ${activeQuote.quoteNumber}`}
+          recipientOptions={emailRecipients}
+          initialRecipient={emailRecipients[0]}
           initialSubject={getQuoteEmailSubject(activeQuote, businessDetails)}
-          initialMessage={
-            sendTarget.method === "email"
-              ? getQuoteEmailMessage(activeQuote, businessDetails)
-              : getQuoteTextMessage(activeQuote, businessDetails)
-          }
+          initialMessage={getQuoteEmailMessage(activeQuote, businessDetails)}
           onClose={() => setSendTarget(null)}
           onSend={async ({ recipient, subject, message }) => {
             await sendQuoteDocument({
@@ -592,9 +561,7 @@ export default function QuotesPage({
                 getQuoteEmailSubject(activeQuote, businessDetails),
               message:
                 message.trim() ||
-                (sendTarget.method === "email"
-                  ? getQuoteEmailMessage(activeQuote, businessDetails)
-                  : getQuoteTextMessage(activeQuote, businessDetails)),
+                getQuoteEmailMessage(activeQuote, businessDetails),
             });
 
             await onMarkSent(activeQuote.id, {
@@ -602,11 +569,9 @@ export default function QuotesPage({
               recipient,
             });
 
-            if (sendTarget.method === "email") {
-              setSendNotice(
-                `Email sent to ${recipient} for ${activeQuote.quoteNumber}.`
-              );
-            }
+            setSendNotice(
+              `Email sent to ${recipient} for ${activeQuote.quoteNumber}.`
+            );
           }}
         />
       ) : null}

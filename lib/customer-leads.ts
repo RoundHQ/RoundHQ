@@ -316,9 +316,11 @@ export function normalizeCustomerLeadStatus(
 export function normalizeCustomerLeadPreferredContact(
   value: unknown
 ): CustomerLeadPreferredContact | undefined {
-  return value === "email" || value === "text" || value === "phone"
-    ? value
-    : undefined;
+  if (value === "email" || value === "phone") {
+    return value;
+  }
+
+  return value === "text" ? "phone" : undefined;
 }
 
 export function extractCustomerLeadData(

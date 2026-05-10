@@ -20,6 +20,11 @@ import {
 } from "@/components/admin/admin-page-chrome";
 import { getAdminCustomerProfile } from "@/lib/admin/customers";
 import { getAdminAccess } from "@/lib/admin/guard";
+import {
+  getPlanUsagePercent,
+  getSubscriptionPlan,
+  SUBSCRIPTION_PLANS,
+} from "@/lib/billing/plans";
 import { getCustomerFeatureSections } from "@/lib/customer-features";
 import { updateCustomerAccountAction } from "./actions";
 
@@ -145,6 +150,35 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
   );
 }
 
+function UsageBar({
+  label,
+  used,
+  limit,
+}: {
+  label: string;
+  used: number;
+  limit: number;
+}) {
+  const percent = getPlanUsagePercent(used, limit);
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <span className="font-bold text-slate-700">{label}</span>
+        <span className="font-extrabold text-slate-950">
+          {used.toLocaleString("en-GB")} / {limit.toLocaleString("en-GB")}
+        </span>
+      </div>
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
+        <div
+          className="h-full rounded-full bg-[#19c653]"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export default async function AdminCustomerProfilePage({
   params,
   searchParams,
@@ -176,6 +210,7 @@ export default async function AdminCustomerProfilePage({
     profile.workspace.stripeSubscriptionId
   );
   const featureSections = getCustomerFeatureSections();
+  const activePlan = getSubscriptionPlan(profile.workspace.subscriptionPlan);
 
   return (
     <main className="min-h-screen bg-white text-slate-950">
@@ -198,14 +233,14 @@ export default async function AdminCustomerProfilePage({
             detail={`Renews: ${formatDate(profile.workspace.currentPeriodEnd)}`}
           />
           <StatCard
-            label="Customers"
-            value={profile.usage.appCustomers}
-            detail="Profiles inside their workspace"
+            label="Plan"
+            value={activePlan.name}
+            detail={`${activePlan.priceLabel} ${activePlan.billingLabel}`}
           />
           <StatCard
-            label="Documents"
-            value={profile.usage.quotes + profile.usage.invoices}
-            detail="Quotes and invoices created"
+            label="Customers"
+            value={profile.usage.appCustomers}
+            detail={`${activePlan.customerLimit.toLocaleString("en-GB")} customer limit`}
           />
         </section>
       </AdminHeroShell>
@@ -291,6 +326,10 @@ export default async function AdminCustomerProfilePage({
               <InfoCard title="Billing information" icon={CreditCard}>
                 <dl>
                   <DetailRow
+                    label="Plan"
+                    value={`${activePlan.name} - ${activePlan.priceLabel} ${activePlan.billingLabel}`}
+                  />
+                  <DetailRow
                     label="Status"
                     value={
                       <span
@@ -358,14 +397,25 @@ export default async function AdminCustomerProfilePage({
               </InfoCard>
 
               <InfoCard title="Workspace usage" icon={BriefcaseBusiness}>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-4">
+                  <UsageBar
+                    label="Customers"
+                    used={profile.usage.appCustomers}
+                    limit={activePlan.customerLimit}
+                  />
+                  <UsageBar
+                    label="Staff accounts"
+                    used={profile.usage.activeStaff}
+                    limit={activePlan.staffLimit}
+                  />
+                </div>
+
+                <div className="mt-5 grid gap-3 sm:grid-cols-2">
                   {[
-                    ["Customers", profile.usage.appCustomers],
                     ["Leads", profile.usage.leads],
                     ["Quotes", profile.usage.quotes],
                     ["Invoices", profile.usage.invoices],
                     ["Jobs", profile.usage.scheduledJobs],
-                    ["Active staff", profile.usage.activeStaff],
                   ].map(([label, value]) => (
                     <div
                       key={label}
@@ -393,14 +443,32 @@ export default async function AdminCustomerProfilePage({
                     Account controls
                   </h2>
                   <p className="mt-2 text-sm leading-6 text-slate-600">
-                    Disable access, set support priority, leave private notes,
-                    and choose which modules this customer can use.
+                    Assign the subscription plan, disable access, set support
+                    priority, leave private notes, and choose which modules this
+                    customer can use.
                   </p>
                 </div>
               </div>
 
               <form action={updateAction} className="space-y-6">
                 <div className="grid gap-5 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-bold text-slate-700">
+                      Subscription plan
+                    </span>
+                    <select
+                      name="subscription_plan"
+                      defaultValue={activePlan.key}
+                      className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
+                    >
+                      {SUBSCRIPTION_PLANS.map((plan) => (
+                        <option key={plan.key} value={plan.key}>
+                          {plan.name} - {plan.priceLabel} per business / month
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
                   <label className="block">
                     <span className="mb-2 block text-sm font-bold text-slate-700">
                       Account status
@@ -415,7 +483,7 @@ export default async function AdminCustomerProfilePage({
                     </select>
                   </label>
 
-                  <label className="block">
+                  <label className="block sm:col-span-2">
                     <span className="mb-2 block text-sm font-bold text-slate-700">
                       Support priority
                     </span>

@@ -68,16 +68,16 @@ export const DEFAULT_SITE_PAGES: SitePage[] = [
   {
     slug: "pricing",
     navLabel: "Pricing",
-    eyebrow: "Simple pricing",
-    title: "One monthly price. Everything included.",
+    eyebrow: "Launch pricing",
+    title: "Starter and Growth plans for running your rounds.",
     summary:
-      "RoundHQ is GBP 30 per month for each business account, with no setup fees and no complicated feature tiers.",
+      "Starter is GBP 30 per business / month for solo operators. Growth is GBP 60 per business / month for teams that need staff permissions, RAMS, and deeper reporting.",
     body:
-      "The full platform is included from day one: unlimited customers, jobs and quotes, invoicing, payments, route planning, staff accounts, reminders, and reports.\n\nStart with a 14-day free trial. No card is required for the trial, and you can cancel whenever you need to.",
+      "Starter includes leads, CRM, quotes, invoices, scheduling, recurring rounds, route map, payment tracking, visit history, notes, one staff account, up to 250 customers, and a basic dashboard.\n\nGrowth includes everything in Starter, plus up to 5 staff accounts, staff permissions, RAMS generator, advanced dashboard insights, customer profitability, commercial customer tools, quote conversion workflows, operational reporting, and up to 1,500 customers.\n\nStart with a 14-day free trial. No card is required for the trial, and you can cancel whenever you need to.",
     highlights: [
-      "GBP 30 per month per business account",
+      "Starter: GBP 30 per business / month",
+      "Growth: GBP 60 per business / month",
       "14-day free trial with no card required",
-      "All current RoundHQ features included",
     ],
     primaryCtaLabel: "Start free trial",
     primaryCtaHref: "/signup",

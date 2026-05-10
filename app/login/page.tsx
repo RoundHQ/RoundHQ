@@ -8,7 +8,7 @@ import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
 const loginBenefits = [
   "Rounds, quotes, invoices and payments",
-  "Route planning and customer records",
+  "Route map and customer records",
   "Staff access and reports",
 ];
 

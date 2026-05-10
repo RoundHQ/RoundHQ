@@ -5,6 +5,7 @@ import {
   ensureSubscriptionRow,
   hasDashboardAccess,
 } from "@/lib/billing/subscriptions";
+import { getSubscriptionPlan, normalizePlanKey } from "@/lib/billing/plans";
 import {
   getBaseUrl,
   getStripe,
@@ -31,9 +32,15 @@ async function getOrganizationName(
 
 export async function POST(request: NextRequest) {
   try {
-    if (!isStripeConfigured()) {
+    const body = (await request.json().catch(() => null)) as {
+      plan?: unknown;
+    } | null;
+    const plan = normalizePlanKey(body?.plan);
+    const planDetails = getSubscriptionPlan(plan);
+
+    if (!isStripeConfigured(plan)) {
       return NextResponse.json(
-        { error: "Stripe is not configured yet." },
+        { error: `Stripe is not configured for ${planDetails.name} yet.` },
         { status: 500 }
       );
     }
@@ -55,7 +62,7 @@ export async function POST(request: NextRequest) {
     }
 
     const stripe = getStripe();
-    const priceId = getStripePriceId();
+    const priceId = getStripePriceId(plan);
     const organizationName = await getOrganizationName(supabase, organizationId);
     let customerId = subscription.stripe_customer_id;
 
@@ -75,6 +82,19 @@ export async function POST(request: NextRequest) {
         .from("subscriptions")
         .update({
           stripe_customer_id: customerId,
+          plan,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("organization_id", organizationId);
+
+      if (updateError) {
+        throw updateError;
+      }
+    } else {
+      const { error: updateError } = await supabase
+        .from("subscriptions")
+        .update({
+          plan,
           updated_at: new Date().toISOString(),
         })
         .eq("organization_id", organizationId);
@@ -101,11 +121,13 @@ export async function POST(request: NextRequest) {
       metadata: {
         organization_id: organizationId,
         supabase_user_id: user.id,
+        plan,
       },
       subscription_data: {
         metadata: {
           organization_id: organizationId,
           supabase_user_id: user.id,
+          plan,
         },
       },
     });
@@ -127,4 +149,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

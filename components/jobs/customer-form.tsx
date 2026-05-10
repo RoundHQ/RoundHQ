@@ -29,6 +29,7 @@ import AddressAutocompleteInput from "./address-autocomplete-input";
 type Props = {
     existing?: Customer;
     defaultRotationWeeks?: RotationWeeks;
+    allowCommercialTools?: boolean;
     onSave: (customer: Customer) => void;
     onCancel: () => void;
 };
@@ -104,6 +105,7 @@ function normalizeContactEmails(emails: string[] | undefined) {
 export default function CustomerForm({
     existing,
     defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
+    allowCommercialTools = true,
     onSave,
     onCancel,
 }: Props) {
@@ -161,6 +163,7 @@ export default function CustomerForm({
         [existing]
     );
     const isCommercialCustomer = form.customerType === "Commercial";
+    const showCommercialTools = allowCommercialTools && isCommercialCustomer;
     const selectedGrassCutAreas = normalizeGrassCutAreas(
         form.grassCutAreas,
         form.isGrassCuttingCustomer
@@ -179,7 +182,7 @@ export default function CustomerForm({
     function updateCustomerType(nextType: CustomerType) {
         setForm((prev) => {
             const nextContactEmails =
-                nextType === "Commercial"
+                nextType === "Commercial" && allowCommercialTools
                     ? prev.contactEmails && prev.contactEmails.length > 0
                         ? prev.contactEmails
                         : prev.email?.trim()
@@ -256,7 +259,7 @@ export default function CustomerForm({
             normalizedDefaultRotationWeeks
         );
         const cleanedPrimaryEmail = form.email?.trim() || "";
-        const cleanedContactEmails = isCommercialCustomer
+        const cleanedContactEmails = showCommercialTools
             ? normalizeContactEmails(form.contactEmails)
             : [];
         const nextCustomer: Customer = {
@@ -266,10 +269,10 @@ export default function CustomerForm({
             town: form.town?.trim() || undefined,
             postcode: form.postcode?.trim() || undefined,
             phone: form.phone?.trim() || undefined,
-            email: isCommercialCustomer
+            email: showCommercialTools
                 ? cleanedContactEmails[0] ?? undefined
                 : cleanedPrimaryEmail || undefined,
-            contactEmails: isCommercialCustomer ? cleanedContactEmails : undefined,
+            contactEmails: showCommercialTools ? cleanedContactEmails : undefined,
             rotationWeeksOverride: normalizeNullableRotationWeeks(
                 form.rotationWeeksOverride
             ),
@@ -328,7 +331,9 @@ export default function CustomerForm({
                                 }
                             >
                                 <option value="Residential">Residential</option>
-                                <option value="Commercial">Commercial</option>
+                                {allowCommercialTools || isCommercialCustomer ? (
+                                    <option value="Commercial">Commercial</option>
+                                ) : null}
                             </select>
                         </div>
 
@@ -447,7 +452,7 @@ export default function CustomerForm({
                             />
                         </div>
 
-                        {isCommercialCustomer ? (
+                        {showCommercialTools ? (
                             <div className="md:col-span-2">
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                     <label className="block text-sm font-medium text-slate-700">
@@ -508,7 +513,7 @@ export default function CustomerForm({
                     </div>
                 </section>
 
-                {isCommercialCustomer && (
+                {showCommercialTools && (
                     <section className="space-y-4">
                         <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                             <h3 className="text-sm font-bold uppercase tracking-wide text-slate-500">

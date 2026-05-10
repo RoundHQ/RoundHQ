@@ -16,6 +16,11 @@ import {
   getRotationDays,
   getRotationWeeksFromCutFrequency,
 } from "./rotation";
+import {
+  DEFAULT_CURRENCY_CODE,
+  formatCurrencyAmount,
+  type CurrencyCode,
+} from "./currency";
 
 export const dayOrder = [
   "Monday",
@@ -512,8 +517,11 @@ export function buildPaymentYearMonths(
   });
 }
 
-export function formatCurrency(value: number | null | undefined) {
-  return `£${Number(value ?? 0).toFixed(2)}`;
+export function formatCurrency(
+  value: number | null | undefined,
+  currencyCode: CurrencyCode | string = DEFAULT_CURRENCY_CODE
+) {
+  return formatCurrencyAmount(value, currencyCode);
 }
 
 export function toRadians(value: number) {

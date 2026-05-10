@@ -9,7 +9,7 @@ import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 const signupBenefits = [
   "14-day free trial",
   "No card required",
-  "Everything included for one monthly price",
+  "Starter £30 or Growth £60",
 ];
 
 export default function SignupPage() {

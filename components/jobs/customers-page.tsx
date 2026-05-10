@@ -33,6 +33,8 @@ type Props = {
   grassCutSeasonStart: string;
   grassCutSeasonEnd: string;
   defaultRotationWeeks?: RotationWeeks;
+  customerLimit?: number;
+  allowCommercialTools?: boolean;
   onAdd: (customer: Customer) => void;
   onUpdate: (customer: Customer) => void;
   onDelete: (customerId: number) => void;
@@ -244,7 +246,8 @@ function findDuplicateCustomer(
 function parseImportRows(
     workbookRows: Record<string, unknown>[],
     existingCustomers: Customer[],
-    defaultRotationWeeks: RotationWeeks
+    defaultRotationWeeks: RotationWeeks,
+    allowCommercialTools: boolean
 ): ImportRow[] {
   return workbookRows.map((row, index) => {
     const name = getText(row, ["Name", "Customer Name"]);
@@ -254,9 +257,9 @@ function parseImportRows(
     const phone = getText(row, ["Phone", "Contact Number", "Mobile"]);
     const email = getText(row, ["Email", "E-mail"]);
     const contactEmails = parseEmailAddresses(email);
-    const customerType = normaliseCustomerType(
-        getText(row, ["Customer Type", "Type"]) || "Residential"
-    );
+    const customerType = allowCommercialTools
+        ? normaliseCustomerType(getText(row, ["Customer Type", "Type"]) || "Residential")
+        : "Residential";
     const isGrassCuttingCustomer = getBoolean(
         row,
         ["Service Customer", "Grass Customer", "On Grass Round"],
@@ -334,11 +337,13 @@ function parseImportRows(
 function CustomerModal({
                          existingCustomer,
                          defaultRotationWeeks,
+                         allowCommercialTools,
                          onClose,
                          onSave,
                        }: {
   existingCustomer?: Customer;
   defaultRotationWeeks: RotationWeeks;
+  allowCommercialTools: boolean;
   onClose: () => void;
   onSave: (customer: Customer) => void;
 }) {
@@ -348,6 +353,7 @@ function CustomerModal({
           <CustomerForm
               existing={existingCustomer}
               defaultRotationWeeks={defaultRotationWeeks}
+              allowCommercialTools={allowCommercialTools}
               onSave={onSave}
               onCancel={onClose}
           />
@@ -363,6 +369,8 @@ export default function CustomersPage({
                                         grassCutSeasonStart,
                                         grassCutSeasonEnd,
                                         defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
+                                        customerLimit = Number.POSITIVE_INFINITY,
+                                        allowCommercialTools = true,
                                         onAdd,
                                         onUpdate,
                                         onDelete,
@@ -385,6 +393,7 @@ export default function CustomersPage({
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const normalizedDefaultRotationWeeks =
       normalizeRotationWeeks(defaultRotationWeeks);
+  const customerLimitReached = customers.length >= customerLimit;
 
   const filteredCustomers = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -411,6 +420,10 @@ export default function CustomersPage({
   }, [customers, search, typeFilter]);
 
   function openAddCustomerModal() {
+    if (customerLimitReached) {
+      return;
+    }
+
     setEditingCustomer(null);
     setIsCustomerModalOpen(true);
   }
@@ -469,7 +482,8 @@ export default function CustomersPage({
       const parsedRows = parseImportRows(
           meaningfulRows,
           customers,
-          normalizedDefaultRotationWeeks
+          normalizedDefaultRotationWeeks,
+          allowCommercialTools
       );
 
       setImportRows(parsedRows);
@@ -561,6 +575,13 @@ export default function CustomersPage({
           skipped += 1;
         }
       } else {
+        const nextCustomerCount = customers.length + added;
+
+        if (nextCustomerCount >= customerLimit) {
+          skipped += 1;
+          continue;
+        }
+
         try {
           await onAdd(builtCustomer);
           added += 1;
@@ -593,27 +614,41 @@ export default function CustomersPage({
               <p className="mt-2 text-sm text-white/75">
                 Search, filter, manage, add, edit, and import customer records.
               </p>
+              {Number.isFinite(customerLimit) ? (
+                  <p className="mt-2 text-xs font-semibold text-white/70">
+                    {customers.length.toLocaleString()} of {customerLimit.toLocaleString()} customer records used.
+                  </p>
+              ) : null}
             </div>
 
             <div className="flex flex-wrap gap-2">
               <button
                   onClick={openAddCustomerModal}
+                  disabled={customerLimitReached}
                   className="rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 transition hover:bg-slate-100"
               >
                 Add Customer
               </button>
 
-              <label className="cursor-pointer rounded-xl border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/15">
+              <label className={`rounded-xl border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/15 ${
+                  customerLimitReached ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+              }`}>
                 Import Excel
                 <input
                     type="file"
                     accept=".xlsx,.xls,.csv"
                     className="hidden"
+                    disabled={customerLimitReached}
                     onChange={handleImportFile}
                 />
               </label>
             </div>
           </div>
+          {customerLimitReached ? (
+              <div className="mt-4 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm text-white/80">
+                This plan has reached its customer limit.
+              </div>
+          ) : null}
         </section>
 
         <section className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm">
@@ -634,7 +669,9 @@ export default function CustomersPage({
             >
               <option value="All">All Types</option>
               <option value="Residential">Residential</option>
-              <option value="Commercial">Commercial</option>
+              {allowCommercialTools ? (
+                  <option value="Commercial">Commercial</option>
+              ) : null}
             </select>
 
             <div className="text-sm text-slate-400">
@@ -745,6 +782,7 @@ export default function CustomersPage({
             <CustomerModal
                 existingCustomer={editingCustomer ?? undefined}
                 defaultRotationWeeks={normalizedDefaultRotationWeeks}
+                allowCommercialTools={allowCommercialTools}
                 onClose={closeCustomerModal}
                 onSave={saveCustomerModal}
             />

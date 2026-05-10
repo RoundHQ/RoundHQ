@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   CalendarDays,
@@ -11,6 +11,7 @@ import {
   CreditCard,
   FilePlus2,
   FileText,
+  Megaphone,
   Receipt,
   ReceiptText,
   Route,
@@ -36,6 +37,12 @@ import {
   isCustomerDueInSelectedWeek,
   normalizeRotationWeeks,
 } from "./rotation";
+import {
+  DEFAULT_CURRENCY_CODE,
+  formatCurrencyAmount,
+  normalizeCurrencyCode,
+  type CurrencyCode,
+} from "./currency";
 import type {
   Customer,
   DashboardAttentionItem,
@@ -44,6 +51,7 @@ import type {
   VisitLog,
   WeatherState,
 } from "./types";
+import type { PlatformAnnouncement } from "@/lib/platform-announcements";
 
 type ScheduledJob = {
   id: string;
@@ -59,10 +67,17 @@ type ScheduledJob = {
   createdAt: string;
 };
 
+type FinancialDocument = {
+  id: string;
+  total?: number | null;
+};
+
 type Props = {
   visits: VisitLog[];
   customers: Customer[];
   scheduledJobs: ScheduledJob[];
+  quotes?: FinancialDocument[];
+  invoices?: FinancialDocument[];
   monthlyPayments: MonthlyPayment[];
   grassCutSeasonStart: string;
   grassCutSeasonEnd: string;
@@ -71,12 +86,15 @@ type Props = {
   selectedDay: string;
   defaultRotationWeeks?: RotationWeeks;
   activeRotationWeeks?: RotationWeeks;
+  currencyCode?: CurrencyCode | string;
   isLocked: boolean;
   showWeatherWidget: boolean;
   showRevenueWidget: boolean;
   showJobsWidget: boolean;
   showUnpaidWidget: boolean;
   showRecentActivityWidget: boolean;
+  showAdvancedInsights?: boolean;
+  announcement?: PlatformAnnouncement | null;
   attentionItems: DashboardAttentionItem[];
   onGoToRounds?: () => void;
   onGoToActions?: () => void;
@@ -110,8 +128,15 @@ const DEFAULT_WEATHER_COORDINATES = {
   longitude: -4.2518,
 };
 
-function formatMoney(value: number) {
-  return `\u00a3${value.toFixed(2)}`;
+function formatDashboardMoney(
+  value: number,
+  currencyCode: CurrencyCode | string = DEFAULT_CURRENCY_CODE,
+  options: Pick<
+    Intl.NumberFormatOptions,
+    "minimumFractionDigits" | "maximumFractionDigits"
+  > = {}
+) {
+  return formatCurrencyAmount(value, currencyCode, options);
 }
 
 function formatDateForInput(date: Date) {
@@ -284,6 +309,8 @@ export default function DashboardPage({
   visits,
   customers,
   scheduledJobs,
+  quotes = [],
+  invoices = [],
   monthlyPayments,
   grassCutSeasonStart,
   grassCutSeasonEnd,
@@ -292,12 +319,15 @@ export default function DashboardPage({
   selectedDay,
   defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
   activeRotationWeeks,
+  currencyCode = DEFAULT_CURRENCY_CODE,
   isLocked,
   showWeatherWidget,
   showRevenueWidget,
   showJobsWidget,
   showUnpaidWidget,
   showRecentActivityWidget,
+  showAdvancedInsights = true,
+  announcement = null,
   attentionItems,
   onGoToRounds,
   onGoToActions,
@@ -321,6 +351,20 @@ export default function DashboardPage({
   const [weather, setWeather] = useState<WeatherState | null>(null);
   const [weatherLoading, setWeatherLoading] = useState(showWeatherWidget);
   const [weatherError, setWeatherError] = useState<string | null>(null);
+  const selectedCurrencyCode = normalizeCurrencyCode(currencyCode);
+  const formatMoney = useCallback(
+    (value: number, options?: Parameters<typeof formatDashboardMoney>[2]) =>
+      formatDashboardMoney(value, selectedCurrencyCode, options),
+    [selectedCurrencyCode]
+  );
+  const formatWholeMoney = useCallback(
+    (value: number) =>
+      formatDashboardMoney(value, selectedCurrencyCode, {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      }),
+    [selectedCurrencyCode]
+  );
   const normalizedDefaultRotationWeeks = normalizeRotationWeeks(defaultRotationWeeks);
   const roundRotationWeeks = normalizeRotationWeeks(
     activeRotationWeeks ?? normalizedDefaultRotationWeeks
@@ -591,9 +635,71 @@ export default function DashboardPage({
     )
     .slice(0, 5);
 
-  const todayStr = new Date().toISOString().split("T")[0];
-  const scheduledWorkCount = scheduledJobs.filter((job) => job.date >= todayStr)
-    .length;
+  const todayStr = formatDateForInput(new Date());
+  const todaysScheduledJobs = useMemo(
+    () =>
+      scheduledJobs.filter(
+        (job) =>
+          getInputDateValue(job.date) === todayStr && job.status !== "Cancelled"
+      ),
+    [scheduledJobs, todayStr]
+  );
+  const scheduledWorkCount = todaysScheduledJobs.length;
+  const completedScheduledWorkCount = todaysScheduledJobs.filter(
+    (job) => job.status === "Completed"
+  ).length;
+  const openScheduledWorkCount = Math.max(
+    scheduledWorkCount - completedScheduledWorkCount,
+    0
+  );
+  const quoteValueById = useMemo(
+    () =>
+      new Map(
+        quotes.map((quote) => [quote.id, Number(quote.total ?? 0)] as const)
+      ),
+    [quotes]
+  );
+  const invoiceValueById = useMemo(
+    () =>
+      new Map(
+        invoices.map((invoice) => [
+          invoice.id,
+          Number(invoice.total ?? 0),
+        ] as const)
+      ),
+    [invoices]
+  );
+  const customerValueById = useMemo(
+    () =>
+      new Map(
+        customers.map((customer) => [
+          customer.id,
+          Number(customer.grassCutAmount ?? 0),
+        ] as const)
+      ),
+    [customers]
+  );
+  const scheduledDayValueTotal = todaysScheduledJobs.reduce((total, job) => {
+    const invoiceTotal = (job.invoiceIds ?? []).reduce(
+      (sum, invoiceId) => sum + Number(invoiceValueById.get(invoiceId) ?? 0),
+      0
+    );
+
+    if (invoiceTotal > 0) {
+      return total + invoiceTotal;
+    }
+
+    const quoteTotal = (job.quoteIds ?? []).reduce(
+      (sum, quoteId) => sum + Number(quoteValueById.get(quoteId) ?? 0),
+      0
+    );
+
+    if (quoteTotal > 0) {
+      return total + quoteTotal;
+    }
+
+    return total + Number(customerValueById.get(job.customerId ?? -1) ?? 0);
+  }, 0);
 
   useEffect(() => {
     if (!showWeatherWidget) {
@@ -684,8 +790,7 @@ export default function DashboardPage({
   }, [showWeatherWidget, weatherCoordinates.latitude, weatherCoordinates.longitude]);
 
   const weatherNarrative = weather ? getWeatherNarrative(weather) : null;
-  const showInsightsSection =
-    showRecentActivityWidget || showWeatherWidget;
+  const showBottomSection = showWeatherWidget || Boolean(announcement);
   const quoteAttentionCount = attentionItems.filter(
     (item) => item.kind === "quote_follow_up"
   ).length;
@@ -693,10 +798,11 @@ export default function DashboardPage({
     (item) => item.kind === "invoice_overdue"
   ).length;
   const visibleAttentionItems = attentionItems.slice(0, 4);
-  const dayValueTotal =
+  const roundDayValueTotal =
     dayValueByPaymentMethod.monthly +
     dayValueByPaymentMethod.onDayTransfer +
     dayValueByPaymentMethod.cash;
+  const dayValueTotal = roundDayValueTotal + scheduledDayValueTotal;
   const routeRemainingCount = Math.max(
     todaysCustomers.length - completedVisits.length - notCutVisits.length,
     0
@@ -758,14 +864,51 @@ export default function DashboardPage({
     0
   );
   const bestCustomerProfitRow = customerProfitRows[0] ?? null;
-  const insightsGridClassName =
-    showRecentActivityWidget && showWeatherWidget
-      ? "grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(340px,0.95fr)]"
-      : "grid gap-4";
+  const isStarterDashboard = !showAdvancedInsights;
+  const showPaymentOverview = showAdvancedInsights;
+  const showWorkflowOverview = showAdvancedInsights && (showJobsWidget || showRevenueWidget);
+  const showProfitOverview = showAdvancedInsights && showRevenueWidget;
+  const showOperationsSection =
+    showJobsWidget || showWorkflowOverview || showRecentActivityWidget;
+  const bottomGridClassName =
+    showWeatherWidget && announcement
+      ? "grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)]"
+      : "grid gap-5";
+  const announcementClassName =
+    announcement?.tone === "success"
+      ? "border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-slate-50"
+      : announcement?.tone === "warning"
+        ? "border-amber-200 bg-gradient-to-br from-amber-50 via-white to-slate-50"
+        : "border-sky-200 bg-gradient-to-br from-sky-50 via-white to-slate-50";
+  const announcementIconClassName =
+    announcement?.tone === "warning"
+      ? "text-amber-600"
+      : announcement?.tone === "success"
+        ? "text-emerald-600"
+        : "text-sky-600";
   const panelClassName =
     "rounded-[20px] border border-[#e5e7eb] bg-white shadow-[0_18px_45px_rgba(7,20,38,0.06)]";
   const subtleButtonClassName =
     "inline-flex items-center justify-center gap-2 rounded-xl border border-[#e5e7eb] bg-white px-4 py-3 text-sm font-semibold text-[#071426] shadow-[0_10px_24px_rgba(7,20,38,0.05)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:text-emerald-700";
+  const topSectionClassName = showPaymentOverview
+    ? "grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start"
+    : "grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(540px,0.82fr)] xl:items-stretch";
+  const statGridClassName = showPaymentOverview
+    ? "grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-5"
+    : "grid gap-3 sm:grid-cols-2 2xl:grid-cols-4";
+  const roundMapGridClassName = showPaymentOverview
+    ? "grid gap-5 xl:grid-cols-12"
+    : "grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.8fr)]";
+  const roundPanelClassName = showPaymentOverview
+    ? `${panelClassName} p-5 xl:col-span-7`
+    : `${panelClassName} p-5`;
+  const mapPanelClassName = showPaymentOverview
+    ? `${panelClassName} p-5 xl:col-span-5`
+    : `${panelClassName} p-5`;
+  const workloadPanelClassName =
+    showAdvancedInsights && showRevenueWidget
+      ? `${panelClassName} p-5 xl:col-span-4`
+      : `${panelClassName} p-5 xl:col-span-12`;
   const routeMapCustomers =
     todaysCustomers.length > 0 ? todaysCustomers.slice(0, 5) : customers.slice(0, 5);
   const routeMapPoints = [
@@ -810,29 +953,50 @@ export default function DashboardPage({
 
   return (
     <div className="space-y-5 text-[#071426]">
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start">
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section className={topSectionClassName}>
+        <div className={statGridClassName}>
           <button
             type="button"
-            onClick={onGoToRounds}
-            className={`${panelClassName} p-5 text-left transition hover:-translate-y-0.5 hover:shadow-[0_22px_50px_rgba(7,20,38,0.09)]`}
+            onClick={onGoToSchedule}
+            className={`${panelClassName} p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_22px_50px_rgba(7,20,38,0.09)]`}
           >
             <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
               Today&apos;s Jobs
             </p>
             <p className="mt-4 text-3xl font-black tracking-tight text-[#071426]">
-              {todaysCustomers.length}
+              {scheduledWorkCount}
             </p>
             <p className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-emerald-600">
               <CheckCircle2 size={15} />
+              {scheduledWorkCount === 0
+                ? "No scheduled work"
+                : openScheduledWorkCount === 0
+                  ? "All complete"
+                  : `${openScheduledWorkCount} open`}
+            </p>
+          </button>
+
+          <button
+            type="button"
+            onClick={onGoToRounds}
+            className={`${panelClassName} p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_22px_50px_rgba(7,20,38,0.09)]`}
+          >
+            <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
+              Today&apos;s Round
+            </p>
+            <p className="mt-4 text-3xl font-black tracking-tight text-[#071426]">
+              {todaysCustomers.length}
+            </p>
+            <p className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-emerald-600">
+              <Route size={15} />
               {routeRemainingCount === 0 ? "On track" : `${routeRemainingCount} remaining`}
             </p>
           </button>
 
           <button
             type="button"
-            onClick={onGoToActions}
-            className={`${panelClassName} p-5 text-left transition hover:-translate-y-0.5 hover:shadow-[0_22px_50px_rgba(7,20,38,0.09)]`}
+            onClick={onGoToRounds}
+            className={`${panelClassName} p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_22px_50px_rgba(7,20,38,0.09)]`}
           >
             <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
               Visit Status
@@ -850,42 +1014,44 @@ export default function DashboardPage({
             </p>
           </button>
 
-          <button
-            type="button"
-            onClick={onGoToPayments}
-            className={`${panelClassName} p-5 text-left transition hover:-translate-y-0.5 hover:shadow-[0_22px_50px_rgba(7,20,38,0.09)]`}
-          >
-            <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
-              Total Owed
-            </p>
-            <p className="mt-4 text-3xl font-black tracking-tight text-[#071426]">
-              {formatMoney(outstandingPaymentSnapshot.total)}
-            </p>
-            <p className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-emerald-600">
-              <CheckCircle2 size={15} />
-              View arrears
-            </p>
-          </button>
+          {showPaymentOverview ? (
+            <button
+              type="button"
+              onClick={onGoToPayments}
+              className={`${panelClassName} p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_22px_50px_rgba(7,20,38,0.09)]`}
+            >
+              <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
+                Total Owed
+              </p>
+              <p className="mt-4 text-3xl font-black tracking-tight text-[#071426]">
+                {formatMoney(outstandingPaymentSnapshot.total)}
+              </p>
+              <p className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-emerald-600">
+                <CheckCircle2 size={15} />
+                View arrears
+              </p>
+            </button>
+          ) : null}
 
           <button
             type="button"
-            onClick={onGoToActions}
-            className={`${panelClassName} p-5 text-left transition hover:-translate-y-0.5 hover:shadow-[0_22px_50px_rgba(7,20,38,0.09)]`}
+            onClick={onGoToPayments}
+            className={`${panelClassName} p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_22px_50px_rgba(7,20,38,0.09)]`}
           >
             <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
               Day Value
             </p>
             <p className="mt-4 text-3xl font-black tracking-tight text-[#071426]">
-              {formatMoney(dayValueTotal)}
+              {formatWholeMoney(dayValueTotal)}
             </p>
             <p className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-emerald-600">
               <CheckCircle2 size={15} />
-              On track
+              Round + scheduled
             </p>
           </button>
         </div>
 
-        <div className={`${panelClassName} flex flex-col gap-3 p-4 xl:min-w-[410px]`}>
+        <div className={`${panelClassName} flex flex-col gap-3 p-4 xl:min-w-[540px]`}>
           <div className="grid gap-2 sm:grid-cols-2">
             <select
               value={selectedWeek}
@@ -911,7 +1077,7 @@ export default function DashboardPage({
             </select>
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 xl:flex-nowrap">
             <button
               type="button"
               onClick={onGoToCustomers}
@@ -940,8 +1106,8 @@ export default function DashboardPage({
         </div>
       </section>
 
-      <div className="grid gap-5 xl:grid-cols-12">
-        <section className={`${panelClassName} p-5 xl:col-span-5`}>
+      <div className={roundMapGridClassName}>
+        <section className={roundPanelClassName}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h3 className="text-xl font-black tracking-tight text-[#071426]">
@@ -962,11 +1128,35 @@ export default function DashboardPage({
 
           <div className="mt-5 overflow-hidden">
             {visibleRoundCustomers.length === 0 ? (
-              <div className="rounded-2xl bg-[#f7faf9] px-4 py-8 text-center">
-                <ClipboardList className="mx-auto text-emerald-500" size={24} />
-                <p className="mt-3 text-sm font-semibold text-[#667085]">
-                  No customers on this round.
-                </p>
+              <div className="grid min-h-[230px] place-items-center rounded-2xl border border-dashed border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-[#f7faf9] px-5 py-8 text-center">
+                <div className="max-w-md">
+                  <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-emerald-600 shadow-sm ring-1 ring-emerald-100">
+                    <ClipboardList size={22} />
+                  </span>
+                  <p className="mt-4 text-base font-black text-[#071426]">
+                    No customers due on this round
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-[#667085]">
+                    Add your first customer or switch week/day to see scheduled work.
+                  </p>
+                  <div className="mt-5 flex flex-wrap justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={onGoToCustomers}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#20c766] px-4 py-2.5 text-sm font-bold text-white shadow-[0_14px_28px_rgba(32,199,102,0.22)] transition hover:bg-[#16ad55]"
+                    >
+                      <UserPlus size={16} />
+                      Add customer
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onGoToSchedule}
+                      className="inline-flex items-center justify-center rounded-xl border border-emerald-100 bg-white px-4 py-2.5 text-sm font-bold text-emerald-700 transition hover:bg-emerald-50"
+                    >
+                      View schedule
+                    </button>
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="divide-y divide-slate-100">
@@ -1027,7 +1217,7 @@ export default function DashboardPage({
           )}
         </section>
 
-        <section className={`${panelClassName} p-5 xl:col-span-3`}>
+        <section className={mapPanelClassName}>
           <div className="flex items-start justify-between gap-3">
             <div>
               <h3 className="text-xl font-black tracking-tight text-[#071426]">
@@ -1078,63 +1268,188 @@ export default function DashboardPage({
           </button>
         </section>
 
-        <section className={`${panelClassName} p-5 xl:col-span-4`}>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-xl font-black tracking-tight text-[#071426]">
-                  Payments Snapshot
-                </h3>
-                <p className="mt-5 text-3xl font-black tracking-tight text-[#071426]">
-                  {formatMoney(outstandingPaymentSnapshot.total)}
-                </p>
-                <p className="mt-1 text-sm text-[#667085]">Total unpaid</p>
-              </div>
-              <button
-                type="button"
-                onClick={onGoToPayments}
-                className="text-sm font-semibold text-emerald-700 transition hover:text-emerald-800"
-              >
-                View all
-              </button>
-            </div>
-
-            <div className="mt-5 space-y-4">
-              {outstandingBreakdownRows.map((row) => (
-                <div key={row.label} className="border-b border-slate-100 pb-3 last:border-b-0">
-                  <div className="flex items-center justify-between gap-4">
-                    <p className={`text-sm font-semibold ${row.textClassName}`}>
-                      {row.label}
-                    </p>
-                    <p className="text-sm font-bold text-[#071426]">
-                      {formatMoney(row.amount)}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {showUnpaidWidget && (
-              <div className="mt-6 flex items-center justify-between gap-4 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-emerald-600">
-                    <CalendarDays size={18} />
-                  </div>
-                  <p className="text-sm font-semibold text-emerald-700">
-                    {paidTodayVisits.length} payments received today
-                  </p>
-                </div>
-                <p className="text-xl font-black text-[#003c35]">
-                  {formatMoney(paidTodayTotal)}
-                </p>
-              </div>
-            )}
-          </section>
       </div>
 
-      {(showJobsWidget || showRevenueWidget) && (
+      {(showPaymentOverview || (showAdvancedInsights && showRevenueWidget) || showProfitOverview) && (
+        <div className="grid gap-5 xl:grid-cols-3">
+          {showPaymentOverview ? (
+            <section className={`${panelClassName} p-5`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-xl font-black tracking-tight text-[#071426]">
+                    Payments Snapshot
+                  </h3>
+                  <p className="mt-5 text-3xl font-black tracking-tight text-[#071426]">
+                    {formatMoney(outstandingPaymentSnapshot.total)}
+                  </p>
+                  <p className="mt-1 text-sm text-[#667085]">Total unpaid</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={onGoToPayments}
+                  className="text-sm font-semibold text-emerald-700 transition hover:text-emerald-800"
+                >
+                  View all
+                </button>
+              </div>
+
+              <div className="mt-5 space-y-4">
+                {outstandingBreakdownRows.map((row) => (
+                  <div
+                    key={row.label}
+                    className="border-b border-slate-100 pb-3 last:border-b-0"
+                  >
+                    <div className="flex items-center justify-between gap-4">
+                      <p className={`text-sm font-semibold ${row.textClassName}`}>
+                        {row.label}
+                      </p>
+                      <p className="text-sm font-bold text-[#071426]">
+                        {formatMoney(row.amount)}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {showUnpaidWidget && (
+                <div className="mt-6 flex items-center justify-between gap-4 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-emerald-600">
+                      <CalendarDays size={18} />
+                    </div>
+                    <p className="text-sm font-semibold text-emerald-700">
+                      {paidTodayVisits.length} payments received today
+                    </p>
+                  </div>
+                  <p className="text-xl font-black text-[#003c35]">
+                    {formatMoney(paidTodayTotal)}
+                  </p>
+                </div>
+              )}
+            </section>
+          ) : null}
+
+          {showAdvancedInsights && showRevenueWidget && (
+            <section className={`${panelClassName} p-5`}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-xl font-black tracking-tight text-[#071426]">
+                    Revenue View
+                  </h3>
+                  <p className="mt-1 text-sm text-[#667085]">Book value</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={onGoToCustomerProfit}
+                  className="rounded-lg border border-[#e5e7eb] px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50"
+                >
+                  This month
+                </button>
+              </div>
+
+              <div className="mt-6 grid gap-3">
+                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-5">
+                  <p className="text-sm font-semibold text-emerald-700">
+                    Monthly book
+                  </p>
+                  <p className="mt-4 text-3xl font-black text-[#071426]">
+                    {formatMoney(monthlyBookValue)}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-5">
+                  <p className="text-sm font-semibold text-blue-700">
+                    Yearly book
+                  </p>
+                  <p className="mt-4 text-3xl font-black text-[#071426]">
+                    {formatMoney(yearlyBookValue)}
+                  </p>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {showProfitOverview && (
+            <section className={`${panelClassName} p-5`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
+                    Profit Per Customer
+                  </p>
+                  <h3 className="mt-1 text-xl font-black tracking-tight text-[#071426]">
+                    Customer Profitability
+                  </h3>
+                </div>
+                {onGoToCustomerProfit ? (
+                  <button
+                    type="button"
+                    onClick={onGoToCustomerProfit}
+                    className="text-sm font-semibold text-emerald-700 transition hover:text-emerald-800"
+                  >
+                    View report
+                  </button>
+                ) : null}
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl bg-emerald-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase text-emerald-700">
+                    Paid in
+                  </p>
+                  <p className="mt-2 text-2xl font-black text-slate-900">
+                    {formatMoney(totalCustomerProfitBeforeExpenses)}
+                  </p>
+                </div>
+                <div className="rounded-2xl bg-amber-50 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase text-amber-700">
+                    Still owed
+                  </p>
+                  <p className="mt-2 text-2xl font-black text-slate-900">
+                    {formatMoney(totalCustomerProfitOutstanding)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase text-slate-400">
+                  Best customer
+                </p>
+                <p className="mt-1 truncate text-base font-black text-slate-900">
+                  {bestCustomerProfitRow?.customerName ?? "No data"}
+                </p>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {customerProfitReviewRows.length === 0 ? (
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">
+                    No payment or missed-visit issues showing.
+                  </div>
+                ) : (
+                  customerProfitReviewRows.slice(0, 2).map((row) => (
+                    <button
+                      key={row.customerId}
+                      type="button"
+                      onClick={() => onOpenCustomer?.(row.customerId)}
+                      className="flex w-full items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-amber-200 hover:bg-amber-50"
+                    >
+                      <span className="min-w-0 truncate text-sm font-semibold text-slate-900">
+                        {row.customerName}
+                      </span>
+                      <span className="shrink-0 text-sm font-black text-amber-700">
+                        {formatMoney(row.outstanding)}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </section>
+          )}
+        </div>
+      )}
+
+      {showOperationsSection && (
         <div className="grid gap-5 xl:grid-cols-12">
           {showJobsWidget && (
-            <section className={`${panelClassName} p-5 xl:col-span-4`}>
+            <section className={workloadPanelClassName}>
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <h3 className="text-xl font-black tracking-tight text-[#071426]">
@@ -1151,7 +1466,9 @@ export default function DashboardPage({
                 </button>
               </div>
 
-              <div className="mt-6 flex h-40 items-end gap-8 border-b border-slate-200 px-4">
+              <div className={`mt-6 flex items-end border-b border-slate-200 px-4 ${
+                isStarterDashboard ? "h-32 gap-12" : "h-40 gap-8"
+              }`}>
                 {workloadBars.map((bar) => (
                   <button
                     key={bar.label}
@@ -1176,7 +1493,7 @@ export default function DashboardPage({
             </section>
           )}
 
-          {showRevenueWidget && (
+          {false && showAdvancedInsights && showRevenueWidget && (
             <section className={`${panelClassName} p-5 xl:col-span-3`}>
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -1215,6 +1532,7 @@ export default function DashboardPage({
             </section>
           )}
 
+          {showWorkflowOverview ? (
           <section className={`${panelClassName} p-5 xl:col-span-5`}>
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -1330,10 +1648,84 @@ export default function DashboardPage({
               )}
             </div>
           </section>
+          ) : null}
+
+          {showRecentActivityWidget && (
+            <section className={`${panelClassName} p-5 xl:col-span-3`}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    Recent Activity
+                  </p>
+                  <h3 className="mt-1 text-xl font-black tracking-tight text-slate-900">
+                    Visit Log
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={onGoToRounds}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                    isLocked
+                      ? "bg-rose-100 text-rose-700"
+                      : "bg-emerald-100 text-emerald-700"
+                  }`}
+                >
+                  {isLocked ? "Locked" : "Active"}
+                </button>
+              </div>
+
+              <div className="mt-4 max-h-[330px] overflow-hidden rounded-2xl border border-slate-200">
+                {recentVisits.length === 0 ? (
+                  <div className="px-4 py-6 text-sm font-semibold text-slate-500">
+                    No recent visit activity yet.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {recentVisits.slice(0, 4).map((visit) => {
+                      const customer = customers.find(
+                        (entry) => entry.id === visit.customerId
+                      );
+                      const badgeClass =
+                        visit.status === "completed"
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-rose-100 text-rose-700";
+
+                      return (
+                        <div
+                          key={visit.id}
+                          className="flex items-center justify-between gap-4 px-4 py-3"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate font-semibold text-slate-900">
+                              {customer?.name ?? "Unknown Customer"}
+                            </p>
+                            <p className="truncate text-xs text-slate-500">
+                              {new Date(visit.visitDate).toLocaleDateString()}{" "}
+                              {"\u00b7"}{" "}
+                              {getRotationCycleLabel(
+                                visit.week ?? selectedWeek,
+                                roundRotationWeeks
+                              )}{" "}
+                              {"\u00b7"} {visit.day ?? selectedDay}
+                            </p>
+                          </div>
+                          <span
+                            className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClass}`}
+                          >
+                            {visit.status === "completed" ? "Done" : "Missed"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
         </div>
       )}
 
-      {showRevenueWidget && (
+      {false && showProfitOverview && (
         <section className={`${panelClassName} p-5`}>
           <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
             <div>
@@ -1538,9 +1930,9 @@ export default function DashboardPage({
         </section>
       )}
 
-      {showInsightsSection && (
-        <div className={insightsGridClassName}>
-          {showRecentActivityWidget && (
+      {showBottomSection && (
+        <div className={bottomGridClassName}>
+          {false && showRecentActivityWidget && (
             <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -1710,7 +2102,7 @@ export default function DashboardPage({
                 </div>
               </div>
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <div className={`mt-4 grid gap-3 ${onGoToActions ? "sm:grid-cols-2" : ""}`}>
                 <button
                   type="button"
                   onClick={onGoToMap}
@@ -1719,17 +2111,51 @@ export default function DashboardPage({
                   <Route size={16} />
                   Route Map
                 </button>
-                <button
-                  type="button"
-                  onClick={onGoToActions}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                >
-                  <ClipboardList size={16} />
-                  Actions
-                </button>
+                {onGoToActions ? (
+                  <button
+                    type="button"
+                    onClick={onGoToActions}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    <ClipboardList size={16} />
+                    Actions
+                  </button>
+                ) : null}
               </div>
             </section>
           )}
+
+          {announcement ? (
+            <section
+              className={`rounded-[22px] border p-5 shadow-sm ${announcementClassName}`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    RoundHQ Announcement
+                  </p>
+                  <h3 className="mt-2 text-2xl font-black tracking-tight text-slate-900">
+                    {announcement.title}
+                  </h3>
+                </div>
+                <Megaphone className={announcementIconClassName} size={24} />
+              </div>
+
+              <p className="mt-4 text-sm leading-6 text-slate-600">
+                {announcement.message}
+              </p>
+
+              {announcement.ctaLabel && announcement.ctaHref ? (
+                <a
+                  href={announcement.ctaHref}
+                  className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#003c35] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[#022f2a]"
+                >
+                  {announcement.ctaLabel}
+                  <ArrowRight size={14} />
+                </a>
+              ) : null}
+            </section>
+          ) : null}
         </div>
       )}
     </div>

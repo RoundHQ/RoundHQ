@@ -8,6 +8,7 @@ import {
   Flag,
   LifeBuoy,
   Mail,
+  Megaphone,
   Paperclip,
   Receipt,
   ServerCog,
@@ -27,9 +28,11 @@ import {
   type SupportCategoryOption,
   type SupportPriorityOption,
 } from "@/lib/support/helpdesk";
+import { getAdminPlatformAnnouncement } from "@/lib/admin/platform-announcements";
 import {
   saveSupportCategoryAction,
   saveSupportPriorityAction,
+  updatePlatformAnnouncementAction,
   updateAdminEmailSettingsAction,
   updateAdminHelpdeskSettingsAction,
   updateAdminInvoiceSettingsAction,
@@ -404,10 +407,13 @@ export default async function AdminSettingsPage({
   const params = (await searchParams) ?? {};
   const settings = await getPlatformEmailSettings();
   const supportSettings = await getSupportDeskSettingsData();
+  const announcement = await getAdminPlatformAnnouncement();
   const emailReady = isPlatformEmailConfigured(settings);
   const saved = params.saved === "1";
   const activeTab =
-    params.tab === "invoices" || params.tab === "helpdesk"
+    params.tab === "invoices" ||
+    params.tab === "helpdesk" ||
+    params.tab === "announcements"
       ? params.tab
       : "email";
 
@@ -416,9 +422,9 @@ export default async function AdminSettingsPage({
       <AdminHeroShell
         eyebrow="Platform settings"
         title="RoundHQ owner settings."
-        summary="Configure platform email delivery, signup verification emails, and automated invoice reminders from the owner console."
+        summary="Configure platform email delivery, signup verification emails, automated invoice reminders, and dashboard announcements from the owner console."
       >
-        <section className="grid gap-4 sm:grid-cols-2">
+        <section className="grid gap-4 sm:grid-cols-3">
           <SettingStat
             title="Email"
             value={emailReady ? "Ready" : "Setup"}
@@ -432,6 +438,15 @@ export default async function AdminSettingsPage({
             title="Invoices"
             value={settings.invoiceAutomationEnabled ? "Auto" : "Manual"}
             detail={`Send ${settings.invoiceDaysBeforeDue} days before the due date`}
+          />
+          <SettingStat
+            title="Announcements"
+            value={announcement.isActive ? "Live" : "Paused"}
+            detail={
+              announcement.isActive
+                ? "Shown inside every customer dashboard"
+                : "No active customer dashboard notice"
+            }
           />
         </section>
       </AdminHeroShell>
@@ -457,6 +472,12 @@ export default async function AdminSettingsPage({
               icon={<LifeBuoy aria-hidden="true" className="size-4" />}
               label="Helpdesk"
             />
+            <SettingsTabLink
+              href="/admin/settings?tab=announcements"
+              isActive={activeTab === "announcements"}
+              icon={<Megaphone aria-hidden="true" className="size-4" />}
+              label="Announcements"
+            />
           </div>
 
           {saved && (
@@ -465,6 +486,8 @@ export default async function AdminSettingsPage({
                 ? "Invoice settings saved."
                 : activeTab === "helpdesk"
                   ? "Helpdesk settings saved."
+                : activeTab === "announcements"
+                  ? "Announcement saved."
                 : "Email settings saved."}
             </div>
           )}
@@ -489,6 +512,18 @@ export default async function AdminSettingsPage({
               helpdesk settings.
               <div className="mt-2 text-xs text-amber-800">
                 {supportSettings.schemaError}
+              </div>
+            </div>
+          )}
+
+          {activeTab === "announcements" && announcement.schemaError && (
+            <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+              <span className="font-bold">Announcements database setup needed:</span>{" "}
+              Run <code>supabase/platform_announcements_schema.sql</code> or
+              the latest <code>supabase/roundhq_tenant_schema.sql</code> before
+              saving dashboard announcements.
+              <div className="mt-2 text-xs text-amber-800">
+                {announcement.schemaError}
               </div>
             </div>
           )}
@@ -780,6 +815,143 @@ export default async function AdminSettingsPage({
                       name="{{paymentLink}}"
                       detail="A hosted payment link when one is available."
                     />
+                  </div>
+                </div>
+              </section>
+            </form>
+          ) : activeTab === "announcements" ? (
+            <form
+              action={updatePlatformAnnouncementAction}
+              className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]"
+            >
+              <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
+                <div className="mb-6 flex items-start gap-3">
+                  <div className="flex size-11 shrink-0 items-center justify-center rounded-md bg-[#e7f9ed] text-[#168b43]">
+                    <Megaphone aria-hidden="true" className="size-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-extrabold tracking-normal text-slate-950">
+                      Customer dashboard announcement
+                    </h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                      Publish one platform-wide message for every logged-in
+                      RoundHQ workspace. Turn it off when the update is no
+                      longer needed.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-5">
+                  <label className="flex items-center gap-3 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700">
+                    <input
+                      type="checkbox"
+                      name="announcement_active"
+                      defaultChecked={announcement.isActive}
+                      className="size-4 accent-[#19c653]"
+                    />
+                    Show announcement to all customers
+                  </label>
+
+                  <TextInput
+                    label="Announcement title"
+                    name="announcement_title"
+                    defaultValue={announcement.title}
+                    required
+                  />
+
+                  <TextArea
+                    label="Message"
+                    name="announcement_message"
+                    defaultValue={announcement.message}
+                    rows={7}
+                  />
+
+                  <div className="grid gap-5 sm:grid-cols-2">
+                    <TextInput
+                      label="CTA label"
+                      name="announcement_cta_label"
+                      defaultValue={announcement.ctaLabel}
+                      placeholder="Read more"
+                    />
+                    <TextInput
+                      label="CTA link"
+                      name="announcement_cta_href"
+                      defaultValue={announcement.ctaHref}
+                      placeholder="/support"
+                    />
+                  </div>
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-bold text-slate-700">
+                      Tone
+                    </span>
+                    <select
+                      name="announcement_tone"
+                      defaultValue={announcement.tone}
+                      className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
+                    >
+                      <option value="info">Information</option>
+                      <option value="success">Success</option>
+                      <option value="warning">Warning</option>
+                    </select>
+                  </label>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={Boolean(announcement.schemaError)}
+                  className="mt-6 inline-flex w-full items-center justify-center rounded-md bg-[#19c653] px-5 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.2)] transition hover:bg-[#22d861] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Save announcement
+                </button>
+              </section>
+
+              <section className="space-y-6">
+                <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
+                  <h2 className="text-xl font-extrabold tracking-normal text-slate-950">
+                    Dashboard preview
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    This preview uses the saved version. After saving, customers
+                    will see the new message in the announcement panel on their
+                    dashboard.
+                  </p>
+
+                  <div className="mt-6 rounded-[22px] border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-slate-50 p-5 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                          RoundHQ Announcement
+                        </p>
+                        <h3 className="mt-2 text-2xl font-black tracking-tight text-slate-950">
+                          {announcement.title}
+                        </h3>
+                      </div>
+                      <Megaphone className="shrink-0 text-[#19c653]" size={24} />
+                    </div>
+                    <p className="mt-4 text-sm leading-6 text-slate-600">
+                      {announcement.message ||
+                        "Write a message to broadcast an update to customers."}
+                    </p>
+                    {announcement.ctaLabel && announcement.ctaHref ? (
+                      <span className="mt-5 inline-flex rounded-xl bg-[#003c35] px-4 py-2 text-sm font-bold text-white">
+                        {announcement.ctaLabel}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-5 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+                    Status:{" "}
+                    <span className="font-bold text-slate-950">
+                      {announcement.isActive ? "Live" : "Paused"}
+                    </span>
+                    {announcement.updatedAt ? (
+                      <>
+                        {" "}
+                        | Last saved{" "}
+                        {new Date(announcement.updatedAt).toLocaleString("en-GB")}
+                      </>
+                    ) : null}
                   </div>
                 </div>
               </section>

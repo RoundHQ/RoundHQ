@@ -9,12 +9,12 @@ import {
   FileText,
   MapPin,
   Menu,
-  Route,
   ShieldCheck,
   Sparkles,
   Star,
   Users,
 } from "lucide-react";
+import { SUBSCRIPTION_PLANS } from "@/lib/billing/plans";
 import { getPublishedSitePages } from "@/lib/site-pages";
 
 export const dynamic = "force-dynamic";
@@ -31,15 +31,15 @@ const productPillars = [
     icon: FileText,
   },
   {
-    title: "Route & track",
-    description: "See your jobs on the map and optimise your day.",
+    title: "Route visibility",
+    description: "See daily work on the map and keep every round clear.",
     icon: MapPin,
   },
   {
-    title: "Simple pricing",
-    description: "Per business account",
+    title: "Launch pricing",
+    description: "Starter and Growth plans",
     icon: CreditCard,
-    price: "£30",
+    price: "From £30",
   },
 ];
 
@@ -71,7 +71,7 @@ const features = [
   {
     title: "Route Visibility",
     description:
-      "See all your jobs on the map, review round order, and optimise your route before the day starts.",
+      "See all your jobs on the map, review round order, and keep daily work visible before the day starts.",
     icon: MapPin,
   },
   {
@@ -103,17 +103,7 @@ const testimonials = [
   },
 ];
 
-const pricingIncludes = [
-  "Unlimited customers",
-  "Unlimited jobs & quotes",
-  "Invoicing & payments",
-  "Route planning & map view",
-  "Staff accounts",
-  "Email & SMS reminders",
-  "Reports & insights",
-];
-
-const trustItems = ["No card required", "Cancel anytime", "£30 / month"];
+const trustItems = ["No card required", "Cancel anytime", "Starter £30 / Growth £60"];
 
 function RoundHQLogo({ compact = false }: { compact?: boolean }) {
   return (
@@ -401,12 +391,12 @@ export default async function HomePage() {
               and field service teams
             </p>
             <h1 className="mt-8 max-w-2xl text-5xl font-extrabold leading-[1.08] tracking-normal text-white sm:text-6xl">
-              The ops platform that keeps your business{" "}
-              <span className="text-[#20d85a]">growing.</span>
+              Simple software for running your maintenance business.
             </h1>
             <p className="mt-7 max-w-xl text-lg leading-8 text-white/82">
-              RoundHQ helps maintenance businesses manage customers, rounds,
-              quotes, invoices, visits, payments, and staff, all in one place.
+              Manage customers, rounds, quotes, invoices, payments, staff, and
+              daily work from one clean operating system built for garden and
+              property maintenance teams.
             </p>
 
             <div className="mt-8 flex flex-wrap gap-4">
@@ -553,61 +543,76 @@ export default async function HomePage() {
       </section>
 
       <section id="pricing" className="bg-white px-5 py-16 sm:px-8 lg:py-20">
-        <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.8fr_1fr_0.85fr] lg:items-center">
-          <div>
-            <h2 className="text-4xl font-extrabold leading-tight tracking-normal text-slate-950">
-              Simple pricing.
-              <br />
-              Everything included.
+        <div className="mx-auto max-w-7xl">
+          <div className="max-w-3xl">
+            <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#16a647]">
+              Launch pricing
+            </p>
+            <h2 className="mt-4 text-4xl font-extrabold leading-tight tracking-normal text-slate-950 sm:text-5xl">
+              Start solo, then grow into a small team.
             </h2>
-            <ul className="mt-8 space-y-5">
-              <CheckItem>All features included</CheckItem>
-              <CheckItem>No setup fees</CheckItem>
-              <CheckItem>Cancel anytime</CheckItem>
-              <CheckItem>Dedicated support</CheckItem>
-            </ul>
+            <p className="mt-5 text-base leading-8 text-slate-600">
+              Two simple plans for managing recurring rounds, customers, quotes,
+              invoices, payments, staff, and daily operational visibility.
+            </p>
           </div>
 
-          <article className="rounded-lg border border-slate-300 bg-white p-9 shadow-sm">
-            <span className="rounded-sm bg-[#e7f9ed] px-2.5 py-1 text-xs font-extrabold uppercase text-[#168b43]">
-              All-inclusive
-            </span>
-            <div className="mt-5 flex items-end gap-2">
-              <p className="text-5xl font-extrabold tracking-normal text-slate-950">
-                £30
-              </p>
-              <p className="pb-2 text-lg font-bold text-[#168b43]">/ month</p>
-            </div>
-            <p className="mt-2 text-sm font-semibold text-slate-500">
-              Per business account
-            </p>
-
-            <ul className="mt-7 space-y-3">
-              {pricingIncludes.map((item) => (
-                <CheckItem key={item}>{item}</CheckItem>
-              ))}
-            </ul>
-          </article>
-
-          <article className="rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
-            <div className="flex items-start gap-5">
-              <ShieldCheck aria-hidden="true" className="size-14 text-[#168b43]" />
-              <div>
-                <h3 className="text-xl font-extrabold text-slate-950">
-                  14-day free trial
-                </h3>
-                <p className="mt-2 text-sm leading-6 text-slate-600">
-                  Try RoundHQ free for 14 days. No card required.
+          <div className="mt-10 grid gap-6 lg:grid-cols-2">
+            {SUBSCRIPTION_PLANS.map((plan) => (
+              <article
+                key={plan.key}
+                className={`relative rounded-lg border bg-white p-8 shadow-sm ${
+                  plan.key === "growth"
+                    ? "border-[#19c653] ring-1 ring-[#19c653]/20"
+                    : "border-slate-200"
+                }`}
+              >
+                {plan.badge ? (
+                  <span className="absolute right-5 top-5 rounded-full bg-[#19c653] px-3 py-1 text-xs font-extrabold text-white">
+                    {plan.badge}
+                  </span>
+                ) : null}
+                <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#168b43]">
+                  {plan.name}
                 </p>
-              </div>
-            </div>
-            <Link
-              href="/signup"
-              className="mt-8 inline-flex w-full items-center justify-center rounded-md bg-[#19c653] px-5 py-4 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.22)] transition hover:bg-[#22d861]"
-            >
-              Start your free trial
-            </Link>
-          </article>
+                <h3 className="mt-4 max-w-md text-2xl font-extrabold text-slate-950">
+                  {plan.description}
+                </h3>
+                <div className="mt-6 flex items-end gap-2">
+                  <p className="text-5xl font-extrabold tracking-normal text-slate-950">
+                    {plan.priceLabel}
+                  </p>
+                  <p className="pb-2 text-sm font-bold text-[#168b43]">
+                    {plan.billingLabel}
+                  </p>
+                </div>
+                <ul className="mt-7 space-y-3">
+                  {plan.includedFeatures.map((item) => (
+                    <CheckItem key={item}>{item}</CheckItem>
+                  ))}
+                </ul>
+                <Link
+                  href={`/signup?plan=${plan.key}`}
+                  className={`mt-8 inline-flex w-full items-center justify-center rounded-md px-5 py-4 text-sm font-bold transition ${
+                    plan.key === "growth"
+                      ? "bg-[#19c653] text-white shadow-[0_14px_34px_rgba(25,198,83,0.22)] hover:bg-[#22d861]"
+                      : "border border-slate-200 bg-white text-slate-900 hover:border-[#19c653]/45 hover:bg-[#f1fff6]"
+                  }`}
+                >
+                  Choose {plan.name}
+                </Link>
+              </article>
+            ))}
+          </div>
+
+          <div className="mt-8 flex flex-wrap items-center gap-4 text-sm font-semibold text-slate-600">
+            <span className="inline-flex items-center gap-2">
+              <ShieldCheck aria-hidden="true" className="size-4 text-[#168b43]" />
+              14-day free trial
+            </span>
+            <span>No setup fees</span>
+            <span>Cancel anytime</span>
+          </div>
         </div>
       </section>
 

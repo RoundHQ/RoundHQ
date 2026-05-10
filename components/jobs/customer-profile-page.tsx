@@ -100,6 +100,7 @@ type Props = {
   grassCutSeasonStart: string;
   grassCutSeasonEnd: string;
   defaultRotationWeeks?: RotationWeeks;
+  allowCommercialTools?: boolean;
   onBack: () => void;
   onOpenPayments: () => void;
   onTogglePaid: (visitId: number | string) => void;
@@ -255,9 +256,10 @@ export default function CustomerProfilePage({
   totalSpent,
   outstanding,
   grassCutSeasonStart,
-  grassCutSeasonEnd,
-  defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
-  onBack,
+                                              grassCutSeasonEnd,
+                                              defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
+                                              allowCommercialTools = true,
+                                              onBack,
   onOpenPayments,
   onTogglePaid,
   onUpdateCustomer,
@@ -291,7 +293,8 @@ export default function CustomerProfilePage({
           customer.siteTown ||
           customer.sitePostcode
       );
-  const showCommercialRams = customer.customerType === "Commercial";
+  const showCommercialRams =
+      allowCommercialTools && customer.customerType === "Commercial";
 
   const linkedQuotes: string[] = [];
   const linkedInvoices = useMemo(
@@ -388,6 +391,7 @@ export default function CustomerProfilePage({
                 <CustomerForm
                     existing={customer}
                     defaultRotationWeeks={normalizedDefaultRotationWeeks}
+                    allowCommercialTools={allowCommercialTools}
                     onSave={saveProfileEdits}
                     onCancel={() => setIsEditing(false)}
                 />

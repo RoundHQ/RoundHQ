@@ -10,6 +10,12 @@ import {
 } from "lucide-react";
 import BillingActions from "@/components/billing/billing-actions";
 import {
+  getPlanUsagePercent,
+  getSubscriptionPlan,
+  SUBSCRIPTION_PLANS,
+  type SubscriptionPlan,
+} from "@/lib/billing/plans";
+import {
   ensureSubscriptionRow,
   getSubscriptionStatusLabel,
   hasDashboardAccess,
@@ -19,15 +25,6 @@ import { isStripeConfigured } from "@/lib/stripe/server";
 import { ensureWorkspace } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
-
-const includedFeatures = [
-  "Unlimited customers",
-  "Unlimited jobs and quotes",
-  "Invoicing and payments",
-  "Route planning and map view",
-  "Staff accounts",
-  "Reports and insights",
-];
 
 function RoundHQLogo() {
   return (
@@ -41,6 +38,109 @@ function RoundHQLogo() {
         className="h-auto w-[210px] sm:w-[235px]"
       />
     </Link>
+  );
+}
+
+function UsageBar({
+  label,
+  used,
+  limit,
+}: {
+  label: string;
+  used: number;
+  limit: number;
+}) {
+  const percent = getPlanUsagePercent(used, limit);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <span className="font-semibold text-slate-600">{label}</span>
+        <span className="font-extrabold text-slate-950">
+          {used.toLocaleString("en-GB")} / {limit.toLocaleString("en-GB")}
+        </span>
+      </div>
+      <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
+        <div
+          className="h-full rounded-full bg-[#19c653]"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function PlanCard({
+  plan,
+  activePlan,
+  hasAccess,
+  canManageBilling,
+}: {
+  plan: SubscriptionPlan;
+  activePlan: SubscriptionPlan;
+  hasAccess: boolean;
+  canManageBilling: boolean;
+}) {
+  const isCurrentPlan = activePlan.key === plan.key;
+
+  return (
+    <article
+      className={`relative rounded-lg border bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] ${
+        plan.key === "growth" ? "border-[#19c653] ring-1 ring-[#19c653]/20" : "border-slate-200"
+      }`}
+    >
+      {plan.badge && (
+        <span className="absolute right-4 top-4 rounded-full bg-[#19c653] px-3 py-1 text-xs font-extrabold text-white">
+          {plan.badge}
+        </span>
+      )}
+      <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#168b43]">
+        {plan.name}
+      </p>
+      <h3 className="mt-3 text-xl font-extrabold text-slate-950">
+        {plan.description}
+      </h3>
+      <div className="mt-5 flex items-end gap-2">
+        <p className="text-5xl font-extrabold tracking-normal text-slate-950">
+          {plan.priceLabel}
+        </p>
+        <p className="pb-2 text-sm font-bold text-[#168b43]">
+          {plan.billingLabel}
+        </p>
+      </div>
+      <ul className="mt-6 space-y-3">
+        {plan.includedFeatures.map((item) => (
+          <li key={item} className="flex items-center gap-3 text-sm text-slate-700">
+            <BadgeCheck
+              aria-hidden="true"
+              className="size-4 shrink-0 text-[#18b74f]"
+            />
+            {item}
+          </li>
+        ))}
+      </ul>
+      <BillingActions
+        stripeConfigured={isStripeConfigured(plan.key)}
+        checkoutPlan={plan.key}
+        showCheckout={!hasAccess}
+        showPortal={hasAccess && canManageBilling}
+        showRefresh={false}
+        checkoutLabel={`Choose ${plan.name}`}
+        portalLabel={
+          isCurrentPlan
+            ? "Manage billing"
+            : plan.key === "growth"
+              ? "Upgrade to Growth"
+              : "Manage plan"
+        }
+        className="mt-7"
+      />
+      {isCurrentPlan && hasAccess ? (
+        <p className="mt-3 text-xs font-bold uppercase tracking-[0.14em] text-[#168b43]">
+          Current plan
+        </p>
+      ) : null}
+    </article>
   );
 }
 
@@ -97,9 +197,23 @@ export default async function BillingPage() {
   const hasAccess = hasDashboardAccess(subscription);
   const stripeConfigured = isStripeConfigured();
   const statusLabel = getSubscriptionStatusLabel(subscription);
+  const activePlan = getSubscriptionPlan(subscription.plan);
   const renewalLabel = subscription.current_period_end
     ? new Date(subscription.current_period_end).toLocaleDateString("en-GB")
     : "Not set";
+  const [customersUsageResult, staffUsageResult] = await Promise.all([
+    supabase
+      .from("customers")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", organizationId),
+    supabase
+      .from("staff_members")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", organizationId)
+      .eq("is_active", true),
+  ]);
+  const customerCount = customersUsageResult.count ?? 0;
+  const staffCount = staffUsageResult.count ?? 0;
 
   return (
     <main className="min-h-screen bg-white text-slate-950">
@@ -149,9 +263,9 @@ export default async function BillingPage() {
                 detail={hasAccess ? "Dashboard is open" : "Payment required"}
               />
               <StatusTile
-                title="Next renewal"
-                value={renewalLabel}
-                detail="Billing cycle date"
+                title="Plan"
+                value={activePlan.name}
+                detail={`${activePlan.priceLabel} ${activePlan.billingLabel}`}
               />
             </section>
           </div>
@@ -213,17 +327,16 @@ export default async function BillingPage() {
 
             {!stripeConfigured && (
               <div className="mt-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                Stripe is not configured yet. Add STRIPE_SECRET_KEY,
-                STRIPE_PRICE_ID, SUPABASE_SERVICE_ROLE_KEY, and
+                Stripe is not configured yet. Add STRIPE_SECRET_KEY, the
+                Starter and Growth price IDs, SUPABASE_SERVICE_ROLE_KEY, and
                 STRIPE_WEBHOOK_SECRET before launch.
               </div>
             )}
 
             <BillingActions
               stripeConfigured={stripeConfigured}
-              showCheckout={!hasAccess}
+              showCheckout={false}
               showPortal={Boolean(subscription.stripe_customer_id)}
-              checkoutLabel="Start subscription"
               portalLabel="Manage billing"
               className="mt-7"
             />
@@ -241,38 +354,54 @@ export default async function BillingPage() {
               </div>
               <div>
                 <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#168b43]">
-                  All-inclusive
+                  Current plan
                 </p>
-                <div className="mt-3 flex items-end gap-2">
-                  <p className="text-5xl font-extrabold tracking-normal text-slate-950">
-                    £30
-                  </p>
-                  <p className="pb-2 text-lg font-bold text-[#168b43]">
-                    / month
-                  </p>
-                </div>
+                <h2 className="mt-3 text-3xl font-extrabold text-slate-950">
+                  {activePlan.name}
+                </h2>
                 <p className="mt-2 text-sm font-semibold text-slate-500">
-                  Per business account
+                  {activePlan.priceLabel} {activePlan.billingLabel}
                 </p>
               </div>
             </div>
 
-            <ul className="mt-8 space-y-3">
-              {includedFeatures.map((item) => (
-                <li
-                  key={item}
-                  className="flex items-center gap-3 text-sm text-slate-700"
-                >
-                  <BadgeCheck
-                    aria-hidden="true"
-                    className="size-4 shrink-0 text-[#18b74f]"
-                  />
-                  {item}
-                </li>
-              ))}
-            </ul>
+            <div className="mt-8 space-y-5">
+              <UsageBar
+                label="Customers"
+                used={customerCount}
+                limit={activePlan.customerLimit}
+              />
+              <UsageBar
+                label="Staff accounts"
+                used={staffCount}
+                limit={activePlan.staffLimit}
+              />
+            </div>
+
+            <div className="mt-7 rounded-md border border-[#19c653]/20 bg-[#f1fff6] p-4">
+              <p className="text-sm font-extrabold text-slate-950">
+                {activePlan.dashboardLabel}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                {activePlan.key === "starter"
+                  ? "Upgrade to Growth when you need RAMS, staff permissions, advanced insights, and customer profitability."
+                  : "Growth includes RAMS, staff permissions, advanced insights, and customer profitability for growing teams."}
+              </p>
+            </div>
           </aside>
         </div>
+
+        <section className="mt-6 grid gap-6 lg:grid-cols-2">
+          {SUBSCRIPTION_PLANS.map((plan) => (
+            <PlanCard
+              key={plan.key}
+              plan={plan}
+              activePlan={activePlan}
+              hasAccess={hasAccess}
+              canManageBilling={Boolean(subscription.stripe_customer_id)}
+            />
+          ))}
+        </section>
       </section>
     </main>
   );

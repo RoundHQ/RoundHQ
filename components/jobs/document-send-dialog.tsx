@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Mail, MessageSquare, X } from "lucide-react";
+import { Mail, X } from "lucide-react";
 
 type Props = {
   isOpen: boolean;
-  method: "email" | "text";
+  method: "email";
   title: string;
   recipientOptions: string[];
   initialRecipient?: string;
@@ -29,7 +29,6 @@ function getErrorMessage(error: unknown) {
 
 export default function DocumentSendDialog({
   isOpen,
-  method,
   title,
   recipientOptions,
   initialRecipient,
@@ -69,9 +68,7 @@ export default function DocumentSendDialog({
 
   const hasRecipientOptions = recipientOptions.length > 0;
   const helperText =
-    method === "email"
-      ? "The email will be sent directly from the website and the PDF will be attached for the customer to download."
-      : "The PDF will be prepared first. If your browser cannot attach files directly, it will download the PDF and open your text app with the message filled in.";
+    "The email will be sent directly from the website and the PDF will be attached for the customer to download.";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
@@ -79,9 +76,9 @@ export default function DocumentSendDialog({
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 text-slate-500">
-              {method === "email" ? <Mail size={16} /> : <MessageSquare size={16} />}
+              <Mail size={16} />
               <p className="text-xs font-semibold uppercase tracking-[0.2em]">
-                {method === "email" ? "Email Document" : "Text Document"}
+                Email Document
               </p>
             </div>
             <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-900">
@@ -107,7 +104,7 @@ export default function DocumentSendDialog({
         <div className="mt-6 space-y-4">
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">
-              {method === "email" ? "Send To" : "Text To"}
+              Send To
             </label>
             {hasRecipientOptions ? (
               <select
@@ -131,27 +128,25 @@ export default function DocumentSendDialog({
                   setRecipient(event.target.value);
                   setErrorMessage("");
                 }}
-                placeholder={method === "email" ? "customer@example.com" : "07123456789"}
+                placeholder="customer@example.com"
                 className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
               />
             )}
           </div>
 
-          {method === "email" ? (
-            <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700">
-                Subject
-              </label>
-              <input
-                value={subject}
-                onChange={(event) => {
-                  setSubject(event.target.value);
-                  setErrorMessage("");
-                }}
-                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
-              />
-            </div>
-          ) : null}
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700">
+              Subject
+            </label>
+            <input
+              value={subject}
+              onChange={(event) => {
+                setSubject(event.target.value);
+                setErrorMessage("");
+              }}
+              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
+            />
+          </div>
 
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">
@@ -201,13 +196,7 @@ export default function DocumentSendDialog({
             disabled={!recipient.trim() || isSending}
             className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isSending
-              ? method === "email"
-                ? "Sending..."
-                : "Preparing..."
-              : method === "email"
-                ? "Send Email"
-                : "Send Text"}
+            {isSending ? "Sending..." : "Send Email"}
           </button>
         </div>
       </div>

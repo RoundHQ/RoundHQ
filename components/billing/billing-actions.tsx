@@ -2,22 +2,26 @@
 
 import { useState } from "react";
 import { CreditCard, RefreshCw, Settings } from "lucide-react";
+import type { SubscriptionPlanKey } from "@/lib/billing/plans";
 
 type BillingActionsProps = {
   stripeConfigured: boolean;
+  checkoutPlan?: SubscriptionPlanKey;
   showCheckout?: boolean;
   showPortal?: boolean;
+  showRefresh?: boolean;
   checkoutLabel?: string;
   portalLabel?: string;
   className?: string;
 };
 
-async function openBillingUrl(endpoint: string) {
+async function openBillingUrl(endpoint: string, payload?: Record<string, unknown>) {
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
+    body: payload ? JSON.stringify(payload) : undefined,
   });
   const data = (await response.json().catch(() => null)) as {
     url?: string;
@@ -33,8 +37,10 @@ async function openBillingUrl(endpoint: string) {
 
 export default function BillingActions({
   stripeConfigured,
+  checkoutPlan = "starter",
   showCheckout = true,
   showPortal = false,
+  showRefresh = true,
   checkoutLabel = "Start subscription",
   portalLabel = "Manage billing",
   className = "",
@@ -50,7 +56,10 @@ export default function BillingActions({
     setError("");
 
     try {
-      await openBillingUrl(endpoint);
+      await openBillingUrl(
+        endpoint,
+        action === "checkout" ? { plan: checkoutPlan } : undefined
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to open billing.");
       setLoadingAction("");
@@ -84,18 +93,20 @@ export default function BillingActions({
           </button>
         )}
 
-        <button
-          type="button"
-          onClick={() => {
-            setLoadingAction("refresh");
-            window.location.reload();
-          }}
-          disabled={loadingAction !== ""}
-          className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 transition hover:border-[#19c653]/45 hover:bg-[#f1fff6] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <RefreshCw aria-hidden="true" className="size-4" />
-          Refresh status
-        </button>
+        {showRefresh && (
+          <button
+            type="button"
+            onClick={() => {
+              setLoadingAction("refresh");
+              window.location.reload();
+            }}
+            disabled={loadingAction !== ""}
+            className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-5 py-3 text-sm font-bold text-slate-700 transition hover:border-[#19c653]/45 hover:bg-[#f1fff6] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <RefreshCw aria-hidden="true" className="size-4" />
+            Refresh status
+          </button>
+        )}
       </div>
 
       {error && (

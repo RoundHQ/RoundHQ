@@ -100,15 +100,6 @@ function canSharePdfFile(file: File) {
   }
 }
 
-function buildSmsUrl(to: string, body: string) {
-  const params = new URLSearchParams({ body });
-  return `sms:${encodeURIComponent(to)}?${params.toString()}`;
-}
-
-export function buildTextMessageUrl(to: string, body: string) {
-  return buildSmsUrl(to, body);
-}
-
 async function shareOrDownloadFile(options: {
   blob: Blob;
   filename: string;
@@ -244,50 +235,10 @@ export async function sendCustomerEmailMessage(options: {
   return "sent";
 }
 
-export async function sendCustomerTextMessage(options: {
-  recipient: string;
-  message: string;
-}) {
-  const response = await fetch("/api/send-visit-text", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      to: options.recipient,
-      message: options.message,
-    }),
-  });
-
-  const responseBody = (await response.json().catch(() => null)) as
-    | { error?: string }
-    | null;
-
-  if (!response.ok) {
-    throw new Error(
-      responseBody?.error?.trim() || "Unable to send the text message."
-    );
-  }
-
-  return "sent";
-}
-
-async function deliverTextDocument(options: {
-  blob: Blob;
-  filename: string;
-  title: string;
-  text: string;
-  recipient: string;
-}) {
-  const deliveryResult = await shareOrDownloadFile(options);
-  window.location.href = buildSmsUrl(options.recipient, options.text);
-  return deliveryResult;
-}
-
 export async function sendQuoteDocument(options: {
   quote: QuoteDocument;
   businessDetails: DeliveryBusinessDetails;
-  method: "email" | "text";
+  method: "email";
   recipient: string;
   subject: string;
   message: string;
@@ -295,30 +246,20 @@ export async function sendQuoteDocument(options: {
   const filename = `${options.quote.quoteNumber || options.quote.id}.pdf`;
   const blob = await getQuotePdfBlob(options.quote, options.businessDetails);
 
-  if (options.method === "email") {
-    return sendDocumentEmail({
-      blob,
-      filename,
-      recipient: options.recipient,
-      subject: options.subject,
-      message: options.message,
-      businessDetails: options.businessDetails,
-    });
-  }
-
-  return deliverTextDocument({
+  return sendDocumentEmail({
     blob,
     filename,
-    title: options.subject,
-    text: options.message,
     recipient: options.recipient,
+    subject: options.subject,
+    message: options.message,
+    businessDetails: options.businessDetails,
   });
 }
 
 export async function sendInvoiceDocument(options: {
   invoice: InvoiceDocument;
   businessDetails: DeliveryBusinessDetails;
-  method: "email" | "text";
+  method: "email";
   recipient: string;
   subject: string;
   message: string;
@@ -326,22 +267,12 @@ export async function sendInvoiceDocument(options: {
   const filename = `${options.invoice.invoiceNumber || options.invoice.id}.pdf`;
   const blob = await getInvoicePdfBlob(options.invoice, options.businessDetails);
 
-  if (options.method === "email") {
-    return sendDocumentEmail({
-      blob,
-      filename,
-      recipient: options.recipient,
-      subject: options.subject,
-      message: options.message,
-      businessDetails: options.businessDetails,
-    });
-  }
-
-  return deliverTextDocument({
+  return sendDocumentEmail({
     blob,
     filename,
-    title: options.subject,
-    text: options.message,
     recipient: options.recipient,
+    subject: options.subject,
+    message: options.message,
+    businessDetails: options.businessDetails,
   });
 }

@@ -7,7 +7,6 @@ import {
   FileText,
   History as HistoryIcon,
   Mail,
-  MessageSquare,
   Pencil,
   Repeat,
   Trash2,
@@ -135,7 +134,7 @@ type Props = {
 
 type SendTarget = {
   invoiceId: string;
-  method: "email" | "text";
+  method: "email";
 } | null;
 
 type DocumentSendMetadata = {
@@ -270,22 +269,6 @@ function getInvoiceEmailMessage(
     .join("\n");
 }
 
-function getInvoiceTextMessage(
-  invoice: Invoice,
-  businessDetails: BusinessDetails
-) {
-  return [
-    `Hi ${invoice.customerName},`,
-    `your invoice ${invoice.invoiceNumber} from ${getBrandName(businessDetails)} is ready.`,
-    `Total: ${formatCurrency(invoice.total)}.`,
-    invoice.dueDate
-      ? `Due by ${new Date(invoice.dueDate).toLocaleDateString()}.`
-      : undefined,
-    "I have prepared the PDF for you as well.",
-  ]
-    .filter(Boolean)
-    .join(" ");
-}
 
 function getInvoiceDueDaysAfterIssue(invoice: Invoice, fallbackDays: number) {
   if (!invoice.dueDate) {
@@ -387,11 +370,6 @@ export default function InvoicesPage({
     () => (activeCustomer ? getCustomerEmailAddresses(activeCustomer) : []),
     [activeCustomer]
   );
-  const textRecipients = useMemo(() => {
-    const phone = activeCustomer?.phone?.trim();
-    return phone ? [phone] : [];
-  }, [activeCustomer]);
-
   const recurringInvoice = useMemo(
     () =>
       recurringEditor
@@ -419,16 +397,9 @@ export default function InvoicesPage({
     () => (recurringCustomer ? getCustomerEmailAddresses(recurringCustomer) : []),
     [recurringCustomer]
   );
-  const recurringPhoneOptions = useMemo(() => {
-    const phone = recurringCustomer?.phone?.trim();
-    return phone ? [phone] : [];
-  }, [recurringCustomer]);
   const recurringRecipientOptions = useMemo(
-    () =>
-      recurringSendMethod === "email"
-        ? recurringEmailOptions
-        : recurringPhoneOptions,
-    [recurringEmailOptions, recurringPhoneOptions, recurringSendMethod]
+    () => recurringEmailOptions,
+    [recurringEmailOptions]
   );
   const activeRecurringTemplateCount = useMemo(
     () =>
@@ -617,7 +588,7 @@ export default function InvoicesPage({
                       <p className="text-xs text-slate-400">Preferred Send</p>
                       <p className="mt-1 text-sm font-semibold text-slate-900">
                         {template.preferredSendMethod
-                          ? `${template.preferredSendMethod === "email" ? "Email" : "Text"}${
+                          ? `Email${
                               template.sendTo ? ` • ${template.sendTo}` : ""
                             }`
                           : "Manual"}
@@ -813,16 +784,6 @@ export default function InvoicesPage({
 
                           <button
                             onClick={() =>
-                              setSendTarget({ invoiceId: invoice.id, method: "text" })
-                            }
-                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-                          >
-                            <MessageSquare size={14} />
-                            Text
-                          </button>
-
-                          <button
-                            onClick={() =>
                               openRecurringEditor(invoice.id, existingTemplate ?? undefined)
                             }
                             className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
@@ -888,7 +849,7 @@ export default function InvoicesPage({
                   <p className="mt-2 text-sm text-slate-600">{entry.summary}</p>
                   {entry.recipient ? (
                     <p className="mt-1 text-xs text-slate-400">
-                      {entry.method === "text" ? "Text" : "Email"}: {entry.recipient}
+                      Email: {entry.recipient}
                     </p>
                   ) : null}
                 </div>
@@ -905,21 +866,11 @@ export default function InvoicesPage({
         <DocumentSendDialog
           isOpen
           method={sendTarget.method}
-          title={`${sendTarget.method === "email" ? "Email" : "Text"} ${activeInvoice.invoiceNumber}`}
-          recipientOptions={
-            sendTarget.method === "email" ? emailRecipients : textRecipients
-          }
-          initialRecipient={
-            sendTarget.method === "email"
-              ? emailRecipients[0]
-              : textRecipients[0]
-          }
+          title={`Email ${activeInvoice.invoiceNumber}`}
+          recipientOptions={emailRecipients}
+          initialRecipient={emailRecipients[0]}
           initialSubject={getInvoiceEmailSubject(activeInvoice, businessDetails)}
-          initialMessage={
-            sendTarget.method === "email"
-              ? getInvoiceEmailMessage(activeInvoice, businessDetails)
-              : getInvoiceTextMessage(activeInvoice, businessDetails)
-          }
+          initialMessage={getInvoiceEmailMessage(activeInvoice, businessDetails)}
           onClose={() => setSendTarget(null)}
           onSend={async ({ recipient, subject, message }) => {
             await sendInvoiceDocument({
@@ -932,9 +883,7 @@ export default function InvoicesPage({
                 getInvoiceEmailSubject(activeInvoice, businessDetails),
               message:
                 message.trim() ||
-                (sendTarget.method === "email"
-                  ? getInvoiceEmailMessage(activeInvoice, businessDetails)
-                  : getInvoiceTextMessage(activeInvoice, businessDetails)),
+                getInvoiceEmailMessage(activeInvoice, businessDetails),
             });
 
             await onMarkSent(activeInvoice.id, {
@@ -942,11 +891,9 @@ export default function InvoicesPage({
               recipient,
             });
 
-            if (sendTarget.method === "email") {
-              setSendNotice(
-                `Email sent to ${recipient} for ${activeInvoice.invoiceNumber}.`
-              );
-            }
+            setSendNotice(
+              `Email sent to ${recipient} for ${activeInvoice.invoiceNumber}.`
+            );
           }}
         />
       ) : null}
@@ -1017,16 +964,11 @@ export default function InvoicesPage({
                   onChange={(event) => {
                     const nextMethod = event.target.value as DocumentDeliveryMethod;
                     setRecurringSendMethod(nextMethod);
-                    const nextOptions =
-                      nextMethod === "email"
-                        ? recurringEmailOptions
-                        : recurringPhoneOptions;
-                    setRecurringSendTo(nextOptions[0] ?? "");
+                    setRecurringSendTo(recurringEmailOptions[0] ?? "");
                   }}
                   className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
                 >
                   <option value="email">Email</option>
-                  <option value="text">Text</option>
                 </select>
               </div>
 
@@ -1050,11 +992,7 @@ export default function InvoicesPage({
                   <input
                     value={recurringSendTo}
                     onChange={(event) => setRecurringSendTo(event.target.value)}
-                    placeholder={
-                      recurringSendMethod === "email"
-                        ? "customer@example.com"
-                        : "07123456789"
-                    }
+                    placeholder="customer@example.com"
                     className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
                   />
                 )}

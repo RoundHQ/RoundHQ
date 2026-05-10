@@ -1,9 +1,20 @@
 import Stripe from "stripe";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getStripeObjectId, stripeTimestampToIso } from "@/lib/stripe/server";
-
-const SUBSCRIPTION_SELECT =
-  "organization_id, stripe_customer_id, stripe_subscription_id, stripe_price_id, status, trial_ends_at, current_period_end, cancel_at_period_end";
+import {
+  getStripeObjectId,
+  getStripePlanForPriceId,
+  stripeTimestampToIso,
+} from "@/lib/stripe/server";
+import {
+  normalizePlanKey,
+  type SubscriptionPlanKey,
+} from "@/lib/billing/plans";
+import {
+  isMissingSubscriptionPlanColumn,
+  LEGACY_SUBSCRIPTION_SELECT,
+  normalizeSubscriptionRow,
+  SUBSCRIPTION_SELECT,
+} from "@/lib/billing/subscriptions";
 
 type LegacySubscriptionPeriod = Stripe.Subscription & {
   current_period_end?: number;
@@ -19,6 +30,24 @@ function getSubscriptionPeriodEnd(subscription: Stripe.Subscription) {
     .current_period_end;
 
   return stripeTimestampToIso(itemPeriodEnd ?? legacyPeriodEnd);
+}
+
+function getSubscriptionPlanKey(
+  subscription: Stripe.Subscription,
+  priceId: string | null,
+  fallbackPlan?: SubscriptionPlanKey | null
+) {
+  if (subscription.metadata.plan === "starter" || subscription.metadata.plan === "growth") {
+    return subscription.metadata.plan;
+  }
+
+  const planFromPrice = getStripePlanForPriceId(priceId);
+
+  if (planFromPrice) {
+    return planFromPrice;
+  }
+
+  return normalizePlanKey(fallbackPlan);
 }
 
 async function findSubscriptionOrganizationId(
@@ -68,7 +97,8 @@ async function findSubscriptionOrganizationId(
 export async function syncStripeSubscription(
   supabase: SupabaseClient,
   subscription: Stripe.Subscription,
-  fallbackOrganizationId?: string | null
+  fallbackOrganizationId?: string | null,
+  fallbackPlan?: SubscriptionPlanKey | null
 ) {
   const organizationId =
     fallbackOrganizationId ||
@@ -81,14 +111,18 @@ export async function syncStripeSubscription(
     );
   }
 
-  const { data, error } = await supabase
+  const priceId = getSubscriptionPriceId(subscription);
+  const plan = getSubscriptionPlanKey(subscription, priceId, fallbackPlan);
+
+  let { data, error } = await supabase
     .from("subscriptions")
     .upsert(
       {
         organization_id: organizationId,
+        plan,
         stripe_customer_id: getStripeObjectId(subscription.customer),
         stripe_subscription_id: subscription.id,
-        stripe_price_id: getSubscriptionPriceId(subscription),
+        stripe_price_id: priceId,
         status: subscription.status,
         trial_ends_at: stripeTimestampToIso(subscription.trial_end),
         current_period_end: getSubscriptionPeriodEnd(subscription),
@@ -100,11 +134,35 @@ export async function syncStripeSubscription(
     .select(SUBSCRIPTION_SELECT)
     .limit(1);
 
+  if (isMissingSubscriptionPlanColumn(error)) {
+    const legacyResult = await supabase
+      .from("subscriptions")
+      .upsert(
+        {
+          organization_id: organizationId,
+          stripe_customer_id: getStripeObjectId(subscription.customer),
+          stripe_subscription_id: subscription.id,
+          stripe_price_id: priceId,
+          status: subscription.status,
+          trial_ends_at: stripeTimestampToIso(subscription.trial_end),
+          current_period_end: getSubscriptionPeriodEnd(subscription),
+          cancel_at_period_end: subscription.cancel_at_period_end,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "organization_id" }
+      )
+      .select(LEGACY_SUBSCRIPTION_SELECT)
+      .limit(1);
+
+    data = legacyResult.data as typeof data;
+    error = legacyResult.error;
+  }
+
   if (error) {
     throw error;
   }
 
-  return data?.[0] ?? null;
+  return normalizeSubscriptionRow(data?.[0] ?? null);
 }
 
 export async function syncStripeCheckoutSession(
@@ -129,7 +187,7 @@ export async function syncStripeCheckoutSession(
   return syncStripeSubscription(
     supabase,
     subscription,
-    session.client_reference_id || session.metadata?.organization_id || null
+    session.client_reference_id || session.metadata?.organization_id || null,
+    normalizePlanKey(session.metadata?.plan)
   );
 }
-

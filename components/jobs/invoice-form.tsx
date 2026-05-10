@@ -61,6 +61,7 @@ type Props = DocumentCustomerFields & {
     defaultPaymentTermsDays: number;
     defaultVatRegistered: boolean;
     defaultVatRate: number;
+    allowCommercialTools?: boolean;
     onSave: (invoice: Invoice) => void | boolean | Promise<void | boolean>;
     onBack: () => void;
 };
@@ -202,6 +203,7 @@ export default function InvoiceForm({
     defaultPaymentTermsDays,
     defaultVatRegistered,
     defaultVatRate,
+    allowCommercialTools = true,
     onSave,
     onBack,
 }: Props) {
@@ -282,6 +284,8 @@ export default function InvoiceForm({
         siteTown: activeSiteTown,
         sitePostcode: activeSitePostcode,
     } = documentCustomerFields;
+    const showCommercialTools =
+        allowCommercialTools && activeCustomerType === "Commercial";
 
     useEffect(() => {
         if (dueDateTouched) {
@@ -346,7 +350,7 @@ export default function InvoiceForm({
 
     const customerDetails = useMemo(() => {
         const address = [
-            activeCustomerType === "Commercial" ? normalizeOptionalText(activeSiteName) : undefined,
+            showCommercialTools ? normalizeOptionalText(activeSiteName) : undefined,
             normalizeOptionalText(activeCustomerAddress),
         ]
             .filter(Boolean)
@@ -361,12 +365,12 @@ export default function InvoiceForm({
         activeCustomerAddress,
         activeCustomerPostcode,
         activeCustomerTown,
-        activeCustomerType,
         activeSiteName,
+        showCommercialTools,
     ]);
 
     const siteDetails = useMemo(() => {
-        if (activeCustomerType !== "Commercial") {
+        if (!showCommercialTools) {
             return [];
         }
 
@@ -381,11 +385,11 @@ export default function InvoiceForm({
             location || undefined,
         ].filter(Boolean) as string[];
     }, [
-        activeCustomerType,
         activeSiteAddress,
         activeSiteName,
         activeSitePostcode,
         activeSiteTown,
+        showCommercialTools,
     ]);
 
     function handleCustomerNameChange(value: string) {
@@ -427,19 +431,19 @@ export default function InvoiceForm({
             customerTown: normalizeOptionalText(activeCustomerTown),
             customerPostcode: normalizeOptionalText(activeCustomerPostcode),
             siteName:
-                activeCustomerType === "Commercial"
+                showCommercialTools
                     ? normalizeOptionalText(activeSiteName)
                     : undefined,
             siteAddress:
-                activeCustomerType === "Commercial"
+                showCommercialTools
                     ? normalizeOptionalText(activeSiteAddress)
                     : undefined,
             siteTown:
-                activeCustomerType === "Commercial"
+                showCommercialTools
                     ? normalizeOptionalText(activeSiteTown)
                     : undefined,
             sitePostcode:
-                activeCustomerType === "Commercial"
+                showCommercialTools
                     ? normalizeOptionalText(activeSitePostcode)
                     : undefined,
             date: invoiceDate,
@@ -600,7 +604,7 @@ export default function InvoiceForm({
                 </div>
             </section>
 
-            {(customerDetails.length > 0 || activeCustomerType === "Commercial") && (
+            {(customerDetails.length > 0 || showCommercialTools) && (
                 <section className="grid gap-6 xl:grid-cols-2">
                     <DetailCard
                         title="Customer Details"
@@ -608,7 +612,7 @@ export default function InvoiceForm({
                         emptyText="No customer address details are saved on this customer yet."
                     />
 
-                    {activeCustomerType === "Commercial" && (
+                    {showCommercialTools && (
                         <DetailCard
                             title="Site Details"
                             lines={siteDetails}

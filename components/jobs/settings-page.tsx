@@ -23,7 +23,6 @@ import {
     Image as ImageIcon,
     Trash2,
     Settings2,
-    MessageSquare,
 } from "lucide-react";
 import {
     DEFAULT_GRASS_CUT_SEASON_END,
@@ -37,13 +36,21 @@ import {
     normalizeRotationWeeks,
     ROTATION_WEEK_OPTIONS,
 } from "./rotation";
+import {
+    CURRENCY_OPTIONS,
+    DEFAULT_CURRENCY_CODE,
+    formatCurrencyAmount,
+    getCurrencyOption,
+    normalizeCurrencyCode,
+    type CurrencyCode,
+} from "./currency";
 import type { RotationWeeks } from "./types";
 
 type PaymentMethod = "cash" | "bank_transfer" | "direct_debit" | "invoice";
 type CutType = "front_only" | "front_back" | "full_garden";
 type ThemeMode = "light" | "dark" | "system";
 type QuoteServiceType = "service" | "product";
-type WorkflowMessageMethod = "email" | "text" | "both";
+type WorkflowMessageMethod = "email";
 type QuoteService = {
     id: string;
     title: string;
@@ -60,7 +67,6 @@ type SettingsTab =
     | "quotes"
     | "invoices"
     | "email"
-    | "sms"
     | "dashboard"
     | "data";
 
@@ -82,6 +88,7 @@ export type SettingsData = {
     secondaryColor: string;
     themeMode: ThemeMode;
     compactMode: boolean;
+    currencyCode: CurrencyCode;
 
     defaultGrassCutPrice: number;
     defaultHedgeCutPrice: number;
@@ -150,16 +157,8 @@ export type SettingsData = {
 
 type Props = {
     initialSettings?: Partial<SettingsData>;
+    showGrowthSettings?: boolean;
     onSave?: (settings: SettingsData) => Promise<void> | void;
-};
-
-type SmsConfigStatus = {
-    configured: boolean;
-    accountSidConfigured: boolean;
-    authTokenConfigured: boolean;
-    fromNumber: string;
-    messagingServiceSid: string;
-    defaultCountryCode: string;
 };
 
 const STORAGE_KEY = "roundhq_settings";
@@ -173,11 +172,7 @@ const visitDays = [
     "Saturday",
     "Sunday",
 ];
-const workflowMessageMethodOptions: WorkflowMessageMethod[] = [
-    "email",
-    "text",
-    "both",
-];
+const workflowMessageMethodOptions: WorkflowMessageMethod[] = ["email"];
 
 const defaultSettings: SettingsData = {
     businessName: "Your Business",
@@ -197,6 +192,7 @@ const defaultSettings: SettingsData = {
     secondaryColor: "#0f172a",
     themeMode: "light",
     compactMode: false,
+    currencyCode: DEFAULT_CURRENCY_CODE,
 
     defaultGrassCutPrice: 15,
     defaultHedgeCutPrice: 40,
@@ -606,19 +602,14 @@ function TabButton({
 }
 
 function safeMergeSettings(source?: Partial<SettingsData> | null): SettingsData {
-    const quoteFollowUpMethod =
-        source?.quoteFollowUpMethod === "text" || source?.quoteFollowUpMethod === "both"
-            ? source.quoteFollowUpMethod
-            : "email";
-    const invoiceReminderMethod =
-        source?.invoiceReminderMethod === "text" || source?.invoiceReminderMethod === "both"
-            ? source.invoiceReminderMethod
-            : "email";
+    const quoteFollowUpMethod = "email";
+    const invoiceReminderMethod = "email";
 
     return {
         ...defaultSettings,
         ...(source || {}),
         defaultRotationWeeks: normalizeRotationWeeks(source?.defaultRotationWeeks),
+        currencyCode: normalizeCurrencyCode(source?.currencyCode),
         quoteFollowUpMethod,
         invoiceReminderMethod,
         quoteServices: normalizeQuoteServices(source?.quoteServices),
@@ -627,6 +618,7 @@ function safeMergeSettings(source?: Partial<SettingsData> | null): SettingsData 
 
 export default function SettingsPage({
                                          initialSettings,
+                                         showGrowthSettings = true,
                                          onSave,
                                      }: Props) {
     const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -652,15 +644,6 @@ export default function SettingsPage({
     const [newQuoteServiceBuyPrice, setNewQuoteServiceBuyPrice] = useState("0");
     const [testEmailRecipient, setTestEmailRecipient] = useState("");
     const [isSendingTestEmail, setIsSendingTestEmail] = useState(false);
-    const [smsConfigStatus, setSmsConfigStatus] =
-        useState<SmsConfigStatus | null>(null);
-    const [isLoadingSmsConfigStatus, setIsLoadingSmsConfigStatus] =
-        useState(false);
-    const [testSmsRecipient, setTestSmsRecipient] = useState("");
-    const [testSmsMessage, setTestSmsMessage] = useState(
-        "This is a test text from RoundHQ."
-    );
-    const [isSendingTestSms, setIsSendingTestSms] = useState(false);
     const quoteServiceCategories = useMemo(
         () =>
             Array.from(
@@ -707,53 +690,6 @@ export default function SettingsPage({
         settings.emailFromAddress,
         settings.smtpUsername,
     ]);
-
-    useEffect(() => {
-        if (activeTab !== "sms") {
-            return;
-        }
-
-        let isCurrent = true;
-
-        async function loadSmsConfigStatus() {
-            try {
-                setIsLoadingSmsConfigStatus(true);
-
-                const response = await fetch("/api/send-visit-text", {
-                    method: "GET",
-                });
-                const body = (await response.json().catch(() => null)) as
-                    | SmsConfigStatus
-                    | null;
-
-                if (!isCurrent) {
-                    return;
-                }
-
-                if (!response.ok || !body) {
-                    setSmsConfigStatus(null);
-                    return;
-                }
-
-                setSmsConfigStatus(body);
-            } catch (error) {
-                console.error("Failed to load SMS configuration status:", error);
-                if (isCurrent) {
-                    setSmsConfigStatus(null);
-                }
-            } finally {
-                if (isCurrent) {
-                    setIsLoadingSmsConfigStatus(false);
-                }
-            }
-        }
-
-        void loadSmsConfigStatus();
-
-        return () => {
-            isCurrent = false;
-        };
-    }, [activeTab]);
 
     useEffect(() => {
         try {
@@ -933,57 +869,6 @@ export default function SettingsPage({
         }
     }
 
-    async function handleSendTestSms() {
-        const recipient = testSmsRecipient.trim();
-        const textMessage = testSmsMessage.trim();
-
-        if (!recipient) {
-            showMessage("Enter a mobile number to send the test text to.", "error");
-            return;
-        }
-
-        if (!textMessage) {
-            showMessage("Enter a message before sending the test text.", "error");
-            return;
-        }
-
-        try {
-            setIsSendingTestSms(true);
-            setMessage("");
-
-            const response = await fetch("/api/send-visit-text", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                    to: recipient,
-                    message: textMessage,
-                }),
-            });
-
-            const body = (await response.json().catch(() => null)) as
-                | { error?: string }
-                | null;
-
-            if (!response.ok) {
-                throw new Error(body?.error || "Unable to send the test text.");
-            }
-
-            showMessage(`Test text sent to ${recipient}.`, "success");
-        } catch (error) {
-            console.error("Failed to send test text:", error);
-            showMessage(
-                error instanceof Error && error.message.trim()
-                    ? error.message
-                    : "Unable to send the test text.",
-                "error"
-            );
-        } finally {
-            setIsSendingTestSms(false);
-        }
-    }
-
     function handleResetChanges() {
         setSettings(mergedSettings);
         showMessage("Unsaved changes reset.", "info");
@@ -1126,9 +1011,6 @@ export default function SettingsPage({
                     </TabButton>
                     <TabButton active={activeTab === "email"} onClick={() => setActiveTab("email")}>
                         Email
-                    </TabButton>
-                    <TabButton active={activeTab === "sms"} onClick={() => setActiveTab("sms")}>
-                        SMS
                     </TabButton>
                     <TabButton active={activeTab === "dashboard"} onClick={() => setActiveTab("dashboard")}>
                         Dashboard
@@ -1405,35 +1287,64 @@ export default function SettingsPage({
                             icon={CreditCard}
                         >
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                                <Field label="Default service price (£)">
+                                <Field
+                                    label="Currency"
+                                    hint="Used for dashboard totals, quotes, invoices, and payment figures."
+                                >
+                                    <Select
+                                        value={settings.currencyCode}
+                                        onChange={(event) =>
+                                            update(
+                                                "currencyCode",
+                                                normalizeCurrencyCode(event.target.value)
+                                            )
+                                        }
+                                    >
+                                        {CURRENCY_OPTIONS.map((currency) => (
+                                            <option key={currency.code} value={currency.code}>
+                                                {currency.code} - {currency.label} ({currency.symbol})
+                                            </option>
+                                        ))}
+                                    </Select>
+                                </Field>
+
+                                <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                                    <p className="font-semibold">Selected currency</p>
+                                    <p className="mt-1 text-emerald-700">
+                                        {getCurrencyOption(settings.currencyCode).label} will be used
+                                        for money values in the app.
+                                    </p>
+                                </div>
+
+                                <Field label="Default service price">
                                     <NumberInput
                                         value={settings.defaultGrassCutPrice}
                                         onChange={(value) => update("defaultGrassCutPrice", value)}
                                     />
                                 </Field>
 
-                                <Field label="Default hedge trimming price (£)">
+                                <Field label="Default hedge trimming price">
                                     <NumberInput
                                         value={settings.defaultHedgeCutPrice}
                                         onChange={(value) => update("defaultHedgeCutPrice", value)}
                                     />
                                 </Field>
 
-                                <Field label="Default hourly rate (£)">
+                                <Field label="Default hourly rate">
                                     <NumberInput
                                         value={settings.defaultHourlyRate}
                                         onChange={(value) => update("defaultHourlyRate", value)}
                                     />
                                 </Field>
 
-                                <Field label="Fuel surcharge (£)">
+                                <Field label="Fuel surcharge">
                                     <NumberInput
                                         value={settings.fuelSurcharge}
                                         onChange={(value) => update("fuelSurcharge", value)}
                                     />
                                 </Field>
 
-                                <Field label="Minimum charge (£)">
+                                <Field label="Minimum charge">
                                     <NumberInput
                                         value={settings.minimumCharge}
                                         onChange={(value) => update("minimumCharge", value)}
@@ -1658,7 +1569,7 @@ export default function SettingsPage({
                             >
                                 <div className="grid grid-cols-1 gap-4">
                                     <Field
-                                        label="Pressure wash rate (£ per m2)"
+                                        label={`Pressure wash rate (${settings.currencyCode} per m2)`}
                                         hint="Used by the pressure wash calculator on the Create Quote page."
                                     >
                                         <NumberInput
@@ -1874,11 +1785,24 @@ export default function SettingsPage({
                                                             </span>
                                                         </div>
                                                         <p className="mt-1 text-xs text-slate-500">
-                                                            Sell price: £{Number(service.price ?? 0).toFixed(2)}
+                                                            Sell price:{" "}
+                                                            {formatCurrencyAmount(
+                                                                service.price,
+                                                                settings.currencyCode
+                                                            )}
                                                         </p>
                                                         {service.itemType === "product" ? (
                                                             <p className="mt-1 text-xs text-slate-500">
-                                                                Buy price: £{Number(service.buyPrice ?? 0).toFixed(2)} • Profit: £{getQuoteServiceProfit(service).toFixed(2)}
+                                                                Buy price:{" "}
+                                                                {formatCurrencyAmount(
+                                                                    service.buyPrice,
+                                                                    settings.currencyCode
+                                                                )}{" "}
+                                                                | Profit:{" "}
+                                                                {formatCurrencyAmount(
+                                                                    getQuoteServiceProfit(service),
+                                                                    settings.currencyCode
+                                                                )}
                                                             </p>
                                                         ) : null}
                                                     </div>
@@ -2041,12 +1965,14 @@ export default function SettingsPage({
                                     description="Helpful for outdoor scheduling."
                                 />
 
-                                <Toggle
-                                    checked={settings.showRevenueWidget}
-                                    onChange={(value) => update("showRevenueWidget", value)}
-                                    label="Show revenue widget"
-                                    description="Display revenue totals."
-                                />
+                                {showGrowthSettings ? (
+                                    <Toggle
+                                        checked={settings.showRevenueWidget}
+                                        onChange={(value) => update("showRevenueWidget", value)}
+                                        label="Show revenue widget"
+                                        description="Display revenue totals."
+                                    />
+                                ) : null}
 
                                 <Toggle
                                     checked={settings.showJobsWidget}
@@ -2055,12 +1981,14 @@ export default function SettingsPage({
                                     description="Display jobs and totals."
                                 />
 
-                                <Toggle
-                                    checked={settings.showUnpaidWidget}
-                                    onChange={(value) => update("showUnpaidWidget", value)}
-                                    label="Show unpaid widget"
-                                    description="Track outstanding payments."
-                                />
+                                {showGrowthSettings ? (
+                                    <Toggle
+                                        checked={settings.showUnpaidWidget}
+                                        onChange={(value) => update("showUnpaidWidget", value)}
+                                        label="Show unpaid widget"
+                                        description="Track outstanding payments."
+                                    />
+                                ) : null}
 
                                 <Toggle
                                     checked={settings.showRecentActivityWidget}
@@ -2188,8 +2116,7 @@ export default function SettingsPage({
 
                                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 md:col-span-2">
                                     Save these settings before using the Email buttons on Quotes or
-                                    Invoices. Quote and invoice text reminders still use your
-                                    device's normal text sharing flow.
+                                    Invoices.
                                 </div>
 
                                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 md:col-span-2">
@@ -2226,6 +2153,7 @@ export default function SettingsPage({
                             </div>
                         </Card>
 
+                        {showGrowthSettings ? (
                         <div className="xl:col-span-2">
                             <Card
                                 title="Workflow message templates"
@@ -2261,11 +2189,7 @@ export default function SettingsPage({
                                                 >
                                                     {workflowMessageMethodOptions.map((option) => (
                                                         <option key={option} value={option}>
-                                                            {option === "both"
-                                                                ? "Email + Text"
-                                                                : option === "email"
-                                                                    ? "Email"
-                                                                    : "Text"}
+                                                            Email
                                                         </option>
                                                     ))}
                                                 </Select>
@@ -2301,20 +2225,6 @@ export default function SettingsPage({
                                                 />
                                             </Field>
 
-                                            <Field
-                                                label="Text message template"
-                                                hint="This fills the SMS body before your text app opens."
-                                            >
-                                                <Textarea
-                                                    value={settings.quoteFollowUpTextTemplate}
-                                                    onChange={(e) =>
-                                                        update(
-                                                            "quoteFollowUpTextTemplate",
-                                                            e.target.value
-                                                        )
-                                                    }
-                                                />
-                                            </Field>
                                         </div>
                                     </section>
 
@@ -2346,11 +2256,7 @@ export default function SettingsPage({
                                                 >
                                                     {workflowMessageMethodOptions.map((option) => (
                                                         <option key={option} value={option}>
-                                                            {option === "both"
-                                                                ? "Email + Text"
-                                                                : option === "email"
-                                                                    ? "Email"
-                                                                    : "Text"}
+                                                            Email
                                                         </option>
                                                     ))}
                                                 </Select>
@@ -2386,229 +2292,12 @@ export default function SettingsPage({
                                                 />
                                             </Field>
 
-                                            <Field
-                                                label="Text message template"
-                                                hint="This fills the SMS body before your text app opens."
-                                            >
-                                                <Textarea
-                                                    value={settings.invoiceReminderTextTemplate}
-                                                    onChange={(e) =>
-                                                        update(
-                                                            "invoiceReminderTextTemplate",
-                                                            e.target.value
-                                                        )
-                                                    }
-                                                />
-                                            </Field>
                                         </div>
                                     </section>
                                 </div>
                             </Card>
                         </div>
-                    </div>
-                )}
-
-                {activeTab === "sms" && (
-                    <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-                        <Card
-                            title="Automatic completion texts"
-                            description="Send an automatic payment-due text when an On Day Transfer customer is marked complete."
-                            icon={MessageSquare}
-                        >
-                            <div className="grid grid-cols-1 gap-5">
-                                <Toggle
-                                    checked={settings.autoSendVisitCompletionTexts}
-                                    onChange={(value) =>
-                                        update("autoSendVisitCompletionTexts", value)
-                                    }
-                                    label="Send payment text after completion"
-                                    description="Only sends for customers whose payment method is On Day Transfer. Cash and monthly customers are ignored."
-                                />
-
-                                <Field
-                                    label="Completion text template"
-                                    hint="Placeholders: {{customerName}}, {{businessName}}, {{amount}}, {{visitDate}}, {{paymentDetails}}, {{paymentReference}}"
-                                >
-                                    <Textarea
-                                        value={settings.visitCompletionTextTemplate}
-                                        onChange={(e) =>
-                                            update("visitCompletionTextTemplate", e.target.value)
-                                        }
-                                    />
-                                </Field>
-
-                                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600">
-                                    Automatic completion texts only work after the Twilio variables are
-                                    added in Vercel and the site is redeployed. The Auth Token is
-                                    kept out of app settings so it is not exposed in the browser.
-                                </div>
-                            </div>
-                        </Card>
-
-                        <Card
-                            title="Twilio configuration"
-                            description="Check the server-side Twilio setup used by automatic texts and test sends."
-                            icon={ShieldCheck}
-                        >
-                            <div className="grid grid-cols-1 gap-4">
-                                <div
-                                    className={cn(
-                                        "rounded-xl border p-4",
-                                        smsConfigStatus?.configured
-                                            ? "border-emerald-200 bg-emerald-50"
-                                            : "border-amber-200 bg-amber-50"
-                                    )}
-                                >
-                                    <p
-                                        className={cn(
-                                            "text-sm font-semibold",
-                                            smsConfigStatus?.configured
-                                                ? "text-emerald-900"
-                                                : "text-amber-900"
-                                        )}
-                                    >
-                                        {isLoadingSmsConfigStatus
-                                            ? "Checking Twilio setup..."
-                                            : smsConfigStatus?.configured
-                                                ? "Twilio is ready to send SMS."
-                                                : "Twilio needs more server details."}
-                                    </p>
-                                    <p
-                                        className={cn(
-                                            "mt-1 text-sm",
-                                            smsConfigStatus?.configured
-                                                ? "text-emerald-700"
-                                                : "text-amber-800"
-                                        )}
-                                    >
-                                        Add the missing values in Vercel Project Settings, then
-                                        redeploy the app.
-                                    </p>
-                                </div>
-
-                                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                                    {[
-                                        {
-                                            label: "Account SID",
-                                            value: smsConfigStatus?.accountSidConfigured
-                                                ? "Configured"
-                                                : "Missing",
-                                            ready: Boolean(
-                                                smsConfigStatus?.accountSidConfigured
-                                            ),
-                                        },
-                                        {
-                                            label: "Auth Token",
-                                            value: smsConfigStatus?.authTokenConfigured
-                                                ? "Configured"
-                                                : "Missing",
-                                            ready: Boolean(
-                                                smsConfigStatus?.authTokenConfigured
-                                            ),
-                                        },
-                                        {
-                                            label: "From number",
-                                            value: smsConfigStatus?.fromNumber || "Not set",
-                                            ready: Boolean(smsConfigStatus?.fromNumber),
-                                        },
-                                        {
-                                            label: "Messaging Service SID",
-                                            value:
-                                                smsConfigStatus?.messagingServiceSid ||
-                                                "Not set",
-                                            ready: Boolean(
-                                                smsConfigStatus?.messagingServiceSid
-                                            ),
-                                        },
-                                        {
-                                            label: "Default country code",
-                                            value:
-                                                smsConfigStatus?.defaultCountryCode || "+44",
-                                            ready: true,
-                                        },
-                                    ].map((item) => (
-                                        <div
-                                            key={item.label}
-                                            className="rounded-xl border border-slate-200 bg-slate-50 p-4"
-                                        >
-                                            <p className="text-xs font-medium uppercase text-slate-500">
-                                                {item.label}
-                                            </p>
-                                            <p
-                                                className={cn(
-                                                    "mt-1 text-sm font-semibold",
-                                                    item.ready
-                                                        ? "text-slate-900"
-                                                        : "text-amber-700"
-                                                )}
-                                            >
-                                                {item.value}
-                                            </p>
-                                        </div>
-                                    ))}
-                                </div>
-
-                                <div className="rounded-xl border border-slate-200 bg-slate-900 p-4 text-sm text-slate-100">
-                                    <p className="font-semibold">Vercel environment variables</p>
-                                    <div className="mt-3 grid gap-2 font-mono text-xs leading-6 text-slate-200">
-                                        <span>TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</span>
-                                        <span>TWILIO_AUTH_TOKEN=your_twilio_auth_token</span>
-                                        <span>TWILIO_FROM_NUMBER=+447000000000</span>
-                                        <span>SMS_DEFAULT_COUNTRY_CODE=+44</span>
-                                    </div>
-                                    <p className="mt-3 text-xs leading-5 text-slate-300">
-                                        You can use TWILIO_MESSAGING_SERVICE_SID instead of
-                                        TWILIO_FROM_NUMBER if you set up a Twilio Messaging Service.
-                                    </p>
-                                </div>
-                            </div>
-                        </Card>
-
-                        <div className="xl:col-span-2">
-                            <Card
-                                title="Send test SMS"
-                                description="Send a one-off test text using the Twilio details currently deployed on the server."
-                                icon={Phone}
-                            >
-                                <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,1fr)_auto] lg:items-end">
-                                    <Field
-                                        label="Send test text to"
-                                        hint="Use E.164 format if possible, for example +447700900123."
-                                    >
-                                        <Input
-                                            type="tel"
-                                            value={testSmsRecipient}
-                                            onChange={(e) =>
-                                                setTestSmsRecipient(e.target.value)
-                                            }
-                                            placeholder="+447700900123"
-                                        />
-                                    </Field>
-
-                                    <Field label="Test message">
-                                        <Textarea
-                                            value={testSmsMessage}
-                                            onChange={(e) =>
-                                                setTestSmsMessage(e.target.value)
-                                            }
-                                            className="min-h-[92px]"
-                                        />
-                                    </Field>
-
-                                    <button
-                                        type="button"
-                                        onClick={handleSendTestSms}
-                                        disabled={isSendingTestSms}
-                                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                                    >
-                                        <MessageSquare className="h-4 w-4" />
-                                        {isSendingTestSms
-                                            ? "Sending test text..."
-                                            : "Send Test Text"}
-                                    </button>
-                                </div>
-                            </Card>
-                        </div>
+                        ) : null}
                     </div>
                 )}
 
