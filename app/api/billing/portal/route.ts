@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
   try {
-    if (!isStripeConfigured()) {
+    if (!(await isStripeConfigured())) {
       return NextResponse.json(
         { error: "Stripe is not configured yet." },
         { status: 500 }
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const stripe = getStripe();
+    const stripe = await getStripe();
     const portalSession = await stripe.billingPortal.sessions.create({
       customer: subscription.stripe_customer_id,
       return_url: `${getBaseUrl(request.url)}/billing`,
@@ -53,4 +53,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

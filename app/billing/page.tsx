@@ -75,11 +75,13 @@ function PlanCard({
   activePlan,
   hasAccess,
   canManageBilling,
+  stripeConfigured,
 }: {
   plan: SubscriptionPlan;
   activePlan: SubscriptionPlan;
   hasAccess: boolean;
   canManageBilling: boolean;
+  stripeConfigured: boolean;
 }) {
   const isCurrentPlan = activePlan.key === plan.key;
 
@@ -120,7 +122,7 @@ function PlanCard({
         ))}
       </ul>
       <BillingActions
-        stripeConfigured={isStripeConfigured(plan.key)}
+        stripeConfigured={stripeConfigured}
         checkoutPlan={plan.key}
         showCheckout={!hasAccess}
         showPortal={hasAccess && canManageBilling}
@@ -195,7 +197,16 @@ export default async function BillingPage() {
       ? organizations[0].name.trim()
       : "RoundHQ Workspace";
   const hasAccess = hasDashboardAccess(subscription);
-  const stripeConfigured = isStripeConfigured();
+  const [stripeConfigured, starterStripeConfigured, growthStripeConfigured] =
+    await Promise.all([
+      isStripeConfigured(),
+      isStripeConfigured("starter"),
+      isStripeConfigured("growth"),
+    ]);
+  const stripeConfiguredByPlan: Record<SubscriptionPlan["key"], boolean> = {
+    starter: starterStripeConfigured,
+    growth: growthStripeConfigured,
+  };
   const statusLabel = getSubscriptionStatusLabel(subscription);
   const activePlan = getSubscriptionPlan(subscription.plan);
   const renewalLabel = subscription.current_period_end
@@ -327,9 +338,9 @@ export default async function BillingPage() {
 
             {!stripeConfigured && (
               <div className="mt-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                Stripe is not configured yet. Add STRIPE_SECRET_KEY, the
-                Starter and Growth price IDs, SUPABASE_SERVICE_ROLE_KEY, and
-                STRIPE_WEBHOOK_SECRET before launch.
+                Stripe is not configured yet. Add the secret key, webhook
+                signing secret, and both Starter and Growth price IDs in admin
+                settings before launch.
               </div>
             )}
 
@@ -399,6 +410,7 @@ export default async function BillingPage() {
               activePlan={activePlan}
               hasAccess={hasAccess}
               canManageBilling={Boolean(subscription.stripe_customer_id)}
+              stripeConfigured={stripeConfiguredByPlan[plan.key]}
             />
           ))}
         </section>

@@ -8,6 +8,7 @@ import {
 } from "@/lib/billing/subscriptions";
 import { createClient } from "@/lib/supabase/server";
 import { getCustomerAccountSettings } from "@/lib/customer-account";
+import type { SubscriptionPlanKey } from "@/lib/billing/plans";
 import { isStripeConfigured } from "@/lib/stripe/server";
 import { ensureWorkspace } from "@/lib/workspace";
 import { redirect } from "next/navigation";
@@ -55,11 +56,20 @@ export default async function DashboardPage() {
   }
 
   if (!hasDashboardAccess(subscription)) {
+    const [starterStripeConfigured, growthStripeConfigured] = await Promise.all([
+      isStripeConfigured("starter"),
+      isStripeConfigured("growth"),
+    ]);
+    const stripeConfiguredByPlan: Record<SubscriptionPlanKey, boolean> = {
+      starter: starterStripeConfigured,
+      growth: growthStripeConfigured,
+    };
+
     return (
       <SubscriptionGate
         workspaceName={workspaceName}
         subscriptionStatus={getSubscriptionStatusLabel(subscription)}
-        stripeConfigured={isStripeConfigured()}
+        stripeConfiguredByPlan={stripeConfiguredByPlan}
       />
     );
   }

@@ -16,6 +16,7 @@ import {
   DEFAULT_SUPPORT_AUTO_ACKNOWLEDGE_SUBJECT,
 } from "@/lib/support/helpdesk";
 import { normalizeAnnouncementTone } from "@/lib/platform-announcements";
+import { getPlatformStripeSettings } from "@/lib/admin/stripe-settings";
 
 function getText(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -180,6 +181,39 @@ export async function updateAdminHelpdeskSettingsAction(formData: FormData) {
 
   revalidatePath("/admin/settings");
   redirect("/admin/settings?tab=helpdesk&saved=1");
+}
+
+export async function updateAdminStripeSettingsAction(formData: FormData) {
+  await requireAdminAccess("/admin/settings?tab=stripe");
+
+  const existingSettings = await getPlatformStripeSettings();
+  const supabase = createServiceRoleClient();
+
+  const { error } = await supabase.from("platform_stripe_settings").upsert(
+    {
+      id: "primary",
+      stripe_secret_key:
+        getText(formData, "stripe_secret_key") || existingSettings.secretKey,
+      stripe_webhook_secret:
+        getText(formData, "stripe_webhook_secret") ||
+        existingSettings.webhookSecret,
+      starter_price_id: getText(formData, "starter_price_id"),
+      growth_price_id: getText(formData, "growth_price_id"),
+      updated_at: new Date().toISOString(),
+    },
+    {
+      onConflict: "id",
+    }
+  );
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/admin/settings");
+  revalidatePath("/billing");
+  revalidatePath("/dashboard");
+  redirect("/admin/settings?tab=stripe&saved=1");
 }
 
 export async function updatePlatformAnnouncementAction(formData: FormData) {

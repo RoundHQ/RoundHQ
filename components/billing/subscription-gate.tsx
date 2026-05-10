@@ -1,19 +1,24 @@
 import Link from "next/link";
 import { BadgeCheck, LockKeyhole, ShieldCheck } from "lucide-react";
 import BillingActions from "@/components/billing/billing-actions";
-import { SUBSCRIPTION_PLANS } from "@/lib/billing/plans";
+import {
+  SUBSCRIPTION_PLANS,
+  type SubscriptionPlanKey,
+} from "@/lib/billing/plans";
 
 type SubscriptionGateProps = {
   workspaceName: string;
   subscriptionStatus: string;
-  stripeConfigured: boolean;
+  stripeConfiguredByPlan: Record<SubscriptionPlanKey, boolean>;
 };
 
 export default function SubscriptionGate({
   workspaceName,
   subscriptionStatus,
-  stripeConfigured,
+  stripeConfiguredByPlan,
 }: SubscriptionGateProps) {
+  const stripeConfigured = Object.values(stripeConfiguredByPlan).every(Boolean);
+
   return (
     <main className="min-h-screen bg-[#f6f5ef] px-5 py-8 text-slate-950 sm:px-8">
       <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-6xl flex-col">
@@ -48,8 +53,9 @@ export default function SubscriptionGate({
 
               {!stripeConfigured && (
                 <div className="mt-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                  Stripe is not configured yet. Add STRIPE_SECRET_KEY and the
-                  Starter and Growth price IDs before taking live subscriptions.
+                  Stripe is not configured yet. Add the secret key, webhook
+                  signing secret, and both Starter and Growth price IDs in admin
+                  settings before taking live subscriptions.
                 </div>
               )}
 
@@ -99,7 +105,7 @@ export default function SubscriptionGate({
                       ))}
                     </ul>
                     <BillingActions
-                      stripeConfigured={stripeConfigured}
+                      stripeConfigured={stripeConfiguredByPlan[plan.key]}
                       checkoutPlan={plan.key}
                       showCheckout
                       showPortal={false}

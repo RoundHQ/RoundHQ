@@ -266,7 +266,11 @@ export default async function SupportPage({
                 </h2>
               </div>
 
-              <form action={createCustomerTicketAction} className="mt-5 space-y-4">
+              <form
+                action={createCustomerTicketAction}
+                encType="multipart/form-data"
+                className="mt-5 space-y-4"
+              >
                 <label className="block">
                   <span className="mb-2 block text-sm font-bold text-slate-700">
                     Subject
@@ -477,6 +481,7 @@ export default async function SupportPage({
 
                 <form
                   action={addCustomerTicketReplyAction}
+                  encType="multipart/form-data"
                   className="mt-8 rounded-lg border border-slate-200 bg-white p-5"
                 >
                   <input

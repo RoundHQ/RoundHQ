@@ -3,73 +3,66 @@ import {
   normalizePlanKey,
   type SubscriptionPlanKey,
 } from "@/lib/billing/plans";
+import {
+  getPlatformStripeSettings,
+  getStripePriceIdFromSettings,
+  isPlatformStripeConfigured,
+} from "@/lib/admin/stripe-settings";
 
-let stripeClient: Stripe | null = null;
+let stripeClient: { secretKey: string; client: Stripe } | null = null;
 
-export function getStripePriceId(plan: SubscriptionPlanKey = "starter") {
+export async function getStripePriceId(plan: SubscriptionPlanKey = "starter") {
+  const settings = await getPlatformStripeSettings();
   const planKey = normalizePlanKey(plan);
 
-  if (planKey === "growth") {
-    return (
-      process.env.STRIPE_GROWTH_PRICE_ID?.trim() ||
-      process.env.NEXT_PUBLIC_STRIPE_GROWTH_PRICE_ID?.trim() ||
-      ""
-    );
-  }
-
-  return (
-    process.env.STRIPE_STARTER_PRICE_ID?.trim() ||
-    process.env.NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID?.trim() ||
-    process.env.STRIPE_PRICE_ID?.trim() ||
-    process.env.NEXT_PUBLIC_STRIPE_PRICE_ID?.trim() ||
-    ""
-  );
+  return getStripePriceIdFromSettings(settings, planKey);
 }
 
-export function getStripePlanForPriceId(priceId: string | null | undefined) {
+export async function getStripePlanForPriceId(
+  priceId: string | null | undefined
+) {
   if (!priceId) {
     return null;
   }
 
   const trimmedPriceId = priceId.trim();
+  const settings = await getPlatformStripeSettings();
 
-  if (trimmedPriceId && trimmedPriceId === getStripePriceId("growth")) {
+  if (trimmedPriceId && trimmedPriceId === settings.growthPriceId) {
     return "growth" as const;
   }
 
-  if (trimmedPriceId && trimmedPriceId === getStripePriceId("starter")) {
+  if (trimmedPriceId && trimmedPriceId === settings.starterPriceId) {
     return "starter" as const;
   }
 
   return null;
 }
 
-export function isStripeConfigured(plan?: SubscriptionPlanKey) {
-  const hasSecret = Boolean(process.env.STRIPE_SECRET_KEY?.trim());
-
-  if (!hasSecret) {
-    return false;
-  }
-
-  if (plan) {
-    return Boolean(getStripePriceId(plan));
-  }
-
-  return Boolean(getStripePriceId("starter") || getStripePriceId("growth"));
+export async function isStripeConfigured(plan?: SubscriptionPlanKey) {
+  return isPlatformStripeConfigured(await getPlatformStripeSettings(), plan);
 }
 
-export function getStripe() {
-  const secretKey = process.env.STRIPE_SECRET_KEY?.trim();
+export async function getStripe() {
+  const settings = await getPlatformStripeSettings();
+  const secretKey = settings.secretKey;
 
   if (!secretKey) {
-    throw new Error("Stripe is not configured. Add STRIPE_SECRET_KEY.");
+    throw new Error("Stripe is not configured. Add the secret key in admin settings.");
   }
 
-  if (!stripeClient) {
-    stripeClient = new Stripe(secretKey);
+  if (!stripeClient || stripeClient.secretKey !== secretKey) {
+    stripeClient = {
+      secretKey,
+      client: new Stripe(secretKey),
+    };
   }
 
-  return stripeClient;
+  return stripeClient.client;
+}
+
+export async function getStripeWebhookSecret() {
+  return (await getPlatformStripeSettings()).webhookSecret;
 }
 
 export function getBaseUrl(requestUrl: string) {

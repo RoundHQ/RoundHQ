@@ -48,16 +48,16 @@ export const DEFAULT_SITE_PAGES: SitePage[] = [
   {
     slug: "features",
     navLabel: "Features",
-    eyebrow: "Everything in one place",
-    title: "Tools built for the way maintenance teams actually work.",
+    eyebrow: "Complete operating system",
+    title: "Everything a maintenance business needs to run the week.",
     summary:
-      "RoundHQ brings customer records, rounds, quotes, invoices, visits, payments, and staff access into one tidy workspace.",
+      "RoundHQ replaces scattered spreadsheets, notes, diaries, route lists, quote documents, invoice trackers, and payment chasing with one focused workspace for garden and property maintenance teams.",
     body:
-      "Your team can plan the week, see what is due, track who has been visited, and keep a clean record of every customer without fighting spreadsheets.\n\nEach feature is built around daily field work: quick scheduling, clear route visibility, simple quote creation, invoice tracking, and staff permissions that keep the right data in the right hands.",
+      "Start with your customer records: names, addresses, access notes, service prices, documents, visit history, and the small details that keep work moving smoothly.\n\nPlan recurring rounds by week, day, rotation and customer type. See who is due, log completed or missed visits, keep the route visible on a map, and give staff the right level of access.\n\nWhen work changes, RoundHQ keeps the admin close to the job: capture leads, create quotes, convert accepted quotes into scheduled work, send invoices, record payments, and understand what is still owed.",
     highlights: [
-      "Customer management with notes, pricing, documents, and service history",
-      "Rounds and scheduling for weekly, fortnightly, and monthly work",
-      "Quotes, invoices, payments, route maps, staff roles, and reporting",
+      "CRM, leads, quotes, invoices, payments, rounds, route map, and visit history",
+      "Built for weekly, fortnightly, monthly, residential, and commercial maintenance work",
+      "Growth tools include staff permissions, RAMS, advanced insights, and customer profitability",
     ],
     primaryCtaLabel: "Start free trial",
     primaryCtaHref: "/signup",
@@ -68,16 +68,16 @@ export const DEFAULT_SITE_PAGES: SitePage[] = [
   {
     slug: "pricing",
     navLabel: "Pricing",
-    eyebrow: "Launch pricing",
-    title: "Starter and Growth plans for running your rounds.",
+    eyebrow: "Simple launch pricing",
+    title: "Choose the plan that matches how your team works.",
     summary:
-      "Starter is GBP 30 per business / month for solo operators. Growth is GBP 60 per business / month for teams that need staff permissions, RAMS, and deeper reporting.",
+      "Starter is GBP 30 per business / month for solo operators getting organised. Growth is GBP 60 per business / month for teams that need staff permissions, RAMS, commercial workflows, and deeper reporting.",
     body:
-      "Starter includes leads, CRM, quotes, invoices, scheduling, recurring rounds, route map, payment tracking, visit history, notes, one staff account, up to 250 customers, and a basic dashboard.\n\nGrowth includes everything in Starter, plus up to 5 staff accounts, staff permissions, RAMS generator, advanced dashboard insights, customer profitability, commercial customer tools, quote conversion workflows, operational reporting, and up to 1,500 customers.\n\nStart with a 14-day free trial. No card is required for the trial, and you can cancel whenever you need to.",
+      "Starter gives a solo operator the core workspace: leads, customer CRM, scheduling, recurring rounds, route map, quotes, invoices, payment tracking, visit history, notes, one staff account, up to 250 customers, and the main dashboard.\n\nGrowth is built for businesses adding people and complexity. It includes everything in Starter plus up to 5 staff accounts, staff permissions, RAMS generator, advanced dashboard insights, customer profitability, workflow tracking, commercial customer tools, quote conversion workflows, operational reporting, and up to 1,500 customers.\n\nBoth plans start with a 14-day free trial. There are no setup fees, and you can change plan as the business grows.",
     highlights: [
-      "Starter: GBP 30 per business / month",
-      "Growth: GBP 60 per business / month",
-      "14-day free trial with no card required",
+      "Starter: GBP 30 per business / month for solo operators",
+      "Growth: GBP 60 per business / month for teams and commercial work",
+      "14-day free trial, no setup fees, cancel anytime",
     ],
     primaryCtaLabel: "Start free trial",
     primaryCtaHref: "/signup",
@@ -88,16 +88,16 @@ export const DEFAULT_SITE_PAGES: SitePage[] = [
   {
     slug: "about",
     navLabel: "About",
-    eyebrow: "Built for maintenance businesses",
-    title: "RoundHQ helps practical teams run calmer days.",
+    eyebrow: "Built for maintenance teams",
+    title: "RoundHQ is for practical businesses that need less admin drag.",
     summary:
-      "RoundHQ was created for garden maintenance and field service businesses that need structure without heavy software.",
+      "RoundHQ is built around the real rhythm of garden maintenance, lawn care, property maintenance, and field service work: repeat visits, changing routes, customer details, quotes, invoices, payments, staff, and the daily pressure to stay organised.",
     body:
-      "Most maintenance teams grow from hard work, repeat customers, and a lot of moving parts. RoundHQ gives that work a proper operating base so owners can see what is happening, staff know where they need to be, and customers get a more reliable service.\n\nThe aim is simple: fewer missed details, clearer schedules, faster admin, and more control over the business.",
+      "Most maintenance businesses grow from repeat customers, trusted local work, and a lot of moving parts. The problem is that the admin often grows faster than the systems: spreadsheets for customers, paper for rounds, separate quote and invoice files, messages for staff, and memory for the tiny details.\n\nRoundHQ gives that work a proper operating base. Owners can see what is due, staff know where they need to be, customer records stay clean, and the business gets a clearer view of cashflow, workload, and service history.\n\nThe goal is simple: fewer missed details, calmer scheduling, faster admin, better visibility, and more control over the business without forcing teams into heavy generic software.",
     highlights: [
-      "Designed around rounds, visits, quotes, invoices, and field teams",
-      "Built for owners who want visibility without adding admin drag",
-      "Focused on practical workflows rather than bloated software",
+      "Designed around rounds, visits, quotes, invoices, payments, and field teams",
+      "Built for owners who want visibility without adding unnecessary admin",
+      "Focused on practical maintenance workflows rather than generic CRM complexity",
     ],
     primaryCtaLabel: "See the features",
     primaryCtaHref: "/features",
@@ -129,15 +129,15 @@ export const DEFAULT_SITE_PAGES: SitePage[] = [
     slug: "contact",
     navLabel: "Contact",
     eyebrow: "Talk to RoundHQ",
-    title: "Questions, support, or setup help.",
+    title: "Questions, setup help, billing, or support.",
     summary:
-      "Get in touch if you want to ask about RoundHQ, the free trial, billing, or setting up your business workspace.",
+      "Use the right route for the quickest answer: public product questions, workspace support, billing help, or setup guidance for moving your maintenance business into RoundHQ.",
     body:
-      "RoundHQ is here for maintenance businesses that want a cleaner way to manage the day-to-day work.\n\nUse this page for contact details, support information, demo requests, or any launch messaging you want customers to see before they sign up.",
+      "If you are looking at RoundHQ for the first time, contact us with the size of your team, the type of maintenance work you do, and what you currently use for scheduling, quotes, invoices, and payment tracking.\n\nIf you already have a RoundHQ workspace, the best place to get help is the support area inside your account. That keeps your ticket, replies, and files attached to your workspace so the conversation is easy to follow.\n\nFor billing questions, workspace setup, or product feedback, include the email address used for your RoundHQ account and any useful screenshots or files.",
     highlights: [
-      "Ask about the 14-day free trial",
-      "Get help setting up your workspace",
-      "Share product questions or customer support requests",
+      "Product enquiries: mail@roundhq.co.uk",
+      "Workspace support: use the in-app helpdesk from your account",
+      "Billing or setup help: include your RoundHQ workspace email",
     ],
     primaryCtaLabel: "Start free trial",
     primaryCtaHref: "/signup",

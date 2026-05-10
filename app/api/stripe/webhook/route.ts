@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { syncStripeCheckoutSession, syncStripeSubscription } from "@/lib/billing/stripe-sync";
-import { getStripe } from "@/lib/stripe/server";
+import { getStripe, getStripeWebhookSecret } from "@/lib/stripe/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const stripe = getStripe();
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim();
+  const stripe = await getStripe();
+  const webhookSecret = await getStripeWebhookSecret();
   const signature = request.headers.get("stripe-signature");
   const body = await request.text();
 

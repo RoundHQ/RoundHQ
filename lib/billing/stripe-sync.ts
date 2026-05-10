@@ -32,7 +32,7 @@ function getSubscriptionPeriodEnd(subscription: Stripe.Subscription) {
   return stripeTimestampToIso(itemPeriodEnd ?? legacyPeriodEnd);
 }
 
-function getSubscriptionPlanKey(
+async function getSubscriptionPlanKey(
   subscription: Stripe.Subscription,
   priceId: string | null,
   fallbackPlan?: SubscriptionPlanKey | null
@@ -41,7 +41,7 @@ function getSubscriptionPlanKey(
     return subscription.metadata.plan;
   }
 
-  const planFromPrice = getStripePlanForPriceId(priceId);
+  const planFromPrice = await getStripePlanForPriceId(priceId);
 
   if (planFromPrice) {
     return planFromPrice;
@@ -112,7 +112,7 @@ export async function syncStripeSubscription(
   }
 
   const priceId = getSubscriptionPriceId(subscription);
-  const plan = getSubscriptionPlanKey(subscription, priceId, fallbackPlan);
+  const plan = await getSubscriptionPlanKey(subscription, priceId, fallbackPlan);
 
   let { data, error } = await supabase
     .from("subscriptions")

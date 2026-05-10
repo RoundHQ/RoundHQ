@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import {
   BadgeCheck,
   CalendarClock,
+  CreditCard,
   Eye,
   FileText,
   Flag,
@@ -24,6 +25,10 @@ import {
 } from "@/lib/admin/email-settings";
 import { getAdminAccess } from "@/lib/admin/guard";
 import {
+  getPlatformStripeSettings,
+  isPlatformStripeConfigured,
+} from "@/lib/admin/stripe-settings";
+import {
   getSupportDeskSettingsData,
   type SupportCategoryOption,
   type SupportPriorityOption,
@@ -36,6 +41,7 @@ import {
   updateAdminEmailSettingsAction,
   updateAdminHelpdeskSettingsAction,
   updateAdminInvoiceSettingsAction,
+  updateAdminStripeSettingsAction,
 } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -203,7 +209,7 @@ function InvoicePdfPreview({
               From
             </p>
             <p className="mt-2 font-bold">RoundHQ Maintenance</p>
-            <p className="text-slate-500">hello@roundhq.co.uk</p>
+            <p className="text-slate-500">mail@roundhq.co.uk</p>
           </div>
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
@@ -406,12 +412,17 @@ export default async function AdminSettingsPage({
 
   const params = (await searchParams) ?? {};
   const settings = await getPlatformEmailSettings();
+  const stripeSettings = await getPlatformStripeSettings();
   const supportSettings = await getSupportDeskSettingsData();
   const announcement = await getAdminPlatformAnnouncement();
   const emailReady = isPlatformEmailConfigured(settings);
+  const stripeReady =
+    isPlatformStripeConfigured(stripeSettings) &&
+    Boolean(stripeSettings.webhookSecret);
   const saved = params.saved === "1";
   const activeTab =
     params.tab === "invoices" ||
+    params.tab === "stripe" ||
     params.tab === "helpdesk" ||
     params.tab === "announcements"
       ? params.tab
@@ -422,9 +433,9 @@ export default async function AdminSettingsPage({
       <AdminHeroShell
         eyebrow="Platform settings"
         title="RoundHQ owner settings."
-        summary="Configure platform email delivery, signup verification emails, automated invoice reminders, and dashboard announcements from the owner console."
+        summary="Configure platform email delivery, signup verification emails, automated invoice reminders, Stripe checkout, helpdesk defaults, and dashboard announcements from the owner console."
       >
-        <section className="grid gap-4 sm:grid-cols-3">
+        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <SettingStat
             title="Email"
             value={emailReady ? "Ready" : "Setup"}
@@ -438,6 +449,15 @@ export default async function AdminSettingsPage({
             title="Invoices"
             value={settings.invoiceAutomationEnabled ? "Auto" : "Manual"}
             detail={`Send ${settings.invoiceDaysBeforeDue} days before the due date`}
+          />
+          <SettingStat
+            title="Stripe"
+            value={stripeReady ? "Ready" : "Setup"}
+            detail={
+              stripeReady
+                ? "Checkout and webhook details are saved"
+                : "Add keys, webhook secret, and price IDs before taking payments"
+            }
           />
           <SettingStat
             title="Announcements"
@@ -467,6 +487,12 @@ export default async function AdminSettingsPage({
               label="Invoices"
             />
             <SettingsTabLink
+              href="/admin/settings?tab=stripe"
+              isActive={activeTab === "stripe"}
+              icon={<CreditCard aria-hidden="true" className="size-4" />}
+              label="Stripe"
+            />
+            <SettingsTabLink
               href="/admin/settings?tab=helpdesk"
               isActive={activeTab === "helpdesk"}
               icon={<LifeBuoy aria-hidden="true" className="size-4" />}
@@ -484,6 +510,8 @@ export default async function AdminSettingsPage({
             <div className="mb-6 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
               {activeTab === "invoices"
                 ? "Invoice settings saved."
+                : activeTab === "stripe"
+                  ? "Stripe settings saved."
                 : activeTab === "helpdesk"
                   ? "Helpdesk settings saved."
                 : activeTab === "announcements"
@@ -500,6 +528,18 @@ export default async function AdminSettingsPage({
               saving email settings.
               <div className="mt-2 text-xs text-amber-800">
                 {settings.schemaError}
+              </div>
+            </div>
+          )}
+
+          {activeTab === "stripe" && stripeSettings.schemaError && (
+            <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+              <span className="font-bold">Stripe database setup needed:</span>{" "}
+              Run <code>supabase/platform_stripe_settings_schema.sql</code> or
+              the latest <code>supabase/roundhq_tenant_schema.sql</code> before
+              saving Stripe settings.
+              <div className="mt-2 text-xs text-amber-800">
+                {stripeSettings.schemaError}
               </div>
             </div>
           )}
@@ -819,6 +859,141 @@ export default async function AdminSettingsPage({
                 </div>
               </section>
             </form>
+          ) : activeTab === "stripe" ? (
+            <form
+              action={updateAdminStripeSettingsAction}
+              className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]"
+            >
+              <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
+                <div className="mb-6 flex items-start gap-3">
+                  <div className="flex size-11 shrink-0 items-center justify-center rounded-md bg-[#e7f9ed] text-[#168b43]">
+                    <CreditCard aria-hidden="true" className="size-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-extrabold tracking-normal text-slate-950">
+                      Stripe credentials
+                    </h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                      Save the platform Stripe keys used by checkout, customer
+                      portal sessions, and webhook verification.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-5">
+                  <TextInput
+                    label={
+                      stripeSettings.secretKey
+                        ? "Secret key (leave blank to keep saved key)"
+                        : "Secret key"
+                    }
+                    name="stripe_secret_key"
+                    type="password"
+                    placeholder={
+                      stripeSettings.secretKey
+                        ? "Saved secret key present"
+                        : "sk_live_..."
+                    }
+                    required={!stripeSettings.secretKey}
+                  />
+                  <TextInput
+                    label={
+                      stripeSettings.webhookSecret
+                        ? "Webhook signing secret (leave blank to keep saved secret)"
+                        : "Webhook signing secret"
+                    }
+                    name="stripe_webhook_secret"
+                    type="password"
+                    placeholder={
+                      stripeSettings.webhookSecret
+                        ? "Saved webhook secret present"
+                        : "whsec_..."
+                    }
+                    required={!stripeSettings.webhookSecret}
+                  />
+
+                  <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-900">
+                    Webhook endpoint:{" "}
+                    <code className="font-bold">/api/stripe/webhook</code>.
+                    Add it in Stripe and paste the signing secret above.
+                  </div>
+                </div>
+              </section>
+
+              <section className="space-y-6">
+                <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
+                  <h2 className="text-xl font-extrabold tracking-normal text-slate-950">
+                    Payment tier price IDs
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    Paste the recurring Stripe Price ID for each RoundHQ tier.
+                    Checkout uses these IDs when customers choose Starter or
+                    Growth.
+                  </p>
+
+                  <div className="mt-6 space-y-5">
+                    <TextInput
+                      label="Starter price ID"
+                      name="starter_price_id"
+                      defaultValue={stripeSettings.starterPriceId}
+                      placeholder="price_..."
+                      required
+                    />
+                    <TextInput
+                      label="Growth price ID"
+                      name="growth_price_id"
+                      defaultValue={stripeSettings.growthPriceId}
+                      placeholder="price_..."
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
+                  <h2 className="text-xl font-extrabold tracking-normal text-slate-950">
+                    Stripe status
+                  </h2>
+                  <div className="mt-5 grid gap-3">
+                    {[
+                      ["Secret key", Boolean(stripeSettings.secretKey)],
+                      ["Webhook signing secret", Boolean(stripeSettings.webhookSecret)],
+                      ["Starter price ID", Boolean(stripeSettings.starterPriceId)],
+                      ["Growth price ID", Boolean(stripeSettings.growthPriceId)],
+                    ].map(([label, isReady]) => (
+                      <div
+                        key={String(label)}
+                        className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
+                      >
+                        <span className="font-bold text-slate-700">{label}</span>
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-bold ${
+                            isReady
+                              ? "bg-emerald-100 text-emerald-700"
+                              : "bg-amber-100 text-amber-800"
+                          }`}
+                        >
+                          {isReady ? "Ready" : "Missing"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  {stripeSettings.updatedAt ? (
+                    <p className="mt-4 text-xs font-semibold text-slate-500">
+                      Last saved{" "}
+                      {new Date(stripeSettings.updatedAt).toLocaleString("en-GB")}
+                    </p>
+                  ) : null}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={Boolean(stripeSettings.schemaError)}
+                  className="inline-flex w-full items-center justify-center rounded-md bg-[#19c653] px-5 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.2)] transition hover:bg-[#22d861] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Save Stripe settings
+                </button>
+              </section>
+            </form>
           ) : activeTab === "announcements" ? (
             <form
               action={updatePlatformAnnouncementAction}
@@ -929,7 +1104,7 @@ export default async function AdminSettingsPage({
                       </div>
                       <Megaphone className="shrink-0 text-[#19c653]" size={24} />
                     </div>
-                    <p className="mt-4 text-sm leading-6 text-slate-600">
+                    <p className="mt-4 whitespace-pre-line text-sm leading-6 text-slate-600">
                       {announcement.message ||
                         "Write a message to broadcast an update to customers."}
                     </p>
@@ -987,7 +1162,7 @@ export default async function AdminSettingsPage({
                       defaultValue={
                         supportSettings.settings.defaultAssignedAdminEmail
                       }
-                      placeholder="support@roundhq.co.uk"
+                      placeholder="mail@roundhq.co.uk"
                     />
                     <TextArea
                       label="Notify admin emails"

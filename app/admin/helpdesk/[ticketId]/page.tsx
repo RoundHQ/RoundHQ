@@ -283,7 +283,11 @@ export default async function AdminHelpdeskTicketPage({
               <h2 className="text-xl font-extrabold tracking-normal">
                 Reply
               </h2>
-              <form action={addAdminTicketReplyAction} className="mt-6 space-y-5">
+              <form
+                action={addAdminTicketReplyAction}
+                encType="multipart/form-data"
+                className="mt-6 space-y-5"
+              >
                 <input type="hidden" name="ticket_id" value={detail.ticket.id} />
 
                 <label className="block">

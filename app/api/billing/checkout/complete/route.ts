@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
     redirect("/login");
   }
 
-  const stripe = getStripe();
+  const stripe = await getStripe();
   const checkoutSession = await stripe.checkout.sessions.retrieve(sessionId, {
     expand: ["subscription", "subscription.items.data.price"],
   });
@@ -62,4 +62,3 @@ export async function GET(request: NextRequest) {
 
   redirect("/dashboard?billing=success");
 }
-

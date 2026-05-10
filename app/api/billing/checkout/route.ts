@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
     const plan = normalizePlanKey(body?.plan);
     const planDetails = getSubscriptionPlan(plan);
 
-    if (!isStripeConfigured(plan)) {
+    if (!(await isStripeConfigured(plan))) {
       return NextResponse.json(
         { error: `Stripe is not configured for ${planDetails.name} yet.` },
         { status: 500 }
@@ -61,8 +61,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ url: `${getBaseUrl(request.url)}/dashboard` });
     }
 
-    const stripe = getStripe();
-    const priceId = getStripePriceId(plan);
+    const stripe = await getStripe();
+    const priceId = await getStripePriceId(plan);
     const organizationName = await getOrganizationName(supabase, organizationId);
     let customerId = subscription.stripe_customer_id;
 

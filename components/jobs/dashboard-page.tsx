@@ -2141,7 +2141,7 @@ export default function DashboardPage({
                 <Megaphone className={announcementIconClassName} size={24} />
               </div>
 
-              <p className="mt-4 text-sm leading-6 text-slate-600">
+              <p className="mt-4 whitespace-pre-line text-sm leading-6 text-slate-600">
                 {announcement.message}
               </p>
 
