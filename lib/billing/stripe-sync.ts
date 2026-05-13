@@ -9,7 +9,10 @@ import {
   normalizePlanKey,
   type SubscriptionPlanKey,
 } from "@/lib/billing/plans";
+import { isStaffAddonSubscriptionItem } from "@/lib/billing/staff-addons";
 import {
+  BASE_SUBSCRIPTION_SELECT,
+  isMissingSubscriptionAddonColumn,
   isMissingSubscriptionPlanColumn,
   LEGACY_SUBSCRIPTION_SELECT,
   normalizeSubscriptionRow,
@@ -20,16 +23,33 @@ type LegacySubscriptionPeriod = Stripe.Subscription & {
   current_period_end?: number;
 };
 
+function getSubscriptionBaseItem(subscription: Stripe.Subscription) {
+  return (
+    subscription.items.data.find((item) => !isStaffAddonSubscriptionItem(item)) ??
+    subscription.items.data[0] ??
+    null
+  );
+}
+
 function getSubscriptionPriceId(subscription: Stripe.Subscription) {
-  return subscription.items.data[0]?.price?.id ?? null;
+  return getSubscriptionBaseItem(subscription)?.price?.id ?? null;
 }
 
 function getSubscriptionPeriodEnd(subscription: Stripe.Subscription) {
-  const itemPeriodEnd = subscription.items.data[0]?.current_period_end;
+  const itemPeriodEnd = getSubscriptionBaseItem(subscription)?.current_period_end;
   const legacyPeriodEnd = (subscription as LegacySubscriptionPeriod)
     .current_period_end;
 
   return stripeTimestampToIso(itemPeriodEnd ?? legacyPeriodEnd);
+}
+
+function getStaffAddonState(subscription: Stripe.Subscription) {
+  const staffAddonItem = subscription.items.data.find(isStaffAddonSubscriptionItem);
+
+  return {
+    stripeStaffAddonItemId: staffAddonItem?.id ?? null,
+    staffAddonQuantity: staffAddonItem?.quantity ?? 0,
+  };
 }
 
 async function getSubscriptionPlanKey(
@@ -113,6 +133,8 @@ export async function syncStripeSubscription(
 
   const priceId = getSubscriptionPriceId(subscription);
   const plan = await getSubscriptionPlanKey(subscription, priceId, fallbackPlan);
+  const { staffAddonQuantity, stripeStaffAddonItemId } =
+    getStaffAddonState(subscription);
 
   let { data, error } = await supabase
     .from("subscriptions")
@@ -123,6 +145,8 @@ export async function syncStripeSubscription(
         stripe_customer_id: getStripeObjectId(subscription.customer),
         stripe_subscription_id: subscription.id,
         stripe_price_id: priceId,
+        stripe_staff_addon_item_id: stripeStaffAddonItemId,
+        staff_addon_quantity: staffAddonQuantity,
         status: subscription.status,
         trial_ends_at: stripeTimestampToIso(subscription.trial_end),
         current_period_end: getSubscriptionPeriodEnd(subscription),
@@ -133,6 +157,31 @@ export async function syncStripeSubscription(
     )
     .select(SUBSCRIPTION_SELECT)
     .limit(1);
+
+  if (isMissingSubscriptionAddonColumn(error)) {
+    const baseResult = await supabase
+      .from("subscriptions")
+      .upsert(
+        {
+          organization_id: organizationId,
+          plan,
+          stripe_customer_id: getStripeObjectId(subscription.customer),
+          stripe_subscription_id: subscription.id,
+          stripe_price_id: priceId,
+          status: subscription.status,
+          trial_ends_at: stripeTimestampToIso(subscription.trial_end),
+          current_period_end: getSubscriptionPeriodEnd(subscription),
+          cancel_at_period_end: subscription.cancel_at_period_end,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "organization_id" }
+      )
+      .select(BASE_SUBSCRIPTION_SELECT)
+      .limit(1);
+
+    data = baseResult.data as typeof data;
+    error = baseResult.error;
+  }
 
   if (isMissingSubscriptionPlanColumn(error)) {
     const legacyResult = await supabase

@@ -10,6 +10,8 @@ import {
   Save,
   ShieldCheck,
   SlidersHorizontal,
+  Trash2,
+  UserPlus,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -22,11 +24,17 @@ import { getAdminCustomerProfile } from "@/lib/admin/customers";
 import { getAdminAccess } from "@/lib/admin/guard";
 import {
   getPlanUsagePercent,
+  getSubscriptionStaffLimit,
   getSubscriptionPlan,
+  STAFF_ADDON_PRICE_MONTHLY,
   SUBSCRIPTION_PLANS,
 } from "@/lib/billing/plans";
 import { getCustomerFeatureSections } from "@/lib/customer-features";
-import { updateCustomerAccountAction } from "./actions";
+import {
+  deleteCustomerWorkspaceAction,
+  updateCustomerAccountAction,
+  updateCustomerStaffAllowanceAction,
+} from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -203,14 +211,27 @@ export default async function AdminCustomerProfilePage({
     notFound();
   }
 
-  const saved = (await searchParams)?.saved === "1";
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const saved = resolvedSearchParams.saved === "1";
+  const staffSaved = resolvedSearchParams.saved === "staff";
+  const createdSaved = resolvedSearchParams.saved === "created";
   const updateAction = updateCustomerAccountAction.bind(null, organizationId);
+  const staffAllowanceAction = updateCustomerStaffAllowanceAction.bind(
+    null,
+    organizationId
+  );
+  const deleteAction = deleteCustomerWorkspaceAction.bind(null, organizationId);
   const customerUrl = stripeCustomerUrl(profile.workspace.stripeCustomerId);
   const subscriptionUrl = stripeSubscriptionUrl(
     profile.workspace.stripeSubscriptionId
   );
   const featureSections = getCustomerFeatureSections();
   const activePlan = getSubscriptionPlan(profile.workspace.subscriptionPlan);
+  const staffLimit = getSubscriptionStaffLimit(
+    profile.workspace.subscriptionPlan,
+    profile.workspace.staffAddonQuantity
+  );
+  const paidStaffAddOns = profile.workspace.staffAddonQuantity;
 
   return (
     <main className="min-h-screen bg-white text-slate-950">
@@ -249,7 +270,7 @@ export default async function AdminCustomerProfilePage({
         <div className="mx-auto max-w-7xl">
           <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
             <Link
-              href="/admin"
+              href="/admin/customers"
               className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:border-[#19c653]/45 hover:bg-[#f1fff6]"
             >
               <ArrowLeft aria-hidden="true" className="size-4" />
@@ -280,6 +301,20 @@ export default async function AdminCustomerProfilePage({
           {saved && (
             <div className="mb-6 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
               Customer account settings saved.
+            </div>
+          )}
+
+          {createdSaved && (
+            <div className="mb-6 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+              Customer workspace created. Share the owner email and temporary
+              password with the customer.
+            </div>
+          )}
+
+          {staffSaved && (
+            <div className="mb-6 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+              Staff allowance updated. The customer dashboard now uses the new
+              limit.
             </div>
           )}
 
@@ -406,7 +441,7 @@ export default async function AdminCustomerProfilePage({
                   <UsageBar
                     label="Staff accounts"
                     used={profile.usage.activeStaff}
-                    limit={activePlan.staffLimit}
+                    limit={staffLimit}
                   />
                 </div>
 
@@ -431,150 +466,267 @@ export default async function AdminCustomerProfilePage({
                   ))}
                 </div>
               </InfoCard>
-            </div>
 
-            <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
-              <div className="mb-6 flex items-start gap-3">
-                <div className="flex size-11 shrink-0 items-center justify-center rounded-md bg-[#e7f9ed] text-[#168b43]">
-                  <SlidersHorizontal aria-hidden="true" className="size-5" />
-                </div>
-                <div>
-                  <h2 className="text-xl font-extrabold tracking-normal text-slate-950">
-                    Account controls
-                  </h2>
-                  <p className="mt-2 text-sm leading-6 text-slate-600">
-                    Assign the subscription plan, disable access, set support
-                    priority, leave private notes, and choose which modules this
-                    customer can use.
-                  </p>
-                </div>
-              </div>
-
-              <form action={updateAction} className="space-y-6">
-                <div className="grid gap-5 sm:grid-cols-2">
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-bold text-slate-700">
-                      Subscription plan
-                    </span>
-                    <select
-                      name="subscription_plan"
-                      defaultValue={activePlan.key}
-                      className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
-                    >
-                      {SUBSCRIPTION_PLANS.map((plan) => (
-                        <option key={plan.key} value={plan.key}>
-                          {plan.name} - {plan.priceLabel} per business / month
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="block">
-                    <span className="mb-2 block text-sm font-bold text-slate-700">
-                      Account status
-                    </span>
-                    <select
-                      name="account_status"
-                      defaultValue={profile.settings.accountStatus}
-                      className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
-                    >
-                      <option value="active">Active</option>
-                      <option value="disabled">Disabled</option>
-                    </select>
-                  </label>
-
-                  <label className="block sm:col-span-2">
-                    <span className="mb-2 block text-sm font-bold text-slate-700">
-                      Support priority
-                    </span>
-                    <select
-                      name="support_priority"
-                      defaultValue={profile.settings.supportPriority}
-                      className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
-                    >
-                      <option value="standard">Standard</option>
-                      <option value="priority">Priority</option>
-                      <option value="watch">Watch list</option>
-                    </select>
-                  </label>
-                </div>
-
-                <label className="block">
-                  <span className="mb-2 block text-sm font-bold text-slate-700">
-                    Disabled reason
-                  </span>
-                  <textarea
-                    name="disabled_reason"
-                    defaultValue={profile.settings.disabledReason}
-                    rows={3}
-                    placeholder="Shown internally here, and available for the customer disabled screen."
-                    className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
-                  />
-                </label>
-
-                <div>
-                  <h3 className="text-sm font-bold uppercase tracking-[0.14em] text-slate-500">
-                    Feature access
-                  </h3>
-                  <div className="mt-4 space-y-5">
-                    {featureSections.map((section) => (
-                      <div key={section.title}>
-                        <p className="mb-3 text-sm font-extrabold text-slate-950">
-                          {section.title}
-                        </p>
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          {section.features.map((feature) => (
-                            <label
-                              key={feature.key}
-                              className="flex gap-3 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm transition hover:border-[#19c653]/45 hover:bg-[#f1fff6]"
-                            >
-                              <input
-                                type="checkbox"
-                                name={`feature_${feature.key}`}
-                                defaultChecked={
-                                  profile.settings.featureAccess[feature.key]
-                                }
-                                className="mt-1 size-4 shrink-0 accent-[#19c653]"
-                              />
-                              <span>
-                                <span className="block font-bold text-slate-900">
-                                  {feature.label}
-                                </span>
-                                <span className="mt-1 block leading-5 text-slate-600">
-                                  {feature.description}
-                                </span>
-                              </span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
+              <InfoCard title="Staff allowance" icon={UserPlus}>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
+                      Included
+                    </p>
+                    <p className="mt-2 text-2xl font-extrabold text-slate-950">
+                      {activePlan.staffLimit}
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
+                      Paid add-ons
+                    </p>
+                    <p className="mt-2 text-2xl font-extrabold text-slate-950">
+                      {paidStaffAddOns}
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-[#19c653]/30 bg-[#f1fff6] p-4">
+                    <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#168b43]">
+                      Total allowed
+                    </p>
+                    <p className="mt-2 text-2xl font-extrabold text-slate-950">
+                      {staffLimit}
+                    </p>
                   </div>
                 </div>
 
-                <label className="block">
-                  <span className="mb-2 block text-sm font-bold text-slate-700">
-                    Internal notes
-                  </span>
-                  <textarea
-                    name="internal_notes"
-                    defaultValue={profile.settings.internalNotes}
-                    rows={5}
-                    placeholder="Private owner-console notes about onboarding, support history, special pricing, or risk."
-                    className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
-                  />
-                </label>
+                <form action={staffAllowanceAction} className="mt-5 space-y-4">
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-bold text-slate-700">
+                      Staff members to add or remove
+                    </span>
+                    <input
+                      type="number"
+                      name="quantity"
+                      min={1}
+                      step={1}
+                      defaultValue={1}
+                      className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
+                    />
+                  </label>
 
-                <button
-                  type="submit"
-                  disabled={Boolean(profile.settingsSchemaError)}
-                  className="inline-flex items-center justify-center gap-2 rounded-md bg-[#19c653] px-5 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.2)] transition hover:bg-[#22d861] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Save aria-hidden="true" className="size-4" />
-                  Save customer controls
-                </button>
-              </form>
-            </section>
+                  <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+                    Extra staff are charged at{" "}
+                    <span className="font-extrabold text-slate-950">
+                      GBP {STAFF_ADDON_PRICE_MONTHLY}
+                    </span>{" "}
+                    per staff member / month when this workspace has a Stripe
+                    subscription.
+                  </div>
+
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      type="submit"
+                      name="operation"
+                      value="add"
+                      className="inline-flex items-center justify-center gap-2 rounded-md bg-[#19c653] px-4 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.2)] transition hover:bg-[#22d861]"
+                    >
+                      <UserPlus aria-hidden="true" className="size-4" />
+                      Add staff allowance
+                    </button>
+                    <button
+                      type="submit"
+                      name="operation"
+                      value="remove"
+                      disabled={paidStaffAddOns <= 0}
+                      className="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Remove paid staff
+                    </button>
+                  </div>
+                </form>
+              </InfoCard>
+            </div>
+
+            <div className="space-y-6">
+              <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
+                <div className="mb-6 flex items-start gap-3">
+                  <div className="flex size-11 shrink-0 items-center justify-center rounded-md bg-[#e7f9ed] text-[#168b43]">
+                    <SlidersHorizontal aria-hidden="true" className="size-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-extrabold tracking-normal text-slate-950">
+                      Account controls
+                    </h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                      Assign the subscription plan, disable access, set support
+                      priority, leave private notes, and choose which modules this
+                      customer can use.
+                    </p>
+                  </div>
+                </div>
+
+                <form action={updateAction} className="space-y-6">
+                  <div className="grid gap-5 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-bold text-slate-700">
+                        Subscription plan
+                      </span>
+                      <select
+                        name="subscription_plan"
+                        defaultValue={activePlan.key}
+                        className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
+                      >
+                        {SUBSCRIPTION_PLANS.map((plan) => (
+                          <option key={plan.key} value={plan.key}>
+                            {plan.name} - {plan.priceLabel} per business / month
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-bold text-slate-700">
+                        Account status
+                      </span>
+                      <select
+                        name="account_status"
+                        defaultValue={profile.settings.accountStatus}
+                        className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
+                      >
+                        <option value="active">Active</option>
+                        <option value="disabled">Disabled</option>
+                      </select>
+                    </label>
+
+                    <label className="block sm:col-span-2">
+                      <span className="mb-2 block text-sm font-bold text-slate-700">
+                        Support priority
+                      </span>
+                      <select
+                        name="support_priority"
+                        defaultValue={profile.settings.supportPriority}
+                        className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
+                      >
+                        <option value="standard">Standard</option>
+                        <option value="priority">Priority</option>
+                        <option value="watch">Watch list</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-bold text-slate-700">
+                      Disabled reason
+                    </span>
+                    <textarea
+                      name="disabled_reason"
+                      defaultValue={profile.settings.disabledReason}
+                      rows={3}
+                      placeholder="Shown internally here, and available for the customer disabled screen."
+                      className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
+                    />
+                  </label>
+
+                  <div>
+                    <h3 className="text-sm font-bold uppercase tracking-[0.14em] text-slate-500">
+                      Feature access
+                    </h3>
+                    <div className="mt-4 space-y-5">
+                      {featureSections.map((section) => (
+                        <div key={section.title}>
+                          <p className="mb-3 text-sm font-extrabold text-slate-950">
+                            {section.title}
+                          </p>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            {section.features.map((feature) => (
+                              <label
+                                key={feature.key}
+                                className="flex gap-3 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm transition hover:border-[#19c653]/45 hover:bg-[#f1fff6]"
+                              >
+                                <input
+                                  type="checkbox"
+                                  name={`feature_${feature.key}`}
+                                  defaultChecked={
+                                    profile.settings.featureAccess[feature.key]
+                                  }
+                                  className="mt-1 size-4 shrink-0 accent-[#19c653]"
+                                />
+                                <span>
+                                  <span className="block font-bold text-slate-900">
+                                    {feature.label}
+                                  </span>
+                                  <span className="mt-1 block leading-5 text-slate-600">
+                                    {feature.description}
+                                  </span>
+                                </span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-bold text-slate-700">
+                      Internal notes
+                    </span>
+                    <textarea
+                      name="internal_notes"
+                      defaultValue={profile.settings.internalNotes}
+                      rows={5}
+                      placeholder="Private owner-console notes about onboarding, support history, special pricing, or risk."
+                      className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
+                    />
+                  </label>
+
+                  <button
+                    type="submit"
+                    disabled={Boolean(profile.settingsSchemaError)}
+                    className="inline-flex items-center justify-center gap-2 rounded-md bg-[#19c653] px-5 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.2)] transition hover:bg-[#22d861] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Save aria-hidden="true" className="size-4" />
+                    Save customer controls
+                  </button>
+                </form>
+              </section>
+
+              <section className="rounded-lg border border-rose-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
+                <div className="mb-5 flex items-start gap-3">
+                  <div className="flex size-11 shrink-0 items-center justify-center rounded-md bg-rose-50 text-rose-700">
+                    <Trash2 aria-hidden="true" className="size-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-extrabold tracking-normal text-slate-950">
+                      Delete customer
+                    </h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                      Delete this workspace, its app data, members,
+                      subscriptions row, support tickets, customers, jobs,
+                      quotes, and invoices. Any linked Stripe subscription is
+                      cancelled first.
+                    </p>
+                  </div>
+                </div>
+
+                <form action={deleteAction} className="space-y-4">
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-bold text-slate-700">
+                      Type {profile.workspace.name} to confirm
+                    </span>
+                    <input
+                      type="text"
+                      name="confirm_name"
+                      required
+                      className="w-full rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-rose-400 focus:bg-white focus:ring-4 focus:ring-rose-100"
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    className="inline-flex items-center justify-center gap-2 rounded-md bg-rose-600 px-5 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(225,29,72,0.18)] transition hover:bg-rose-700"
+                  >
+                    <Trash2 aria-hidden="true" className="size-4" />
+                    Delete customer
+                  </button>
+                </form>
+              </section>
+            </div>
           </div>
 
           <div className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -642,7 +794,7 @@ export default async function AdminCustomerProfilePage({
                           {document.customer_name || "Unknown customer"}
                         </p>
                         <p className="mt-1 text-slate-600">
-                          {document.status || "No status"} ·{" "}
+                          {document.status || "No status"} -{" "}
                           {formatCurrency(document.total)}
                         </p>
                       </div>

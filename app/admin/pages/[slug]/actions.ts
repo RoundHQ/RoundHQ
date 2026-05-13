@@ -49,7 +49,7 @@ export async function updateSitePageAction(slug: string, formData: FormData) {
       summary,
       body,
       highlights: getHighlights(formData),
-      primary_cta_label: primaryCtaLabel || "Start free trial",
+      primary_cta_label: primaryCtaLabel || "Sign up",
       primary_cta_href: primaryCtaHref,
       sort_order: Number.isFinite(sortOrderValue) ? sortOrderValue : 50,
       is_published: formData.get("is_published") === "on",

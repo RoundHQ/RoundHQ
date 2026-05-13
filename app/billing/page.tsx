@@ -9,9 +9,12 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import BillingActions from "@/components/billing/billing-actions";
+import StaffAddOnActions from "@/components/billing/staff-add-on-actions";
 import {
   getPlanUsagePercent,
+  getSubscriptionStaffLimit,
   getSubscriptionPlan,
+  STAFF_ADDON_PRICE_MONTHLY,
   SUBSCRIPTION_PLANS,
   type SubscriptionPlan,
 } from "@/lib/billing/plans";
@@ -87,7 +90,7 @@ function PlanCard({
 
   return (
     <article
-      className={`relative rounded-lg border bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] ${
+      className={`relative flex h-full flex-col rounded-lg border bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] ${
         plan.key === "growth" ? "border-[#19c653] ring-1 ring-[#19c653]/20" : "border-slate-200"
       }`}
     >
@@ -110,7 +113,7 @@ function PlanCard({
           {plan.billingLabel}
         </p>
       </div>
-      <ul className="mt-6 space-y-3">
+      <ul className="mt-6 flex-1 space-y-3">
         {plan.includedFeatures.map((item) => (
           <li key={item} className="flex items-center gap-3 text-sm text-slate-700">
             <BadgeCheck
@@ -135,7 +138,7 @@ function PlanCard({
               ? "Upgrade to Growth"
               : "Manage plan"
         }
-        className="mt-7"
+        className="mt-auto pt-7"
       />
       {isCurrentPlan && hasAccess ? (
         <p className="mt-3 text-xs font-bold uppercase tracking-[0.14em] text-[#168b43]">
@@ -209,6 +212,10 @@ export default async function BillingPage() {
   };
   const statusLabel = getSubscriptionStatusLabel(subscription);
   const activePlan = getSubscriptionPlan(subscription.plan);
+  const staffLimit = getSubscriptionStaffLimit(
+    subscription.plan,
+    subscription.staff_addon_quantity
+  );
   const renewalLabel = subscription.current_period_end
     ? new Date(subscription.current_period_end).toLocaleDateString("en-GB")
     : "Not set";
@@ -385,7 +392,7 @@ export default async function BillingPage() {
               <UsageBar
                 label="Staff accounts"
                 used={staffCount}
-                limit={activePlan.staffLimit}
+                limit={staffLimit}
               />
             </div>
 
@@ -399,10 +406,19 @@ export default async function BillingPage() {
                   : "Growth includes RAMS, staff permissions, advanced insights, and customer profitability for growing teams."}
               </p>
             </div>
+
+            <StaffAddOnActions
+              stripeConfigured={stripeConfigured}
+              canManageBilling={Boolean(
+                hasAccess && subscription.stripe_subscription_id
+              )}
+              currentAddOnQuantity={subscription.staff_addon_quantity}
+              priceMonthly={STAFF_ADDON_PRICE_MONTHLY}
+            />
           </aside>
         </div>
 
-        <section className="mt-6 grid gap-6 lg:grid-cols-2">
+        <section className="mx-auto mt-6 grid max-w-7xl items-stretch gap-6 lg:grid-cols-2">
           {SUBSCRIPTION_PLANS.map((plan) => (
             <PlanCard
               key={plan.key}

@@ -179,7 +179,7 @@ const contactRoutes = [
   {
     title: "Product questions",
     description:
-      "Ask about features, pricing, trial setup, or whether RoundHQ fits your maintenance workflow.",
+      "Ask about features, pricing, setup, or whether RoundHQ fits your maintenance workflow.",
     action: "Email mail@roundhq.co.uk",
     href: "mailto:mail@roundhq.co.uk?subject=RoundHQ%20product%20question",
     icon: Mail,
@@ -250,7 +250,7 @@ function MarketingHeader({ pages }: { pages: SitePage[] }) {
             href="/signup"
             className="inline-flex items-center rounded-md bg-[#19c653] px-5 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.3)] transition hover:bg-[#22d861]"
           >
-            Start free trial
+            Sign up
           </Link>
         </div>
       </div>
@@ -565,7 +565,7 @@ function PricingContent() {
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             {[
-              ["Trial", "14 days to set up your workspace and test the workflow."],
+              ["Setup", "Create your workspace and choose the plan that fits."],
               ["Starter limit", "One staff account and up to 250 customers."],
               ["Growth limit", "Up to 5 staff accounts and up to 1,500 customers."],
               ["Billing", "Stripe handles subscription checkout and billing management."],
@@ -779,7 +779,7 @@ export default async function SitePageView({ slug }: { slug: SitePageSlug }) {
             href="/signup"
             className="inline-flex w-fit items-center justify-center gap-2 rounded-md bg-[#19c653] px-6 py-4 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.3)] transition hover:bg-[#22d861]"
           >
-            Start free trial
+            Sign up
             <ArrowRight aria-hidden="true" className="size-4" />
           </Link>
         </div>

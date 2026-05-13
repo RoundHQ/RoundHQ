@@ -24,6 +24,8 @@ export type SubscriptionPlan = {
 };
 
 export const DEFAULT_SUBSCRIPTION_PLAN: SubscriptionPlanKey = "starter";
+export const STAFF_ADDON_PRICE_MONTHLY = 10;
+export const STAFF_ADDON_PRICE_PENCE = STAFF_ADDON_PRICE_MONTHLY * 100;
 
 export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
   {
@@ -104,6 +106,33 @@ export function getPlanUsagePercent(used: number, limit: number): number {
   return Math.min(100, Math.round((used / limit) * 100));
 }
 
+export function normalizeStaffAddonQuantity(value: unknown): number {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const parsedValue = Number(value);
+    return Number.isFinite(parsedValue) ? Math.max(0, Math.floor(parsedValue)) : 0;
+  }
+
+  return 0;
+}
+
+export function getSubscriptionStaffLimit(
+  plan: unknown,
+  staffAddonQuantity: unknown
+): number {
+  return getSubscriptionPlan(plan).staffLimit + normalizeStaffAddonQuantity(staffAddonQuantity);
+}
+
+export function hasStaffManagementAccess(
+  plan: unknown,
+  staffAddonQuantity: unknown
+) {
+  return hasGrowthFeatures(plan) || normalizeStaffAddonQuantity(staffAddonQuantity) > 0;
+}
+
 const STARTER_FEATURES = new Set<CustomerFeatureKey>([
   "dashboard",
   "leads",
@@ -118,13 +147,19 @@ const STARTER_FEATURES = new Set<CustomerFeatureKey>([
   "settings",
 ]);
 
-export function getPlanFeatureAccess(plan: unknown): CustomerFeatureAccess {
+export function getPlanFeatureAccess(
+  plan: unknown,
+  staffAddonQuantity: unknown = 0
+): CustomerFeatureAccess {
   const planKey = normalizePlanKey(plan);
+  const hasStaffAddOns = normalizeStaffAddonQuantity(staffAddonQuantity) > 0;
 
   return Object.fromEntries(
     CUSTOMER_FEATURES.map((feature) => [
       feature.key,
-      planKey === "growth" || STARTER_FEATURES.has(feature.key),
+      planKey === "growth" ||
+        STARTER_FEATURES.has(feature.key) ||
+        (feature.key === "staff" && hasStaffAddOns),
     ])
   ) as CustomerFeatureAccess;
 }

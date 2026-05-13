@@ -12,16 +12,19 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  UserPlus,
   Users,
   type LucideIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { createManualCustomerAction } from "./customers/actions";
 import {
   getAdminCustomerWorkspaces,
   type AdminCustomerWorkspace,
 } from "@/lib/admin/customers";
 import {
   getPlanUsagePercent,
+  getSubscriptionStaffLimit,
   getSubscriptionPlan,
   SUBSCRIPTION_PLANS,
 } from "@/lib/billing/plans";
@@ -46,6 +49,7 @@ const STATUS_OPTIONS = [
 type AdminPageSearchParams = {
   q?: string;
   status?: string;
+  deleted?: string;
 };
 
 function formatDate(value: string | null) {
@@ -426,6 +430,131 @@ export default async function AdminPage({
             ))}
           </section>
 
+          {params.deleted === "1" ? (
+            <div className="mb-6 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+              Customer workspace deleted.
+            </div>
+          ) : null}
+
+          <section className="mb-6 rounded-lg border border-slate-200 bg-white p-5 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="flex size-11 shrink-0 items-center justify-center rounded-md bg-[#e7f9ed] text-[#168b43]">
+                  <UserPlus aria-hidden="true" className="size-5" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-extrabold tracking-normal text-slate-950">
+                    Add customer manually
+                  </h2>
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                    Create a workspace, owner login, subscription record, and
+                    dashboard permissions for a new RoundHQ customer.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <form
+              action={createManualCustomerAction}
+              className="mt-5 grid gap-4 lg:grid-cols-2"
+            >
+              <label className="block">
+                <span className="mb-2 block text-sm font-bold text-slate-700">
+                  Business name
+                </span>
+                <input
+                  type="text"
+                  name="workspace_name"
+                  required
+                  placeholder="CleanCut Jobs"
+                  className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-bold text-slate-700">
+                  Owner name
+                </span>
+                <input
+                  type="text"
+                  name="owner_name"
+                  required
+                  placeholder="Owner full name"
+                  className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-bold text-slate-700">
+                  Owner email
+                </span>
+                <input
+                  type="email"
+                  name="owner_email"
+                  required
+                  placeholder="owner@example.co.uk"
+                  className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-bold text-slate-700">
+                  Temporary password
+                </span>
+                <input
+                  type="text"
+                  name="temporary_password"
+                  minLength={8}
+                  required
+                  autoComplete="new-password"
+                  placeholder="Minimum 8 characters"
+                  className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-bold text-slate-700">
+                  Plan
+                </span>
+                <select
+                  name="subscription_plan"
+                  defaultValue="starter"
+                  className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
+                >
+                  {SUBSCRIPTION_PLANS.map((plan) => (
+                    <option key={plan.key} value={plan.key}>
+                      {plan.name} - {plan.priceLabel} {plan.billingLabel}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-bold text-slate-700">
+                  Subscription status
+                </span>
+                <select
+                  name="subscription_status"
+                  defaultValue="active"
+                  className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
+                >
+                  <option value="active">Active manual access</option>
+                  <option value="incomplete">Needs payment</option>
+                </select>
+              </label>
+
+              <div className="flex items-end lg:col-span-2">
+                <button
+                  type="submit"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-[#19c653] px-5 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.2)] transition hover:bg-[#22d861] sm:w-auto"
+                >
+                  <UserPlus aria-hidden="true" className="size-4" />
+                  Add customer
+                </button>
+              </div>
+            </form>
+          </section>
+
           <div className="rounded-lg border border-slate-200 bg-white shadow-[0_18px_46px_rgba(15,23,42,0.08)]">
             <div className="border-b border-slate-200 p-4 sm:p-5">
               <form className="grid gap-3 lg:grid-cols-[1fr_220px_auto]">
@@ -484,6 +613,10 @@ export default async function AdminPage({
                       workspace.stripeCustomerId
                     );
                     const plan = getSubscriptionPlan(workspace.subscriptionPlan);
+                    const staffLimit = getSubscriptionStaffLimit(
+                      workspace.subscriptionPlan,
+                      workspace.staffAddonQuantity
+                    );
 
                     return (
                       <tr
@@ -557,7 +690,7 @@ export default async function AdminPage({
                             <UsageMiniBar
                               label="Staff"
                               used={workspace.activeStaffCount}
-                              limit={plan.staffLimit}
+                              limit={staffLimit}
                             />
                           </div>
                         </td>

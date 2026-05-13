@@ -54,6 +54,8 @@ create table if not exists public.subscriptions (
   stripe_customer_id text null,
   stripe_subscription_id text null,
   stripe_price_id text null,
+  stripe_staff_addon_item_id text null,
+  staff_addon_quantity integer not null default 0,
   status text not null default 'incomplete' check (
     status in (
       'incomplete',
@@ -99,6 +101,29 @@ alter column status set default 'incomplete';
 alter table public.subscriptions
 alter column trial_ends_at drop default;
 
+alter table public.subscriptions
+add column if not exists stripe_staff_addon_item_id text null;
+
+alter table public.subscriptions
+add column if not exists staff_addon_quantity integer;
+
+update public.subscriptions
+set staff_addon_quantity = 0
+where staff_addon_quantity is null;
+
+alter table public.subscriptions
+alter column staff_addon_quantity set default 0;
+
+alter table public.subscriptions
+alter column staff_addon_quantity set not null;
+
+alter table public.subscriptions
+drop constraint if exists subscriptions_staff_addon_quantity_check;
+
+alter table public.subscriptions
+add constraint subscriptions_staff_addon_quantity_check
+check (staff_addon_quantity >= 0);
+
 create unique index if not exists subscriptions_stripe_customer_unique_idx
 on public.subscriptions (stripe_customer_id)
 where stripe_customer_id is not null;
@@ -134,7 +159,7 @@ create table if not exists public.site_pages (
   summary text not null,
   body text not null,
   highlights jsonb not null default '[]'::jsonb,
-  primary_cta_label text not null default 'Start free trial',
+  primary_cta_label text not null default 'Sign up',
   primary_cta_href text not null default '/signup',
   sort_order integer not null default 0,
   is_published boolean not null default true,
@@ -172,7 +197,7 @@ When work changes, RoundHQ keeps the admin close to the job: capture leads, crea
       'Built for weekly, fortnightly, monthly, residential, and commercial maintenance work',
       'Growth tools include staff permissions, RAMS, advanced insights, and customer profitability'
     ),
-    'Start free trial',
+    'Sign up',
     '/signup',
     10,
     true
@@ -187,13 +212,13 @@ When work changes, RoundHQ keeps the admin close to the job: capture leads, crea
 
 Growth is built for businesses adding people and complexity. It includes everything in Starter plus up to 5 staff accounts, staff permissions, RAMS generator, advanced dashboard insights, customer profitability, workflow tracking, commercial customer tools, quote conversion workflows, operational reporting, and up to 1,500 customers.
 
-Both plans start with a 14-day free trial. There are no setup fees, and you can change plan as the business grows.',
+There are no setup fees, and you can change plan as the business grows.',
     jsonb_build_array(
       'Starter: GBP 30 per business / month for solo operators',
       'Growth: GBP 60 per business / month for teams and commercial work',
-      '14-day free trial, no setup fees, cancel anytime'
+      'No setup fees, cancel anytime'
     ),
-    'Start free trial',
+    'Choose a plan',
     '/signup',
     20,
     true
@@ -254,7 +279,7 @@ For billing questions, workspace setup, or product feedback, include the email a
       'Workspace support: use the in-app helpdesk from your account',
       'Billing or setup help: include your RoundHQ workspace email'
     ),
-    'Start free trial',
+    'Sign up',
     '/signup',
     50,
     true

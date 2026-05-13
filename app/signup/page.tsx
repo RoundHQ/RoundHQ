@@ -7,8 +7,8 @@ import { ArrowRight, BadgeCheck, ShieldCheck } from "lucide-react";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
 const signupBenefits = [
-  "14-day free trial",
-  "No card required",
+  "Simple monthly plans",
+  "Choose Starter or Growth",
   "Starter £30 or Growth £60",
 ];
 
@@ -100,7 +100,7 @@ export default function SignupPage() {
         <div className="grid flex-1 items-center gap-10 py-12 lg:grid-cols-[1fr_460px]">
           <section className="max-w-2xl">
             <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#20d85a]">
-              Start your free trial
+              Create your workspace
             </p>
             <h1 className="mt-6 text-5xl font-extrabold leading-[1.08] tracking-normal text-white sm:text-6xl">
               Create your RoundHQ workspace.
@@ -133,7 +133,7 @@ export default function SignupPage() {
               </span>
               <div>
                 <h2 className="text-2xl font-extrabold tracking-normal">
-                  Start free
+                  Create account
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
                   Your workspace is ready as soon as your account is confirmed.

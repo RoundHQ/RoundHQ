@@ -59,7 +59,7 @@ export const DEFAULT_SITE_PAGES: SitePage[] = [
       "Built for weekly, fortnightly, monthly, residential, and commercial maintenance work",
       "Growth tools include staff permissions, RAMS, advanced insights, and customer profitability",
     ],
-    primaryCtaLabel: "Start free trial",
+    primaryCtaLabel: "Sign up",
     primaryCtaHref: "/signup",
     sortOrder: 10,
     isPublished: true,
@@ -73,13 +73,13 @@ export const DEFAULT_SITE_PAGES: SitePage[] = [
     summary:
       "Starter is GBP 30 per business / month for solo operators getting organised. Growth is GBP 60 per business / month for teams that need staff permissions, RAMS, commercial workflows, and deeper reporting.",
     body:
-      "Starter gives a solo operator the core workspace: leads, customer CRM, scheduling, recurring rounds, route map, quotes, invoices, payment tracking, visit history, notes, one staff account, up to 250 customers, and the main dashboard.\n\nGrowth is built for businesses adding people and complexity. It includes everything in Starter plus up to 5 staff accounts, staff permissions, RAMS generator, advanced dashboard insights, customer profitability, workflow tracking, commercial customer tools, quote conversion workflows, operational reporting, and up to 1,500 customers.\n\nBoth plans start with a 14-day free trial. There are no setup fees, and you can change plan as the business grows.",
+      "Starter gives a solo operator the core workspace: leads, customer CRM, scheduling, recurring rounds, route map, quotes, invoices, payment tracking, visit history, notes, one staff account, up to 250 customers, and the main dashboard.\n\nGrowth is built for businesses adding people and complexity. It includes everything in Starter plus up to 5 staff accounts, staff permissions, RAMS generator, advanced dashboard insights, customer profitability, workflow tracking, commercial customer tools, quote conversion workflows, operational reporting, and up to 1,500 customers.\n\nThere are no setup fees, and you can change plan as the business grows.",
     highlights: [
       "Starter: GBP 30 per business / month for solo operators",
       "Growth: GBP 60 per business / month for teams and commercial work",
-      "14-day free trial, no setup fees, cancel anytime",
+      "No setup fees, cancel anytime",
     ],
-    primaryCtaLabel: "Start free trial",
+    primaryCtaLabel: "Choose a plan",
     primaryCtaHref: "/signup",
     sortOrder: 20,
     isPublished: true,
@@ -139,7 +139,7 @@ export const DEFAULT_SITE_PAGES: SitePage[] = [
       "Workspace support: use the in-app helpdesk from your account",
       "Billing or setup help: include your RoundHQ workspace email",
     ],
-    primaryCtaLabel: "Start free trial",
+    primaryCtaLabel: "Sign up",
     primaryCtaHref: "/signup",
     sortOrder: 50,
     isPublished: true,
@@ -172,7 +172,37 @@ function asHighlights(value: unknown, fallback: string[]) {
   return value
     .filter((item): item is string => typeof item === "string")
     .map((item) => item.trim())
+    .map(removeFreeTrialMarketingCopy)
     .filter(Boolean);
+}
+
+function removeFreeTrialMarketingCopy(value: string) {
+  return value
+    .replace(
+      "Both plans start with a 14-day free trial. There are no setup fees, and you can change plan as the business grows.",
+      "There are no setup fees, and you can change plan as the business grows."
+    )
+    .replace(
+      "14-day free trial, no setup fees, cancel anytime",
+      "No setup fees, cancel anytime"
+    )
+    .replace("Start free trial", "Sign up")
+    .replace("Start 14-day free trial", "Choose your plan")
+    .replace("No card required", "Simple monthly plans");
+}
+
+function getPrimaryCtaLabel(value: string | null, fallback: SitePage) {
+  const label = value?.trim();
+
+  if (!label) {
+    return fallback.primaryCtaLabel;
+  }
+
+  if (label.toLowerCase() === "start free trial") {
+    return fallback.primaryCtaLabel;
+  }
+
+  return removeFreeTrialMarketingCopy(label);
 }
 
 function rowToSitePage(row: SitePageRow): SitePage | null {
@@ -188,9 +218,9 @@ function rowToSitePage(row: SitePageRow): SitePage | null {
     eyebrow: row.eyebrow?.trim() || fallback.eyebrow,
     title: row.title?.trim() || fallback.title,
     summary: row.summary?.trim() || fallback.summary,
-    body: row.body?.trim() || fallback.body,
+    body: removeFreeTrialMarketingCopy(row.body?.trim() || fallback.body),
     highlights: asHighlights(row.highlights, fallback.highlights),
-    primaryCtaLabel: row.primary_cta_label?.trim() || fallback.primaryCtaLabel,
+    primaryCtaLabel: getPrimaryCtaLabel(row.primary_cta_label, fallback),
     primaryCtaHref: row.primary_cta_href?.trim() || fallback.primaryCtaHref,
     sortOrder: row.sort_order ?? fallback.sortOrder,
     isPublished: row.is_published ?? fallback.isPublished,

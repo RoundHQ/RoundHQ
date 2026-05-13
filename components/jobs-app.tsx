@@ -115,8 +115,11 @@ import {
 } from "@/lib/customer-features";
 import {
   getPlanFeatureAccess,
+  getSubscriptionStaffLimit,
   getSubscriptionPlan,
   hasGrowthFeatures,
+  hasStaffManagementAccess,
+  normalizeStaffAddonQuantity,
   type SubscriptionPlanKey,
 } from "@/lib/billing/plans";
 import {
@@ -4003,6 +4006,7 @@ function ScheduledJobProfileSection({
 type JobsAppProps = {
   featureAccess?: Partial<CustomerFeatureAccess>;
   subscriptionPlan?: SubscriptionPlanKey;
+  subscriptionStaffAddonQuantity?: number;
 };
 
 type HeaderWeatherState = {
@@ -4034,20 +4038,33 @@ function getCompactWeatherLabel(weatherCode: number | null) {
 export default function JobsApp({
   featureAccess,
   subscriptionPlan,
+  subscriptionStaffAddonQuantity,
 }: JobsAppProps = {}) {
   const customerFeatureAccess = useMemo(
       () => normalizeCustomerFeatureAccess(featureAccess),
       [featureAccess]
+  );
+  const staffAddonQuantity = useMemo(
+      () => normalizeStaffAddonQuantity(subscriptionStaffAddonQuantity),
+      [subscriptionStaffAddonQuantity]
   );
   const activeSubscriptionPlan = useMemo(
       () => getSubscriptionPlan(subscriptionPlan),
       [subscriptionPlan]
   );
   const planFeatureAccess = useMemo(
-      () => getPlanFeatureAccess(subscriptionPlan),
-      [subscriptionPlan]
+      () => getPlanFeatureAccess(subscriptionPlan, staffAddonQuantity),
+      [staffAddonQuantity, subscriptionPlan]
   );
   const hasGrowthPlan = hasGrowthFeatures(subscriptionPlan);
+  const hasTeamPlanAccess = hasStaffManagementAccess(
+      subscriptionPlan,
+      staffAddonQuantity
+  );
+  const activeStaffLimit = useMemo(
+      () => getSubscriptionStaffLimit(subscriptionPlan, staffAddonQuantity),
+      [staffAddonQuantity, subscriptionPlan]
+  );
   const [page, setPage] = useState<PageKey>("dashboard");
   const [expandedNavSections, setExpandedNavSections] = useState<Record<string, boolean>>(
       () => getExpandedNavSections(getNavSectionTitle("dashboard"))
@@ -4210,7 +4227,7 @@ export default function JobsApp({
           return false;
         }
 
-        if (!hasGrowthPlan && !currentUserIsAdmin) {
+        if (!hasTeamPlanAccess && !currentUserIsAdmin) {
           return false;
         }
 
@@ -4230,7 +4247,7 @@ export default function JobsApp({
         allowedRolePages,
         currentUserIsAdmin,
         customerFeatureAccess,
-        hasGrowthPlan,
+        hasTeamPlanAccess,
         planFeatureAccess,
         staffSystemReady,
       ]
@@ -7280,9 +7297,9 @@ export default function JobsApp({
         (staffMember) => staffMember.isActive
     ).length;
 
-    if (values.isActive && activeStaffCount >= activeSubscriptionPlan.staffLimit) {
+    if (values.isActive && activeStaffCount >= activeStaffLimit) {
       throw new Error(
-          `${activeSubscriptionPlan.name} allows up to ${activeSubscriptionPlan.staffLimit} active staff account${activeSubscriptionPlan.staffLimit === 1 ? "" : "s"}.`
+          `${activeSubscriptionPlan.name} allows up to ${activeStaffLimit} active staff account${activeStaffLimit === 1 ? "" : "s"}.`
       );
     }
 
@@ -7340,10 +7357,10 @@ export default function JobsApp({
     if (
         nextIsActive &&
         !existingStaffMember.isSystemAdmin &&
-        activeStaffCountExcludingCurrent >= activeSubscriptionPlan.staffLimit
+        activeStaffCountExcludingCurrent >= activeStaffLimit
     ) {
       throw new Error(
-          `${activeSubscriptionPlan.name} allows up to ${activeSubscriptionPlan.staffLimit} active staff account${activeSubscriptionPlan.staffLimit === 1 ? "" : "s"}.`
+          `${activeSubscriptionPlan.name} allows up to ${activeStaffLimit} active staff account${activeStaffLimit === 1 ? "" : "s"}.`
       );
     }
 
@@ -10106,6 +10123,9 @@ export default function JobsApp({
                       currentUserEmail={currentUserEmail}
                       currentUserIsAdmin={currentUserIsAdmin}
                       staffSystemReady={staffSystemReady}
+                      staffLimit={activeStaffLimit}
+                      staffAddOnQuantity={staffAddonQuantity}
+                      subscriptionPlanName={activeSubscriptionPlan.name}
                       setupMessage={getStaffSystemNotice(staffTablesReady)}
                       onAddStaff={addStaffMember}
                       onUpdateStaff={saveStaffMember}

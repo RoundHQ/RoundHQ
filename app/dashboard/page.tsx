@@ -78,6 +78,7 @@ export default async function DashboardPage() {
     <JobsApp
       featureAccess={accountSettings.featureAccess}
       subscriptionPlan={subscription.plan}
+      subscriptionStaffAddonQuantity={subscription.staff_addon_quantity}
     />
   );
 }

@@ -43,6 +43,9 @@ type Props = {
   currentUserEmail?: string | null;
   currentUserIsAdmin: boolean;
   staffSystemReady: boolean;
+  staffLimit: number;
+  staffAddOnQuantity?: number;
+  subscriptionPlanName?: string;
   setupMessage?: string | null;
   onAddStaff: (values: StaffFormValues) => Promise<void>;
   onUpdateStaff: (staffId: number, values: StaffFormValues) => Promise<void>;
@@ -92,6 +95,9 @@ export default function StaffPage({
   currentUserEmail,
   currentUserIsAdmin,
   staffSystemReady,
+  staffLimit,
+  staffAddOnQuantity = 0,
+  subscriptionPlanName = "Current plan",
   setupMessage,
   onAddStaff,
   onUpdateStaff,
@@ -124,6 +130,11 @@ export default function StaffPage({
   const activeStaffCount = useMemo(() => {
     return staffMembers.filter((staffMember) => staffMember.isActive).length;
   }, [staffMembers]);
+  const safeStaffLimit = Math.max(0, staffLimit);
+  const staffUsagePercent =
+    safeStaffLimit > 0
+      ? Math.min(100, Math.round((activeStaffCount / safeStaffLimit) * 100))
+      : 0;
 
   const currentUserEmailNormalized = normalizeEmail(currentUserEmail ?? "");
 
@@ -327,6 +338,32 @@ export default function StaffPage({
             Only the admin account can manage staff.
           </div>
         ) : null}
+
+        <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-black text-slate-900">
+                Staff account allowance
+              </p>
+              <p className="mt-1 text-sm text-slate-600">
+                {subscriptionPlanName}
+                {staffAddOnQuantity > 0
+                  ? ` plus ${staffAddOnQuantity} paid add-on${staffAddOnQuantity === 1 ? "" : "s"}`
+                  : " included allowance"}
+              </p>
+            </div>
+            <p className="text-sm font-black text-slate-900">
+              {activeStaffCount.toLocaleString("en-GB")} /{" "}
+              {safeStaffLimit.toLocaleString("en-GB")} used
+            </p>
+          </div>
+          <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-white">
+            <div
+              className="h-full rounded-full bg-emerald-600"
+              style={{ width: `${staffUsagePercent}%` }}
+            />
+          </div>
+        </div>
 
         <div className="mt-5 grid gap-3 md:grid-cols-3">
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">

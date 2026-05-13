@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 
-const DEFAULT_ROLE_PERMISSIONS = [
+export const DEFAULT_ROLE_PERMISSIONS = [
   ["Admin", "dashboard", true],
   ["Admin", "schedule", true],
   ["Admin", "rounds", true],
@@ -154,4 +154,3 @@ export async function ensureWorkspace(supabase: SupabaseClient, user: User) {
 
   return organizationId;
 }
-

@@ -103,7 +103,7 @@ const testimonials = [
   },
 ];
 
-const trustItems = ["No card required", "Cancel anytime", "Starter £30 / Growth £60"];
+const trustItems = ["Simple monthly plans", "Cancel anytime", "Starter £30 / Growth £60"];
 
 function RoundHQLogo({ compact = false }: { compact?: boolean }) {
   return (
@@ -210,7 +210,7 @@ function DesktopMockup() {
                 <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="mb-3 flex items-center justify-between">
                     <h4 className="text-sm font-bold text-slate-950">
-                      Today's Round
+                      Today&apos;s Round
                     </h4>
                     <span className="text-[0.7rem] font-bold text-[#12823a]">
                       View schedule
@@ -377,7 +377,7 @@ export default async function HomePage() {
                 href="/signup"
                 className="inline-flex items-center rounded-md bg-[#19c653] px-5 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.3)] transition hover:bg-[#22d861]"
               >
-                Start free trial
+                Sign up
               </Link>
             </div>
           </div>
@@ -404,7 +404,7 @@ export default async function HomePage() {
                 href="/signup"
                 className="inline-flex items-center justify-center rounded-md bg-[#19c653] px-6 py-4 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.3)] transition hover:bg-[#22d861]"
               >
-                Start 14-day free trial
+                Choose your plan
               </Link>
               <Link
                 href="/login"
@@ -608,7 +608,7 @@ export default async function HomePage() {
           <div className="mt-8 flex flex-wrap items-center gap-4 text-sm font-semibold text-slate-600">
             <span className="inline-flex items-center gap-2">
               <ShieldCheck aria-hidden="true" className="size-4 text-[#168b43]" />
-              14-day free trial
+              Simple monthly plans
             </span>
             <span>No setup fees</span>
             <span>Cancel anytime</span>

@@ -13,6 +13,8 @@ import {
   type SubscriptionPlanKey,
 } from "@/lib/billing/plans";
 import {
+  BASE_SUBSCRIPTION_SELECT,
+  isMissingSubscriptionAddonColumn,
   isMissingSubscriptionPlanColumn,
   LEGACY_SUBSCRIPTION_SELECT,
   SUBSCRIPTION_SELECT,
@@ -45,6 +47,8 @@ type SubscriptionRow = {
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
   stripe_price_id: string | null;
+  stripe_staff_addon_item_id: string | null;
+  staff_addon_quantity: number | null;
   status: string;
   trial_ends_at: string | null;
   current_period_end: string | null;
@@ -115,6 +119,7 @@ export type AdminCustomerWorkspace = {
   memberCount: number;
   appCustomerCount: number;
   activeStaffCount: number;
+  staffAddonQuantity: number;
   subscriptionPlan: SubscriptionPlanKey;
   subscriptionStatus: string;
   stripeCustomerId: string | null;
@@ -220,6 +225,7 @@ function buildWorkspace({
     memberCount,
     appCustomerCount,
     activeStaffCount,
+    staffAddonQuantity: Math.max(0, Number(subscription?.staff_addon_quantity ?? 0)),
     subscriptionPlan: normalizePlanKey(subscription?.plan),
     subscriptionStatus: subscription?.status ?? "missing",
     stripeCustomerId: subscription?.stripe_customer_id ?? null,
@@ -260,6 +266,20 @@ async function selectSubscriptionRows(supabase: SupabaseClient) {
     .from("subscriptions")
     .select(ADMIN_SUBSCRIPTION_SELECT);
 
+  if (isMissingSubscriptionAddonColumn(result.error)) {
+    const baseResult = await supabase
+      .from("subscriptions")
+      .select(`${BASE_SUBSCRIPTION_SELECT}, created_at, updated_at`);
+
+    if (!isMissingSubscriptionPlanColumn(baseResult.error)) {
+      return baseResult;
+    }
+
+    return supabase
+      .from("subscriptions")
+      .select(ADMIN_LEGACY_SUBSCRIPTION_SELECT);
+  }
+
   if (!isMissingSubscriptionPlanColumn(result.error)) {
     return result;
   }
@@ -278,6 +298,24 @@ async function selectSubscriptionRow(
     .select(ADMIN_SUBSCRIPTION_SELECT)
     .eq("organization_id", organizationId)
     .maybeSingle();
+
+  if (isMissingSubscriptionAddonColumn(result.error)) {
+    const baseResult = await supabase
+      .from("subscriptions")
+      .select(`${BASE_SUBSCRIPTION_SELECT}, created_at, updated_at`)
+      .eq("organization_id", organizationId)
+      .maybeSingle();
+
+    if (!isMissingSubscriptionPlanColumn(baseResult.error)) {
+      return baseResult;
+    }
+
+    return supabase
+      .from("subscriptions")
+      .select(ADMIN_LEGACY_SUBSCRIPTION_SELECT)
+      .eq("organization_id", organizationId)
+      .maybeSingle();
+  }
 
   if (!isMissingSubscriptionPlanColumn(result.error)) {
     return result;

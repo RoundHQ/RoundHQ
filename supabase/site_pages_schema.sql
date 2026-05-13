@@ -13,7 +13,7 @@ create table if not exists public.site_pages (
   summary text not null,
   body text not null,
   highlights jsonb not null default '[]'::jsonb,
-  primary_cta_label text not null default 'Start free trial',
+  primary_cta_label text not null default 'Sign up',
   primary_cta_href text not null default '/signup',
   sort_order integer not null default 0,
   is_published boolean not null default true,
@@ -63,7 +63,7 @@ When work changes, RoundHQ keeps the admin close to the job: capture leads, crea
       'Built for weekly, fortnightly, monthly, residential, and commercial maintenance work',
       'Growth tools include staff permissions, RAMS, advanced insights, and customer profitability'
     ),
-    'Start free trial',
+    'Sign up',
     '/signup',
     10,
     true
@@ -78,13 +78,13 @@ When work changes, RoundHQ keeps the admin close to the job: capture leads, crea
 
 Growth is built for businesses adding people and complexity. It includes everything in Starter plus up to 5 staff accounts, staff permissions, RAMS generator, advanced dashboard insights, customer profitability, workflow tracking, commercial customer tools, quote conversion workflows, operational reporting, and up to 1,500 customers.
 
-Both plans start with a 14-day free trial. There are no setup fees, and you can change plan as the business grows.',
+There are no setup fees, and you can change plan as the business grows.',
     jsonb_build_array(
       'Starter: GBP 30 per business / month for solo operators',
       'Growth: GBP 60 per business / month for teams and commercial work',
-      '14-day free trial, no setup fees, cancel anytime'
+      'No setup fees, cancel anytime'
     ),
-    'Start free trial',
+    'Choose a plan',
     '/signup',
     20,
     true
@@ -145,7 +145,7 @@ For billing questions, workspace setup, or product feedback, include the email a
       'Workspace support: use the in-app helpdesk from your account',
       'Billing or setup help: include your RoundHQ workspace email'
     ),
-    'Start free trial',
+    'Sign up',
     '/signup',
     50,
     true
