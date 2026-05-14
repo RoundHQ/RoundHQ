@@ -364,6 +364,9 @@ export default async function HomePage() {
                   {page.navLabel}
                 </Link>
               ))}
+              <Link href="/blog" className="hover:text-white">
+                Blog
+              </Link>
             </nav>
 
             <div className="flex items-center gap-3">
@@ -628,7 +631,7 @@ export default async function HomePage() {
 
           {[
             ["Product", "Features", "Pricing"],
-            ["Support", "Resources", "Contact"],
+            ["Support", "Resources", "Blog", "Contact"],
             ["Company", "About"],
           ].map(([heading, ...items]) => (
             <div key={heading}>

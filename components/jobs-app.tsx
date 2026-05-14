@@ -2051,7 +2051,7 @@ function formatDatabaseError(error: { code?: string; message: string }) {
               message.includes("customers_day_check")
           )
       ) {
-        return "Supabase is connected, but the customers table needs the latest customer fields. Run the customer fields SQL setup script and refresh.";
+        return "Supabase is connected, but the customers table needs the latest customer fields. Run supabase/customer_fields.sql in Supabase, then refresh.";
       }
 
       if (
@@ -8060,10 +8060,6 @@ export default function JobsApp({
   }
 
   function beginQuoteScheduling(quoteId: string) {
-    if (!hasGrowthPlan) {
-      return;
-    }
-
     const context = getQuoteSchedulingContext(quoteId);
 
     if (!context) {
@@ -9159,13 +9155,13 @@ export default function JobsApp({
         <div className="flex min-h-screen items-center justify-center bg-[#edf1f2] p-6">
           <div className="w-full max-w-md rounded-[28px] bg-white p-8 shadow-sm">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-              Supabase
+              RoundHQ
             </p>
             <h1 className="mt-3 text-2xl font-black tracking-tight text-slate-900">
               Loading job data...
             </h1>
             <p className="mt-2 text-sm text-slate-500">
-              Pulling the latest shared app state from Supabase.
+              Preparing the latest RoundHQ workspace data.
             </p>
           </div>
         </div>

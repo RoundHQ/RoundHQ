@@ -237,6 +237,9 @@ function MarketingHeader({ pages }: { pages: SitePage[] }) {
               {page.navLabel}
             </Link>
           ))}
+          <Link href="/blog" className="hover:text-white">
+            Blog
+          </Link>
         </nav>
 
         <div className="flex items-center gap-3">
@@ -285,6 +288,11 @@ function MarketingFooter({ pages }: { pages: SitePage[] }) {
                 </Link>
               </li>
             ))}
+            <li>
+              <Link href="/blog" className="text-sm text-white/60 hover:text-white">
+                Blog
+              </Link>
+            </li>
           </ul>
         </div>
 

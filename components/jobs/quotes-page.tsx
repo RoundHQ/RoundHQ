@@ -152,6 +152,10 @@ function getHistoryTypeLabel(type: DocumentHistoryEntry["type"]) {
   }
 }
 
+function canAddQuoteToSchedule(status: QuoteStatus) {
+  return status === "Accepted" || status === "Approved" || status === "Scheduled";
+}
+
 function formatHistoryDate(value: string) {
   const parsedDate = new Date(value);
 
@@ -389,91 +393,97 @@ export default function QuotesPage({
                   </td>
                 </tr>
               ) : (
-                filteredQuotes.map((quote) => (
-                  <tr key={quote.id} className="border-t border-slate-100">
-                    <td className="px-4 py-4 font-semibold text-slate-900">
-                      {quote.quoteNumber}
-                    </td>
-                    <td className="px-4 py-4 font-semibold text-slate-900">
-                      {quote.customerName}
-                    </td>
+                filteredQuotes.map((quote) => {
+                  const canScheduleQuote = canAddQuoteToSchedule(quote.status);
+                  const scheduleButtonLabel =
+                    quote.status === "Scheduled" ? "Reschedule" : "Add to Schedule";
 
-                    <td className="px-4 py-4 text-sm text-slate-600">
-                      {new Date(quote.date).toLocaleDateString()}
-                    </td>
+                  return (
+                    <tr key={quote.id} className="border-t border-slate-100">
+                      <td className="px-4 py-4 font-semibold text-slate-900">
+                        {quote.quoteNumber}
+                      </td>
+                      <td className="px-4 py-4 font-semibold text-slate-900">
+                        {quote.customerName}
+                      </td>
 
-                    <td className="px-4 py-4">
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-semibold ${getQuoteStatusClasses(
-                          quote.status
-                        )}`}
-                      >
-                        {quote.status}
-                      </span>
-                    </td>
+                      <td className="px-4 py-4 text-sm text-slate-600">
+                        {new Date(quote.date).toLocaleDateString()}
+                      </td>
 
-                    <td className="px-4 py-4 text-sm font-semibold text-slate-900">
-                      {formatCurrency(quote.total)}
-                    </td>
-
-                    <td className="px-4 py-4">
-                      <div className="flex justify-end gap-2">
-                        <button
-                          onClick={() => onEdit(quote.id)}
-                          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                      <td className="px-4 py-4">
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-semibold ${getQuoteStatusClasses(
+                            quote.status
+                          )}`}
                         >
-                          <Pencil size={14} />
-                          Edit
-                        </button>
+                          {quote.status}
+                        </span>
+                      </td>
 
-                        <button
-                          onClick={() => onDelete(quote.id)}
-                          className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
-                        >
-                          <Trash2 size={14} />
-                          Delete
-                        </button>
+                      <td className="px-4 py-4 text-sm font-semibold text-slate-900">
+                        {formatCurrency(quote.total)}
+                      </td>
 
-                        <button
-                          onClick={() => generateQuotePDF(quote, businessDetails)}
-                          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-                        >
-                          <Download size={14} />
-                          PDF
-                        </button>
+                      <td className="px-4 py-4">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => onEdit(quote.id)}
+                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                          >
+                            <Pencil size={14} />
+                            Edit
+                          </button>
 
-                        <button
-                          onClick={() =>
-                            setSendTarget({ quoteId: quote.id, method: "email" })
-                          }
-                          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-                        >
-                          <Mail size={14} />
-                          Email
-                        </button>
+                          <button
+                            onClick={() => onDelete(quote.id)}
+                            className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                          >
+                            <Trash2 size={14} />
+                            Delete
+                          </button>
 
-                        {allowQuoteConversionWorkflows ? (
-                          <>
+                          <button
+                            onClick={() => generateQuotePDF(quote, businessDetails)}
+                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                          >
+                            <Download size={14} />
+                            PDF
+                          </button>
+
+                          <button
+                            onClick={() =>
+                              setSendTarget({ quoteId: quote.id, method: "email" })
+                            }
+                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                          >
+                            <Mail size={14} />
+                            Email
+                          </button>
+
+                          {canScheduleQuote ? (
                             <button
                               onClick={() => onConvertToSchedule(quote.id)}
                               className="inline-flex items-center gap-2 rounded-lg bg-[#0f2343] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#1a325b]"
                             >
                               <Calendar size={14} />
-                              Add to Schedule
+                              {scheduleButtonLabel}
                             </button>
+                          ) : null}
 
+                          {allowQuoteConversionWorkflows ? (
                             <button
                               onClick={() => onConvertToInvoice(quote.id)}
                               className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700"
                             >
                               Create Invoice
                             </button>
-                          </>
-                        ) : null}
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

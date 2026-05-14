@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   CalendarDays,
@@ -23,6 +23,7 @@ import {
   getCustomerDisplayAddress,
   getInputDateValue,
   getMonthlyPlanCharge,
+  getWorkdayFromDate,
   isDateInSeasonRange,
 } from "./helpers";
 import {
@@ -31,6 +32,7 @@ import {
 } from "./customer-profit";
 import {
   DEFAULT_ROTATION_WEEKS,
+  getCycleWeek,
   getEffectiveRotationWeeks,
   getRotationCycleLabel,
   getRotationDays,
@@ -58,6 +60,8 @@ type ScheduledJob = {
   title: string;
   date: string;
   notes?: string;
+  startTime?: string;
+  finishTime?: string;
   customerName?: string;
   customerId?: number | null;
   type: "One Off" | "Quote Accepted" | "Grass Cut" | "Commercial";
@@ -206,6 +210,103 @@ function hasCoordinates(customer: Customer) {
   );
 }
 
+function addDays(date: Date, days: number) {
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + days);
+  return nextDate;
+}
+
+function getSelectedWorkDate(
+  selectedWeek: string,
+  selectedDay: string,
+  rotationWeeks: RotationWeeks
+) {
+  const today = new Date();
+  const searchWindowDays = getRotationDays(rotationWeeks);
+
+  for (let offset = 0; offset <= searchWindowDays; offset += 1) {
+    const candidateDate = addDays(today, offset);
+    const candidateWorkday = getWorkdayFromDate(candidateDate).selectedDay;
+
+    if (
+      candidateWorkday === selectedDay &&
+      getCycleWeek(candidateDate, rotationWeeks) === selectedWeek
+    ) {
+      return candidateDate;
+    }
+  }
+
+  for (let offset = -1; offset >= -searchWindowDays; offset -= 1) {
+    const candidateDate = addDays(today, offset);
+    const candidateWorkday = getWorkdayFromDate(candidateDate).selectedDay;
+
+    if (
+      candidateWorkday === selectedDay &&
+      getCycleWeek(candidateDate, rotationWeeks) === selectedWeek
+    ) {
+      return candidateDate;
+    }
+  }
+
+  return today;
+}
+
+function getScheduledJobTimeLabel(job: ScheduledJob) {
+  if (job.startTime && job.finishTime) {
+    return `${job.startTime} - ${job.finishTime}`;
+  }
+
+  if (job.startTime) {
+    return `Starts ${job.startTime}`;
+  }
+
+  if (job.finishTime) {
+    return `Finishes ${job.finishTime}`;
+  }
+
+  return "Time not set";
+}
+
+function getScheduledJobValue(
+  job: ScheduledJob,
+  invoiceValueById: Map<string, number>,
+  quoteValueById: Map<string, number>,
+  customerValueById: Map<number, number>
+) {
+  const invoiceTotal = (job.invoiceIds ?? []).reduce(
+    (sum, invoiceId) => sum + Number(invoiceValueById.get(invoiceId) ?? 0),
+    0
+  );
+
+  if (invoiceTotal > 0) {
+    return invoiceTotal;
+  }
+
+  const quoteTotal = (job.quoteIds ?? []).reduce(
+    (sum, quoteId) => sum + Number(quoteValueById.get(quoteId) ?? 0),
+    0
+  );
+
+  if (quoteTotal > 0) {
+    return quoteTotal;
+  }
+
+  return Number(customerValueById.get(job.customerId ?? -1) ?? 0);
+}
+
+type MapPoint = {
+  id: number;
+  name: string;
+  latitude: number;
+  longitude: number;
+};
+
+declare global {
+  interface Window {
+    google?: any;
+  }
+}
+
 function getVisitRoundKeyForCustomer(
   selectedWeek: string,
   selectedDay: string,
@@ -351,6 +452,11 @@ export default function DashboardPage({
   const [weather, setWeather] = useState<WeatherState | null>(null);
   const [weatherLoading, setWeatherLoading] = useState(showWeatherWidget);
   const [weatherError, setWeatherError] = useState<string | null>(null);
+  const [googleMapReady, setGoogleMapReady] = useState(false);
+  const [googleMapUnavailable, setGoogleMapUnavailable] = useState(false);
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const mapInstanceRef = useRef<any>(null);
+  const mapMarkersRef = useRef<any[]>([]);
   const selectedCurrencyCode = normalizeCurrencyCode(currencyCode);
   const formatMoney = useCallback(
     (value: number, options?: Parameters<typeof formatDashboardMoney>[2]) =>
@@ -373,6 +479,11 @@ export default function DashboardPage({
     selectedWeek,
     roundRotationWeeks
   );
+  const selectedWorkDate = useMemo(
+    () => getSelectedWorkDate(selectedWeek, selectedDay, roundRotationWeeks),
+    [roundRotationWeeks, selectedDay, selectedWeek]
+  );
+  const selectedWorkDateValue = formatDateForInput(selectedWorkDate);
 
   const todaysCustomers = useMemo(
     () =>
@@ -635,14 +746,14 @@ export default function DashboardPage({
     )
     .slice(0, 5);
 
-  const todayStr = formatDateForInput(new Date());
   const todaysScheduledJobs = useMemo(
     () =>
       scheduledJobs.filter(
         (job) =>
-          getInputDateValue(job.date) === todayStr && job.status !== "Cancelled"
+          getInputDateValue(job.date) === selectedWorkDateValue &&
+          job.status !== "Cancelled"
       ),
-    [scheduledJobs, todayStr]
+    [scheduledJobs, selectedWorkDateValue]
   );
   const scheduledWorkCount = todaysScheduledJobs.length;
   const completedScheduledWorkCount = todaysScheduledJobs.filter(
@@ -680,25 +791,10 @@ export default function DashboardPage({
     [customers]
   );
   const scheduledDayValueTotal = todaysScheduledJobs.reduce((total, job) => {
-    const invoiceTotal = (job.invoiceIds ?? []).reduce(
-      (sum, invoiceId) => sum + Number(invoiceValueById.get(invoiceId) ?? 0),
-      0
+    return (
+      total +
+      getScheduledJobValue(job, invoiceValueById, quoteValueById, customerValueById)
     );
-
-    if (invoiceTotal > 0) {
-      return total + invoiceTotal;
-    }
-
-    const quoteTotal = (job.quoteIds ?? []).reduce(
-      (sum, quoteId) => sum + Number(quoteValueById.get(quoteId) ?? 0),
-      0
-    );
-
-    if (quoteTotal > 0) {
-      return total + quoteTotal;
-    }
-
-    return total + Number(customerValueById.get(job.customerId ?? -1) ?? 0);
   }, 0);
 
   useEffect(() => {
@@ -807,7 +903,32 @@ export default function DashboardPage({
     todaysCustomers.length - completedVisits.length - notCutVisits.length,
     0
   );
-  const todayDateLabel = new Date().toLocaleDateString(undefined, {
+  const hasRoundWork = todaysCustomers.length > 0;
+  const workItemCount = hasRoundWork ? todaysCustomers.length : scheduledWorkCount;
+  const workStatusLabel = hasRoundWork
+    ? routeRemainingCount === 0
+      ? "On track"
+      : `${routeRemainingCount} remaining`
+    : scheduledWorkCount === 0
+      ? "No work scheduled"
+      : openScheduledWorkCount === 0
+        ? "All complete"
+        : `${openScheduledWorkCount} scheduled open`;
+  const workCompletedCount = hasRoundWork
+    ? completedVisits.length
+    : completedScheduledWorkCount;
+  const workTotalCount = hasRoundWork ? todaysCustomers.length : scheduledWorkCount;
+  const workIssueCount = hasRoundWork ? notCutVisits.length : 0;
+  const workProgressLabel = hasRoundWork
+    ? workIssueCount > 0
+      ? `${workIssueCount} not completed`
+      : "On track"
+    : scheduledWorkCount === 0
+      ? "No scheduled work"
+      : openScheduledWorkCount > 0
+        ? `${openScheduledWorkCount} open`
+        : "All complete";
+  const workDateLabel = selectedWorkDate.toLocaleDateString(undefined, {
     weekday: "long",
     day: "numeric",
     month: "short",
@@ -815,6 +936,9 @@ export default function DashboardPage({
   const visibleRoundCustomers = todaysCustomers.slice(0, 8);
   const hiddenRoundCustomerCount =
     todaysCustomers.length - visibleRoundCustomers.length;
+  const visibleScheduledJobs = todaysScheduledJobs.slice(0, 6);
+  const hiddenScheduledJobCount =
+    todaysScheduledJobs.length - visibleScheduledJobs.length;
   const outstandingBreakdownRows = [
     {
       label: "Monthly",
@@ -905,19 +1029,47 @@ export default function DashboardPage({
   const mapPanelClassName = showPaymentOverview
     ? `${panelClassName} p-5 xl:col-span-5`
     : `${panelClassName} p-5`;
+  const pairedOperationsLayout =
+    showJobsWidget && showRecentActivityWidget && !showWorkflowOverview;
+  const operationsGridClassName = pairedOperationsLayout
+    ? roundMapGridClassName
+    : "grid gap-5 xl:grid-cols-12";
   const workloadPanelClassName =
-    showAdvancedInsights && showRevenueWidget
+    pairedOperationsLayout
+      ? roundPanelClassName
+      : showAdvancedInsights && showRevenueWidget
       ? `${panelClassName} p-5 xl:col-span-4`
       : `${panelClassName} p-5 xl:col-span-12`;
-  const routeMapCustomers =
-    todaysCustomers.length > 0 ? todaysCustomers.slice(0, 5) : customers.slice(0, 5);
-  const routeMapPoints = [
-    { left: "30%", top: "24%" },
-    { left: "50%", top: "42%" },
-    { left: "62%", top: "64%" },
-    { left: "78%", top: "38%" },
-    { left: "48%", top: "72%" },
-  ];
+  const visitLogPanelClassName =
+    pairedOperationsLayout
+      ? mapPanelClassName
+      : `${panelClassName} p-5 xl:col-span-3`;
+  const scheduledWorkCustomers = useMemo(() => {
+    const customerMap = new Map(customers.map((customer) => [customer.id, customer]));
+    const uniqueCustomers = new Map<number, Customer>();
+
+    todaysScheduledJobs.forEach((job) => {
+      if (job.customerId == null) {
+        return;
+      }
+
+      const customer = customerMap.get(job.customerId);
+
+      if (customer) {
+        uniqueCustomers.set(customer.id, customer);
+      }
+    });
+
+    return Array.from(uniqueCustomers.values());
+  }, [customers, todaysScheduledJobs]);
+  const workMapCustomers = hasRoundWork ? todaysCustomers : scheduledWorkCustomers;
+  const routeMapCustomers = workMapCustomers.filter(hasCoordinates).slice(0, 8);
+  const routeMapPoints = routeMapCustomers.map((customer) => ({
+    id: customer.id,
+    name: customer.name,
+    latitude: customer.latitude ?? DEFAULT_WEATHER_COORDINATES.latitude,
+    longitude: customer.longitude ?? DEFAULT_WEATHER_COORDINATES.longitude,
+  }));
   const paidTodayVisits = todaysVisits.filter((visit) => {
     const paid = visit.paid === true || visit.paymentStatus === "Paid";
     return paid;
@@ -951,6 +1103,123 @@ export default function DashboardPage({
   const workloadMax = Math.max(...workloadBars.map((bar) => bar.value), 1);
   const dayFilters = dayOptions?.length ? dayOptions : [selectedDay];
 
+  useEffect(() => {
+    if (window.google?.maps) {
+      setGoogleMapReady(true);
+      setGoogleMapUnavailable(false);
+      return undefined;
+    }
+
+    let attempts = 0;
+    const intervalId = window.setInterval(() => {
+      attempts += 1;
+
+      if (window.google?.maps) {
+        setGoogleMapReady(true);
+        setGoogleMapUnavailable(false);
+        window.clearInterval(intervalId);
+      } else if (attempts >= 40) {
+        setGoogleMapUnavailable(true);
+        window.clearInterval(intervalId);
+      }
+    }, 250);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!googleMapReady || !mapContainerRef.current || !window.google?.maps) {
+      return undefined;
+    }
+
+    const maps = window.google.maps;
+    const fallbackCenter = {
+      lat: weatherCoordinates.latitude,
+      lng: weatherCoordinates.longitude,
+    };
+    const center =
+      routeMapPoints.length > 0
+        ? {
+            lat:
+              routeMapPoints.reduce((total, point) => total + point.latitude, 0) /
+              routeMapPoints.length,
+            lng:
+              routeMapPoints.reduce((total, point) => total + point.longitude, 0) /
+              routeMapPoints.length,
+          }
+        : fallbackCenter;
+
+    if (!mapInstanceRef.current) {
+      mapInstanceRef.current = new maps.Map(mapContainerRef.current, {
+        center,
+        clickableIcons: false,
+        disableDefaultUI: true,
+        fullscreenControl: true,
+        gestureHandling: "cooperative",
+        mapTypeControl: false,
+        streetViewControl: false,
+        zoom: routeMapPoints.length > 0 ? 13 : 11,
+        zoomControl: true,
+      });
+    }
+
+    const map = mapInstanceRef.current;
+    mapMarkersRef.current.forEach((marker) => marker.setMap(null));
+    mapMarkersRef.current = [];
+
+    if (routeMapPoints.length === 0) {
+      map.setCenter(center);
+      map.setZoom(11);
+      return undefined;
+    }
+
+    const bounds = new maps.LatLngBounds();
+
+    routeMapPoints.forEach((point, index) => {
+      const position = {
+        lat: point.latitude,
+        lng: point.longitude,
+      };
+      const marker = new maps.Marker({
+        map,
+        position,
+        title: point.name,
+        label: {
+          text: String(index + 1),
+          color: "#ffffff",
+          fontWeight: "800",
+        },
+      });
+
+      marker.addListener("click", () => onOpenCustomer?.(point.id));
+      mapMarkersRef.current.push(marker);
+      bounds.extend(position);
+    });
+
+    if (routeMapPoints.length === 1) {
+      map.setCenter({
+        lat: routeMapPoints[0].latitude,
+        lng: routeMapPoints[0].longitude,
+      });
+      map.setZoom(15);
+    } else {
+      map.fitBounds(bounds, 48);
+    }
+
+    return () => {
+      mapMarkersRef.current.forEach((marker) => marker.setMap(null));
+      mapMarkersRef.current = [];
+    };
+  }, [
+    googleMapReady,
+    onOpenCustomer,
+    routeMapPoints,
+    weatherCoordinates.latitude,
+    weatherCoordinates.longitude,
+  ]);
+
   return (
     <div className="space-y-5 text-[#071426]">
       <section className={topSectionClassName}>
@@ -978,39 +1247,39 @@ export default function DashboardPage({
 
           <button
             type="button"
-            onClick={onGoToRounds}
+            onClick={hasRoundWork ? onGoToRounds : onGoToSchedule}
             className={`${panelClassName} p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_22px_50px_rgba(7,20,38,0.09)]`}
           >
             <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
-              Today&apos;s Round
+              Todays Work
             </p>
             <p className="mt-4 text-3xl font-black tracking-tight text-[#071426]">
-              {todaysCustomers.length}
+              {workItemCount}
             </p>
             <p className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-emerald-600">
               <Route size={15} />
-              {routeRemainingCount === 0 ? "On track" : `${routeRemainingCount} remaining`}
+              {workStatusLabel}
             </p>
           </button>
 
           <button
             type="button"
-            onClick={onGoToRounds}
+            onClick={hasRoundWork ? onGoToRounds : onGoToSchedule}
             className={`${panelClassName} p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_22px_50px_rgba(7,20,38,0.09)]`}
           >
             <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
               Visit Status
             </p>
             <p className="mt-4 text-3xl font-black tracking-tight text-[#071426]">
-              {completedVisits.length} / {todaysCustomers.length}
+              {workCompletedCount} / {workTotalCount}
             </p>
             <p
               className={`mt-3 inline-flex items-center gap-2 text-sm font-semibold ${
-                notCutVisits.length > 0 ? "text-orange-600" : "text-emerald-600"
+                workIssueCount > 0 ? "text-orange-600" : "text-emerald-600"
               }`}
             >
               <CircleAlert size={15} />
-              {notCutVisits.length > 0 ? `${notCutVisits.length} not completed` : "On track"}
+              {workProgressLabel}
             </p>
           </button>
 
@@ -1111,10 +1380,10 @@ export default function DashboardPage({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h3 className="text-xl font-black tracking-tight text-[#071426]">
-                Today&apos;s Round
+                Todays Work
               </h3>
               <p className="mt-1 text-sm text-[#667085]">
-                {todayDateLabel} - {selectedCycleLabel} {selectedDay}
+                {workDateLabel} - {selectedCycleLabel} {selectedDay}
               </p>
             </div>
             <button
@@ -1127,38 +1396,7 @@ export default function DashboardPage({
           </div>
 
           <div className="mt-5 overflow-hidden">
-            {visibleRoundCustomers.length === 0 ? (
-              <div className="grid min-h-[230px] place-items-center rounded-2xl border border-dashed border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-[#f7faf9] px-5 py-8 text-center">
-                <div className="max-w-md">
-                  <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-emerald-600 shadow-sm ring-1 ring-emerald-100">
-                    <ClipboardList size={22} />
-                  </span>
-                  <p className="mt-4 text-base font-black text-[#071426]">
-                    No customers due on this round
-                  </p>
-                  <p className="mt-2 text-sm leading-6 text-[#667085]">
-                    Add your first customer or switch week/day to see scheduled work.
-                  </p>
-                  <div className="mt-5 flex flex-wrap justify-center gap-2">
-                    <button
-                      type="button"
-                      onClick={onGoToCustomers}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#20c766] px-4 py-2.5 text-sm font-bold text-white shadow-[0_14px_28px_rgba(32,199,102,0.22)] transition hover:bg-[#16ad55]"
-                    >
-                      <UserPlus size={16} />
-                      Add customer
-                    </button>
-                    <button
-                      type="button"
-                      onClick={onGoToSchedule}
-                      className="inline-flex items-center justify-center rounded-xl border border-emerald-100 bg-white px-4 py-2.5 text-sm font-bold text-emerald-700 transition hover:bg-emerald-50"
-                    >
-                      View schedule
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : (
+            {hasRoundWork ? (
               <div className="divide-y divide-slate-100">
                 {visibleRoundCustomers.slice(0, 6).map((customer) => {
                   const visit = currentVisitsByCustomer.get(customer.id);
@@ -1206,13 +1444,90 @@ export default function DashboardPage({
                   );
                 })}
               </div>
+            ) : visibleScheduledJobs.length > 0 ? (
+              <div className="divide-y divide-slate-100">
+                {visibleScheduledJobs.map((job) => {
+                  const jobValue = getScheduledJobValue(
+                    job,
+                    invoiceValueById,
+                    quoteValueById,
+                    customerValueById
+                  );
+
+                  return (
+                    <button
+                      key={job.id}
+                      type="button"
+                      onClick={onGoToSchedule}
+                      className="grid w-full gap-3 py-3 text-left transition hover:bg-[#f7faf9] sm:grid-cols-[minmax(0,1.4fr)_auto_auto_auto] sm:items-center"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-[#071426]">
+                          {job.title}
+                        </p>
+                        <p className="truncate text-sm text-[#667085]">
+                          {[job.customerName, getScheduledJobTimeLabel(job)]
+                            .filter(Boolean)
+                            .join(" - ")}
+                        </p>
+                      </div>
+                      <span className="w-fit rounded-md bg-[#f2f5f4] px-2.5 py-1 text-xs font-semibold text-[#475467]">
+                        {job.type}
+                      </span>
+                      <span className="w-fit rounded-md bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
+                        {job.status}
+                      </span>
+                      <span className="w-fit rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                        {formatWholeMoney(jobValue)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="grid min-h-[230px] place-items-center rounded-2xl border border-dashed border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-[#f7faf9] px-5 py-8 text-center">
+                <div className="max-w-md">
+                  <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-emerald-600 shadow-sm ring-1 ring-emerald-100">
+                    <ClipboardList size={22} />
+                  </span>
+                  <p className="mt-4 text-base font-black text-[#071426]">
+                    No work scheduled for this day
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-[#667085]">
+                    Add a customer to the round or book work on the schedule.
+                  </p>
+                  <div className="mt-5 flex flex-wrap justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={onGoToCustomers}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#20c766] px-4 py-2.5 text-sm font-bold text-white shadow-[0_14px_28px_rgba(32,199,102,0.22)] transition hover:bg-[#16ad55]"
+                    >
+                      <UserPlus size={16} />
+                      Add customer
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onGoToSchedule}
+                      className="inline-flex items-center justify-center rounded-xl border border-emerald-100 bg-white px-4 py-2.5 text-sm font-bold text-emerald-700 transition hover:bg-emerald-50"
+                    >
+                      View schedule
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
 
-          {hiddenRoundCustomerCount > 0 && (
+          {hasRoundWork && hiddenRoundCustomerCount > 0 && (
             <p className="mt-3 text-sm font-semibold text-slate-500">
               {hiddenRoundCustomerCount} more customer
               {hiddenRoundCustomerCount === 1 ? "" : "s"} on this round.
+            </p>
+          )}
+          {!hasRoundWork && hiddenScheduledJobCount > 0 && (
+            <p className="mt-3 text-sm font-semibold text-slate-500">
+              {hiddenScheduledJobCount} more scheduled job
+              {hiddenScheduledJobCount === 1 ? "" : "s"} for this day.
             </p>
           )}
         </section>
@@ -1229,33 +1544,22 @@ export default function DashboardPage({
           </div>
 
           <div className="relative mt-5 min-h-[250px] overflow-hidden rounded-2xl bg-[#f4f7f6]">
-            <div className="absolute inset-0 opacity-70">
-              <div className="absolute left-[-12%] top-[22%] h-[2px] w-[130%] rotate-[-21deg] bg-white" />
-              <div className="absolute left-[-8%] top-[58%] h-[2px] w-[120%] rotate-[17deg] bg-white" />
-              <div className="absolute left-[26%] top-[-10%] h-[120%] w-[2px] rotate-[28deg] bg-white" />
-              <div className="absolute left-[70%] top-[-10%] h-[120%] w-[2px] rotate-[-18deg] bg-white" />
-            </div>
-            {routeMapCustomers.length === 0 ? (
-              <div className="absolute inset-0 flex items-center justify-center px-8 text-center text-sm font-semibold text-[#667085]">
-                Add customers with route details to preview the day.
+            <div ref={mapContainerRef} className="absolute inset-0" />
+            {!googleMapReady && !googleMapUnavailable ? (
+              <div className="absolute inset-x-4 bottom-4 z-10 rounded-2xl bg-white/95 px-4 py-3 text-center text-sm font-semibold text-[#667085] shadow-sm ring-1 ring-slate-200">
+                Loading Google Maps preview...
               </div>
-            ) : (
-              routeMapCustomers.map((customer, index) => {
-                const point = routeMapPoints[index % routeMapPoints.length];
-                return (
-                  <button
-                    key={customer.id}
-                    type="button"
-                    onClick={() => onOpenCustomer?.(customer.id)}
-                    title={customer.name}
-                    className="absolute flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-[#20c766] to-[#087f48] text-sm font-black text-white shadow-[0_12px_25px_rgba(0,80,55,0.25)] ring-4 ring-white/80"
-                    style={{ left: point.left, top: point.top }}
-                  >
-                    {index + 1}
-                  </button>
-                );
-              })
-            )}
+            ) : null}
+            {googleMapUnavailable ? (
+              <div className="absolute inset-x-4 bottom-4 z-10 rounded-2xl bg-white/95 px-4 py-3 text-center text-sm font-semibold text-[#667085] shadow-sm ring-1 ring-slate-200">
+                Google Maps is unavailable. Check the Google Maps API key.
+              </div>
+            ) : null}
+            {googleMapReady && routeMapCustomers.length === 0 ? (
+              <div className="absolute inset-x-4 bottom-4 z-10 rounded-2xl bg-white/95 px-4 py-3 text-center text-sm font-semibold text-[#667085] shadow-sm ring-1 ring-slate-200">
+                Add coordinates to customers to pin today&apos;s work on the map.
+              </div>
+            ) : null}
           </div>
 
           <button
@@ -1447,7 +1751,7 @@ export default function DashboardPage({
       )}
 
       {showOperationsSection && (
-        <div className="grid gap-5 xl:grid-cols-12">
+        <div className={operationsGridClassName}>
           {showJobsWidget && (
             <section className={workloadPanelClassName}>
               <div className="flex items-center justify-between gap-3">
@@ -1651,7 +1955,7 @@ export default function DashboardPage({
           ) : null}
 
           {showRecentActivityWidget && (
-            <section className={`${panelClassName} p-5 xl:col-span-3`}>
+            <section className={visitLogPanelClassName}>
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
