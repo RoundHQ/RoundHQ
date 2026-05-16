@@ -32,6 +32,8 @@ set round_key = concat(
     when lower(day::text) like 'wed%' then 'Wednesday'
     when lower(day::text) like 'thu%' then 'Thursday'
     when lower(day::text) like 'fri%' then 'Friday'
+    when lower(day::text) like 'sat%' then 'Saturday'
+    when lower(day::text) like 'sun%' then 'Sunday'
     else day::text
   end,
   '-',

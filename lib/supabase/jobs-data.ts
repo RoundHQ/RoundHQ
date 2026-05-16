@@ -130,6 +130,8 @@ const DAY_OPTIONS: DayName[] = [
   "Wednesday",
   "Thursday",
   "Friday",
+  "Saturday",
+  "Sunday",
 ];
 const CUSTOMER_TYPES: CustomerType[] = ["Residential", "Commercial"];
 const CUT_FREQUENCIES: CutFrequency[] = [

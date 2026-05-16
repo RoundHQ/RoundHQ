@@ -1,9 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import DocumentCustomerCreateDialog from "./document-customer-create-dialog";
 import DocumentCustomerPicker from "./document-customer-picker";
-import { INVOICE_STATUS_OPTIONS, type Customer, type InvoiceStatus } from "./types";
+import {
+    INVOICE_STATUS_OPTIONS,
+    type Customer,
+    type InvoiceStatus,
+    type RotationWeeks,
+} from "./types";
+import type { EditFormCollaboration } from "./edit-collaboration";
 
 type CustomerType = "Residential" | "Commercial";
 
@@ -61,8 +68,11 @@ type Props = DocumentCustomerFields & {
     defaultPaymentTermsDays: number;
     defaultVatRegistered: boolean;
     defaultVatRate: number;
+    defaultRotationWeeks?: RotationWeeks;
     allowCommercialTools?: boolean;
+    editCollaboration?: EditFormCollaboration<Invoice>;
     onSave: (invoice: Invoice) => void | boolean | Promise<void | boolean>;
+    onCreateCustomer?: (customer: Customer) => Promise<Customer | null | undefined>;
     onBack: () => void;
 };
 
@@ -203,8 +213,11 @@ export default function InvoiceForm({
     defaultPaymentTermsDays,
     defaultVatRegistered,
     defaultVatRate,
+    defaultRotationWeeks,
     allowCommercialTools = true,
+    editCollaboration,
     onSave,
+    onCreateCustomer,
     onBack,
 }: Props) {
     const isEditingInvoice = Boolean(existingInvoice);
@@ -225,6 +238,9 @@ export default function InvoiceForm({
     const [invoiceCustomerName, setInvoiceCustomerName] = useState(
         existingInvoice?.customerName ?? customerName ?? ""
     );
+    const [isAddingCustomer, setIsAddingCustomer] = useState(false);
+    const [pendingCustomerName, setPendingCustomerName] = useState("");
+    const [createdCustomer, setCreatedCustomer] = useState<Customer | null>(null);
     const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(
         initialSelectedCustomerId
     );
@@ -267,12 +283,18 @@ export default function InvoiceForm({
                   },
               ]
     );
+    const draftInvoiceIdRef = useRef(existingInvoice?.id ?? crypto.randomUUID());
+    const initialDraftRef = useRef("");
+    const handledSaveRequestRef = useRef(0);
+    const handledDiscardRequestRef = useRef(0);
+    const editCollaborationRef = useRef(editCollaboration);
     const selectedCustomer = useMemo(
         () =>
             selectedCustomerId == null
                 ? null
-                : customers.find((customer) => customer.id === selectedCustomerId) ?? null,
-        [customers, selectedCustomerId]
+                : customers.find((customer) => customer.id === selectedCustomerId) ??
+                  (createdCustomer?.id === selectedCustomerId ? createdCustomer : null),
+        [createdCustomer, customers, selectedCustomerId]
     );
     const {
         customerType: activeCustomerType,
@@ -348,6 +370,103 @@ export default function InvoiceForm({
         [subtotal, vatAmount]
     );
 
+    const buildInvoiceDraft = useCallback((): Invoice => {
+        const cleanedItems = items.filter(
+            (item) =>
+                item.description.trim() !== "" ||
+                Number(item.quantity) > 0 ||
+                Number(item.price) > 0
+        );
+
+        return {
+            id: draftInvoiceIdRef.current,
+            invoiceNumber: existingInvoice?.invoiceNumber ?? "",
+            customerId: selectedCustomerId,
+            customerName: invoiceCustomerName.trim(),
+            customerType: activeCustomerType,
+            customerAddress: normalizeOptionalText(activeCustomerAddress),
+            customerTown: normalizeOptionalText(activeCustomerTown),
+            customerPostcode: normalizeOptionalText(activeCustomerPostcode),
+            siteName:
+                showCommercialTools
+                    ? normalizeOptionalText(activeSiteName)
+                    : undefined,
+            siteAddress:
+                showCommercialTools
+                    ? normalizeOptionalText(activeSiteAddress)
+                    : undefined,
+            siteTown:
+                showCommercialTools
+                    ? normalizeOptionalText(activeSiteTown)
+                    : undefined,
+            sitePostcode:
+                showCommercialTools
+                    ? normalizeOptionalText(activeSitePostcode)
+                    : undefined,
+            date: invoiceDate,
+            dueDate: dueDate.trim() || undefined,
+            status: invoiceStatus,
+            items: cleanedItems,
+            notes: notes.trim() || undefined,
+            terms: terms.trim() || undefined,
+            vatRate,
+            vatAmount,
+            total,
+            linkedQuoteId: linkedQuoteId.trim() || undefined,
+        };
+    }, [
+        activeCustomerAddress,
+        activeCustomerPostcode,
+        activeCustomerTown,
+        activeCustomerType,
+        activeSiteAddress,
+        activeSiteName,
+        activeSitePostcode,
+        activeSiteTown,
+        dueDate,
+        existingInvoice?.invoiceNumber,
+        invoiceCustomerName,
+        invoiceDate,
+        invoiceStatus,
+        items,
+        linkedQuoteId,
+        notes,
+        selectedCustomerId,
+        showCommercialTools,
+        terms,
+        total,
+        vatAmount,
+        vatRate,
+    ]);
+
+    useEffect(() => {
+        editCollaborationRef.current = editCollaboration;
+    }, [editCollaboration]);
+
+    useEffect(() => {
+        if (!editCollaborationRef.current || initialDraftRef.current) {
+            return;
+        }
+
+        initialDraftRef.current = JSON.stringify(buildInvoiceDraft());
+    }, [buildInvoiceDraft]);
+
+    useEffect(() => {
+        const collaboration = editCollaborationRef.current;
+
+        if (!collaboration) {
+            return;
+        }
+
+        const draft = buildInvoiceDraft();
+        const draftJson = JSON.stringify(draft);
+        const isDirty = initialDraftRef.current
+            ? draftJson !== initialDraftRef.current
+            : false;
+
+        collaboration.onDraftChange(draft, isDirty);
+    }, [buildInvoiceDraft]);
+
     const customerDetails = useMemo(() => {
         const address = [
             showCommercialTools ? normalizeOptionalText(activeSiteName) : undefined,
@@ -410,62 +529,82 @@ export default function InvoiceForm({
         setDocumentCustomerFields(getDocumentCustomerFieldsFromCustomer(customer));
     }
 
-    async function handleSave() {
-        const cleanedItems = items.filter(
-            (item) =>
-                item.description.trim() !== "" ||
-                Number(item.quantity) > 0 ||
-                Number(item.price) > 0
-        );
+    function beginCreateCustomer(name: string) {
+        if (!onCreateCustomer) {
+            return;
+        }
 
-        if (!invoiceCustomerName.trim()) return;
-        if (cleanedItems.length === 0) return;
-
-        await onSave({
-            id: existingInvoice?.id ?? crypto.randomUUID(),
-            invoiceNumber: existingInvoice?.invoiceNumber ?? "",
-            customerId: selectedCustomerId,
-            customerName: invoiceCustomerName.trim(),
-            customerType: activeCustomerType,
-            customerAddress: normalizeOptionalText(activeCustomerAddress),
-            customerTown: normalizeOptionalText(activeCustomerTown),
-            customerPostcode: normalizeOptionalText(activeCustomerPostcode),
-            siteName:
-                showCommercialTools
-                    ? normalizeOptionalText(activeSiteName)
-                    : undefined,
-            siteAddress:
-                showCommercialTools
-                    ? normalizeOptionalText(activeSiteAddress)
-                    : undefined,
-            siteTown:
-                showCommercialTools
-                    ? normalizeOptionalText(activeSiteTown)
-                    : undefined,
-            sitePostcode:
-                showCommercialTools
-                    ? normalizeOptionalText(activeSitePostcode)
-                    : undefined,
-            date: invoiceDate,
-            dueDate: dueDate.trim() || undefined,
-            status: invoiceStatus,
-            items: cleanedItems,
-            notes: notes.trim() || undefined,
-            terms: terms.trim() || undefined,
-            vatRate,
-            vatAmount,
-            total,
-            linkedQuoteId: linkedQuoteId.trim() || undefined,
-        });
+        setPendingCustomerName(name);
+        setIsAddingCustomer(true);
     }
+
+    function handleCustomerCreated(customer: Customer) {
+        setCreatedCustomer(customer);
+        handleCustomerSelect(customer);
+        setPendingCustomerName("");
+        setIsAddingCustomer(false);
+    }
+
+    const handleSave = useCallback(async () => {
+        const draft = buildInvoiceDraft();
+        if (!invoiceCustomerName.trim()) return;
+        if (draft.items.length === 0) return;
+
+        const saveResult = await onSave(draft);
+
+        if (saveResult !== false) {
+            editCollaboration?.onSaveComplete();
+        }
+    }, [buildInvoiceDraft, editCollaboration, invoiceCustomerName, onSave]);
+
+    useEffect(() => {
+        if (
+            !editCollaboration?.saveRequestId ||
+            handledSaveRequestRef.current === editCollaboration.saveRequestId
+        ) {
+            return;
+        }
+
+        handledSaveRequestRef.current = editCollaboration.saveRequestId;
+        void handleSave();
+    }, [editCollaboration?.saveRequestId, handleSave]);
+
+    useEffect(() => {
+        if (
+            !editCollaboration?.discardRequestId ||
+            handledDiscardRequestRef.current === editCollaboration.discardRequestId
+        ) {
+            return;
+        }
+
+        handledDiscardRequestRef.current = editCollaboration.discardRequestId;
+        editCollaboration.onDiscardComplete();
+        onBack();
+    }, [editCollaboration, onBack]);
+
+    const handleBack = useCallback(() => {
+        editCollaborationRef.current?.onDiscardComplete();
+        onBack();
+    }, [onBack]);
 
     return (
         <div className="space-y-6">
+            {isAddingCustomer && onCreateCustomer ? (
+                <DocumentCustomerCreateDialog
+                    customerName={pendingCustomerName || invoiceCustomerName}
+                    defaultRotationWeeks={defaultRotationWeeks}
+                    allowCommercialTools={allowCommercialTools}
+                    onCreateCustomer={onCreateCustomer}
+                    onCreated={handleCustomerCreated}
+                    onCancel={() => setIsAddingCustomer(false)}
+                />
+            ) : null}
+
             <section className="rounded-[24px] bg-gradient-to-r from-[#153c3f] to-[#244d51] px-6 py-5 text-white shadow-sm">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                     <div>
                         <button
-                            onClick={onBack}
+                            onClick={handleBack}
                             className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/15"
                         >
                             <ArrowLeft size={16} />
@@ -518,6 +657,7 @@ export default function InvoiceForm({
                             selectedCustomerId={selectedCustomerId}
                             onChange={handleCustomerNameChange}
                             onSelect={handleCustomerSelect}
+                            onCreateCustomer={onCreateCustomer ? beginCreateCustomer : undefined}
                             placeholder="Customer name"
                         />
                     </div>
@@ -795,7 +935,7 @@ export default function InvoiceForm({
 
                     <div className="flex flex-wrap gap-2">
                         <button
-                            onClick={onBack}
+                            onClick={handleBack}
                             className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                         >
                             Cancel

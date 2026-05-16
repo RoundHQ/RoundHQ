@@ -629,7 +629,10 @@ export default function SchedulePage({
         </section>
       )}
 
-      <section className="rounded-[22px] border border-slate-200 bg-white shadow-sm">
+      <section
+        data-tour="schedule-week-view"
+        className="rounded-[22px] border border-slate-200 bg-white shadow-sm"
+      >
         <div className="flex flex-col gap-4 border-b border-slate-200 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-2">
             <button
@@ -714,6 +717,7 @@ export default function SchedulePage({
                   {dayJobs.slice(0, 3).map((job) => (
                     <div
                       key={job.id}
+                      data-tour="job-card"
                       className={`truncate rounded-md border px-2 py-1 text-[11px] font-medium ${
                         job.isVirtual ? "cursor-default" : "cursor-pointer"
                       } ${getJobBadgeClass(
@@ -797,6 +801,7 @@ export default function SchedulePage({
               return (
                 <div
                   key={job.id}
+                  data-tour="job-card"
                   onClick={canOpenJob ? () => onOpenJob(job.id) : undefined}
                   className={`flex flex-col gap-3 rounded-2xl border p-4 transition md:flex-row md:items-start md:justify-between ${
                     canOpenJob ? "cursor-pointer" : "cursor-default"

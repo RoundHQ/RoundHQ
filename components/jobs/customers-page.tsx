@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import CustomerForm from "./customer-form";
 import {
   getCustomerDisplayAddress,
@@ -11,6 +11,7 @@ import {
   DEFAULT_ROTATION_WEEKS,
   normalizeRotationWeeks,
 } from "./rotation";
+import type { EditFormCollaboration } from "./edit-collaboration";
 import type {
   Customer,
   MonthlyPayment,
@@ -27,10 +28,14 @@ type Props = {
   defaultRotationWeeks?: RotationWeeks;
   customerLimit?: number;
   allowCommercialTools?: boolean;
+  autoOpenAddCustomerRequestId?: number;
   onAdd: (customer: Customer) => void;
   onUpdate: (customer: Customer) => void;
   onDelete: (customerId: number) => void;
   onOpenCustomer: (customerId: number) => void;
+  getCustomerEditCollaboration?: (
+    customer: Customer | undefined
+  ) => EditFormCollaboration<Customer> | undefined;
 };
 
 type CustomerTypeFilter = "All" | "Residential" | "Commercial";
@@ -59,22 +64,33 @@ function CustomerModal({
                          existingCustomer,
                          defaultRotationWeeks,
                          allowCommercialTools,
+                         editCollaboration,
                          onClose,
                          onSave,
                        }: {
   existingCustomer?: Customer;
   defaultRotationWeeks: RotationWeeks;
   allowCommercialTools: boolean;
+  editCollaboration?: EditFormCollaboration<Customer>;
   onClose: () => void;
   onSave: (customer: Customer) => void;
 }) {
   return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+      <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              onClose();
+            }
+          }}
+      >
         <div className="max-h-[90vh] w-full max-w-4xl overflow-auto rounded-[24px] bg-white shadow-2xl">
           <CustomerForm
               existing={existingCustomer}
               defaultRotationWeeks={defaultRotationWeeks}
               allowCommercialTools={allowCommercialTools}
+              editCollaboration={editCollaboration}
               onSave={onSave}
               onCancel={onClose}
           />
@@ -92,10 +108,12 @@ export default function CustomersPage({
                                         defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
                                         customerLimit = Number.POSITIVE_INFINITY,
                                         allowCommercialTools = true,
+                                        autoOpenAddCustomerRequestId = 0,
                                         onAdd,
                                         onUpdate,
                                         onDelete,
                                         onOpenCustomer,
+                                        getCustomerEditCollaboration,
                                       }: Props) {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] =
@@ -103,6 +121,7 @@ export default function CustomersPage({
 
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const handledAutoOpenRequestRef = useRef(0);
   const normalizedDefaultRotationWeeks =
       normalizeRotationWeeks(defaultRotationWeeks);
   const customerLimitReached = customers.length >= customerLimit;
@@ -135,6 +154,24 @@ export default function CustomersPage({
     setEditingCustomer(null);
     setIsCustomerModalOpen(true);
   }
+
+  useEffect(() => {
+    if (
+      autoOpenAddCustomerRequestId <= 0 ||
+      customerLimitReached ||
+      handledAutoOpenRequestRef.current === autoOpenAddCustomerRequestId
+    ) {
+      return;
+    }
+
+    handledAutoOpenRequestRef.current = autoOpenAddCustomerRequestId;
+    const timeoutId = window.setTimeout(() => {
+      setEditingCustomer(null);
+      setIsCustomerModalOpen(true);
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [autoOpenAddCustomerRequestId, customerLimitReached]);
 
   function openEditCustomerModal(customer: Customer) {
     setEditingCustomer(customer);
@@ -185,6 +222,7 @@ export default function CustomersPage({
               <button
                   onClick={openAddCustomerModal}
                   disabled={customerLimitReached}
+                  data-tour="add-customer-button"
                   className="rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 transition hover:bg-slate-100"
               >
                 Add Customer
@@ -204,6 +242,7 @@ export default function CustomersPage({
             <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
+                data-tour="customer-search"
                 placeholder="Search name, address, phone, email, postcode..."
                 className="flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
             />
@@ -267,8 +306,15 @@ export default function CustomersPage({
                             key={customer.id}
                             className="border-t border-slate-100"
                         >
-                          <td className="px-4 py-4 font-semibold text-slate-900">
-                            {customer.name}
+                          <td className="px-4 py-4">
+                            <button
+                                type="button"
+                                data-tour="customer-row-name"
+                                onClick={() => onOpenCustomer(customer.id)}
+                                className="text-left font-semibold text-slate-900 underline-offset-4 transition hover:text-emerald-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+                            >
+                              {customer.name}
+                            </button>
                           </td>
 
                           <td className="px-4 py-4 text-sm text-slate-600">
@@ -329,6 +375,9 @@ export default function CustomersPage({
                 existingCustomer={editingCustomer ?? undefined}
                 defaultRotationWeeks={normalizedDefaultRotationWeeks}
                 allowCommercialTools={allowCommercialTools}
+                editCollaboration={getCustomerEditCollaboration?.(
+                    editingCustomer ?? undefined
+                )}
                 onClose={closeCustomerModal}
                 onSave={saveCustomerModal}
             />

@@ -142,6 +142,7 @@ const STARTER_FEATURES = new Set<CustomerFeatureKey>([
   "map",
   "customers",
   "payments",
+  "expenses",
   "quotes",
   "invoices",
   "settings",

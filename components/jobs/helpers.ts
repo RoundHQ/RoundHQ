@@ -28,6 +28,8 @@ export const dayOrder = [
   "Wednesday",
   "Thursday",
   "Friday",
+  "Saturday",
+  "Sunday",
 ] as const;
 export const APPROX_SPEED_MPH = 20;
 const CALENDAR_DAY_MS = 24 * 60 * 60 * 1000;
@@ -383,9 +385,9 @@ export function getWorkdayFromDate(date: Date): {
     case 5:
       return { dayLabel: "Friday", selectedDay: "Friday" };
     case 6:
-      return { dayLabel: "Saturday", selectedDay: null };
+      return { dayLabel: "Saturday", selectedDay: "Saturday" };
     default:
-      return { dayLabel: "Sunday", selectedDay: null };
+      return { dayLabel: "Sunday", selectedDay: "Sunday" };
   }
 }
 

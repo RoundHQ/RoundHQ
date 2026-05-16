@@ -15,6 +15,7 @@ type Props = {
   onChange: (value: string) => void;
   onSelectAddress: (parts: AddressParts) => void;
   placeholder?: string;
+  dataTour?: string;
 };
 
 declare global {
@@ -28,6 +29,7 @@ export default function AddressAutocompleteInput({
                                                    onChange,
                                                    onSelectAddress,
                                                    placeholder = "Start typing an address...",
+                                                   dataTour,
                                                  }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const autocompleteRef = useRef<any>(null);
@@ -89,6 +91,7 @@ export default function AddressAutocompleteInput({
           className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
           placeholder={placeholder}
           value={value}
+          data-tour={dataTour}
           onChange={(e) => onChange(e.target.value)}
       />
   );

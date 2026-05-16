@@ -36,6 +36,7 @@ create table if not exists public.role_permissions (
       'commercial',
       'commercialDocs',
       'customers',
+      'expenses',
       'quotes',
       'invoices',
       'staff',
@@ -46,6 +47,30 @@ create table if not exists public.role_permissions (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   primary key (role, page_key)
+);
+
+alter table public.role_permissions
+drop constraint if exists role_permissions_page_key_check;
+
+alter table public.role_permissions
+add constraint role_permissions_page_key_check
+check (
+  page_key in (
+    'dashboard',
+    'schedule',
+    'rounds',
+    'history',
+    'map',
+    'actions',
+    'commercial',
+    'commercialDocs',
+    'customers',
+    'expenses',
+    'quotes',
+    'invoices',
+    'staff',
+    'settings'
+  )
 );
 
 insert into public.role_permissions (role, page_key, allowed)
@@ -59,6 +84,7 @@ values
   ('Admin', 'commercial', true),
   ('Admin', 'commercialDocs', true),
   ('Admin', 'customers', true),
+  ('Admin', 'expenses', true),
   ('Admin', 'quotes', true),
   ('Admin', 'invoices', true),
   ('Admin', 'staff', true),
@@ -72,6 +98,7 @@ values
   ('Staff', 'commercial', true),
   ('Staff', 'commercialDocs', true),
   ('Staff', 'customers', true),
+  ('Staff', 'expenses', true),
   ('Staff', 'quotes', true),
   ('Staff', 'invoices', true),
   ('Staff', 'staff', false),
@@ -85,6 +112,7 @@ values
   ('Operator', 'commercial', true),
   ('Operator', 'commercialDocs', false),
   ('Operator', 'customers', false),
+  ('Operator', 'expenses', false),
   ('Operator', 'quotes', false),
   ('Operator', 'invoices', false),
   ('Operator', 'staff', false),

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { MapPin, UserRound } from "lucide-react";
+import { MapPin, UserPlus, UserRound } from "lucide-react";
 import type { Customer } from "./types";
 
 type Props = {
@@ -11,6 +11,7 @@ type Props = {
     placeholder?: string;
     onChange: (value: string) => void;
     onSelect: (customer: Customer) => void;
+    onCreateCustomer?: (name: string) => void;
 };
 
 function normalizeSearchText(value: string | null | undefined) {
@@ -57,9 +58,11 @@ export default function DocumentCustomerPicker({
     placeholder = "Customer name",
     onChange,
     onSelect,
+    onCreateCustomer,
 }: Props) {
     const [isOpen, setIsOpen] = useState(false);
     const query = normalizeSearchText(value);
+    const trimmedValue = value.trim();
 
     const matches = useMemo(() => {
         const scoredMatches = customers
@@ -93,9 +96,27 @@ export default function DocumentCustomerPicker({
 
         return scoredMatches.slice(0, 8).map((entry) => entry.customer);
     }, [customers, query, selectedCustomerId]);
+    const hasExactCustomerName = useMemo(
+        () =>
+            Boolean(query) &&
+            customers.some((customer) => normalizeSearchText(customer.name) === query),
+        [customers, query]
+    );
+    const canCreateCustomer = Boolean(
+        onCreateCustomer && trimmedValue && !hasExactCustomerName
+    );
 
     function handleSelect(customer: Customer) {
         onSelect(customer);
+        setIsOpen(false);
+    }
+
+    function handleCreateCustomer() {
+        if (!onCreateCustomer || !trimmedValue) {
+            return;
+        }
+
+        onCreateCustomer(trimmedValue);
         setIsOpen(false);
     }
 
@@ -113,7 +134,7 @@ export default function DocumentCustomerPicker({
                 className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
             />
 
-            {isOpen && customers.length > 0 ? (
+            {isOpen && (customers.length > 0 || canCreateCustomer) ? (
                 <div className="absolute left-0 right-0 z-30 mt-2 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
                     {matches.length > 0 ? (
                         matches.map((customer) => {
@@ -168,11 +189,29 @@ export default function DocumentCustomerPicker({
                                 </button>
                             );
                         })
-                    ) : (
+                    ) : !canCreateCustomer ? (
                         <div className="px-3 py-3 text-sm text-slate-500">
                             No matching customers
                         </div>
-                    )}
+                    ) : null}
+
+                    {canCreateCustomer ? (
+                        <button
+                            type="button"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={handleCreateCustomer}
+                            className="mt-1 flex w-full items-start gap-3 rounded-lg border-t border-slate-100 px-3 py-2.5 text-left text-slate-700 transition hover:bg-emerald-50 hover:text-emerald-900"
+                        >
+                            <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+                                <UserPlus size={16} />
+                            </span>
+
+                            <span className="min-w-0 flex-1 text-sm">
+                                <span className="font-semibold">{trimmedValue}</span>
+                                {" isn't a customer, add them now"}
+                            </span>
+                        </button>
+                    ) : null}
                 </div>
             ) : null}
         </div>

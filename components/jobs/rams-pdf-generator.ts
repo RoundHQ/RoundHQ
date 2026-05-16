@@ -25,6 +25,16 @@ type LogoAsset = {
   height: number;
 };
 
+type RamsPdfSettings = {
+  headerStyle: "banner" | "letterhead";
+  logoBackground: "none" | "dark" | "light";
+  logoScale: number;
+  showLogo: boolean;
+  showFooter: boolean;
+  showBusinessDetails: boolean;
+  footerText: string;
+};
+
 function normalizeOptionalText(value: string | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
@@ -76,8 +86,35 @@ function setTextColor(doc: jsPDF, hex: string) {
   doc.setTextColor(r, g, b);
 }
 
+function getRamsPdfSettings(details: RamsBusinessDetails): RamsPdfSettings {
+  const rawLogoScale =
+    typeof details.pdfLogoScale === "number"
+      ? details.pdfLogoScale
+      : Number(details.pdfLogoScale);
+  const logoScale = Number.isFinite(rawLogoScale)
+    ? Math.min(160, Math.max(60, rawLogoScale)) / 100
+    : 1;
+
+  return {
+    headerStyle: details.pdfHeaderStyle === "letterhead" ? "letterhead" : "banner",
+    logoBackground:
+      details.pdfLogoBackground === "dark" || details.pdfLogoBackground === "light"
+        ? details.pdfLogoBackground
+        : "none",
+    logoScale,
+    showLogo: details.pdfShowLogo !== false,
+    showFooter: details.pdfShowFooter !== false,
+    showBusinessDetails: details.pdfShowBusinessDetails !== false,
+    footerText: normalizeOptionalText(details.pdfFooterText) ?? "",
+  };
+}
+
 function resolveLogoUrl(logoUrl?: string) {
-  const candidate = logoUrl?.trim() || "/logo.png";
+  const candidate = logoUrl?.trim();
+
+  if (!candidate) {
+    return undefined;
+  }
 
   if (/^(https?:|data:)/i.test(candidate)) {
     return candidate;
@@ -98,6 +135,12 @@ async function loadLogoAsset(logoUrl?: string): Promise<LogoAsset | null> {
   return new Promise((resolve) => {
     const image = new Image();
     image.crossOrigin = "anonymous";
+    const resolvedLogoUrl = resolveLogoUrl(logoUrl);
+
+    if (!resolvedLogoUrl) {
+      resolve(null);
+      return;
+    }
 
     image.onload = () => {
       const canvas = document.createElement("canvas");
@@ -123,7 +166,7 @@ async function loadLogoAsset(logoUrl?: string): Promise<LogoAsset | null> {
     };
 
     image.onerror = () => resolve(null);
-    image.src = resolveLogoUrl(logoUrl);
+    image.src = resolvedLogoUrl;
   });
 }
 
@@ -186,35 +229,80 @@ function drawParagraphBox(
 function drawHeader(
   doc: jsPDF,
   logoAsset: LogoAsset | null,
-  secondaryColor: string
+  primaryColor: string,
+  secondaryColor: string,
+  brandName: string,
+  pdfSettings: RamsPdfSettings
 ) {
   const headerHeight = 40;
   const headerPaddingX = 6;
   const headerPaddingY = 6;
   const titleLines = ["Risk Assessment", "& Method Statement"];
   const titleX = MARGIN + CONTENT_WIDTH - headerPaddingX;
+  const isBanner = pdfSettings.headerStyle === "banner";
 
-  setFillColor(doc, secondaryColor);
-  doc.roundedRect(MARGIN, MARGIN, CONTENT_WIDTH, headerHeight, 4, 4, "F");
+  setFillColor(doc, isBanner ? secondaryColor : "#ffffff");
+  setDrawColor(doc, isBanner ? secondaryColor : "#d7e3e6");
+  doc.roundedRect(MARGIN, MARGIN, CONTENT_WIDTH, headerHeight, 4, 4, "FD");
+
+  if (!isBanner) {
+    setFillColor(doc, primaryColor);
+    doc.rect(MARGIN, MARGIN, CONTENT_WIDTH, 2.4, "F");
+  }
 
   if (logoAsset) {
-    const maxWidth = Math.min(88, CONTENT_WIDTH * 0.38);
-    const maxHeight = headerHeight - headerPaddingY * 2;
+    const maxWidth = Math.min(118, CONTENT_WIDTH * 0.38 * pdfSettings.logoScale);
+    const maxHeight = Math.min(
+      headerHeight - headerPaddingY * 2,
+      (headerHeight - headerPaddingY * 2) * pdfSettings.logoScale
+    );
+    const logoPadding = pdfSettings.logoBackground === "none" ? 0 : 3;
     const scale = Math.min(
-      maxWidth / logoAsset.width,
-      maxHeight / logoAsset.height
+      (maxWidth - logoPadding * 2) / logoAsset.width,
+      (maxHeight - logoPadding * 2) / logoAsset.height
     );
     const drawWidth = logoAsset.width * scale;
     const drawHeight = logoAsset.height * scale;
     const drawX = MARGIN + headerPaddingX;
     const drawY = MARGIN + (headerHeight - drawHeight) / 2;
 
-    doc.addImage(logoAsset.dataUrl, "PNG", drawX, drawY, drawWidth, drawHeight);
+    if (pdfSettings.logoBackground !== "none") {
+      setFillColor(
+        doc,
+        pdfSettings.logoBackground === "dark" ? secondaryColor : "#ffffff"
+      );
+      setDrawColor(doc, pdfSettings.logoBackground === "dark" ? secondaryColor : "#d7e3e6");
+      doc.roundedRect(
+        drawX,
+        MARGIN + headerPaddingY,
+        drawWidth + logoPadding * 2,
+        maxHeight,
+        2,
+        2,
+        "FD"
+      );
+    }
+
+    doc.addImage(
+      logoAsset.dataUrl,
+      "PNG",
+      drawX + logoPadding,
+      drawY,
+      drawWidth,
+      drawHeight
+    );
+  } else {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(15);
+    setTextColor(doc, isBanner ? "#ffffff" : secondaryColor);
+    doc.text(brandName.toUpperCase(), MARGIN + headerPaddingX, MARGIN + 22, {
+      maxWidth: Math.min(88, CONTENT_WIDTH * 0.38),
+    });
   }
 
   doc.setFont("helvetica", "bold");
   doc.setFontSize(13.5);
-  setTextColor(doc, "#ffffff");
+  setTextColor(doc, isBanner ? "#ffffff" : secondaryColor);
   const titleLineHeight = 5.6;
   const totalTitleHeight = titleLines.length * titleLineHeight;
   const titleY = MARGIN + (headerHeight - totalTitleHeight) / 2 + 4.2;
@@ -594,12 +682,61 @@ function drawSignOff(
   );
 }
 
+function addRamsFooters(
+  doc: jsPDF,
+  businessDetails: RamsBusinessDetails,
+  secondaryColor: string,
+  pdfSettings: RamsPdfSettings
+) {
+  if (!pdfSettings.showFooter) {
+    return;
+  }
+
+  const businessDetailsText = pdfSettings.showBusinessDetails
+    ? [
+        getRamsCompanyName(businessDetails),
+        normalizeOptionalText(businessDetails.businessPhone),
+        normalizeOptionalText(businessDetails.businessEmail),
+        normalizeOptionalText(businessDetails.website),
+      ]
+        .filter(Boolean)
+        .join(" | ")
+    : "";
+  const footerText = [pdfSettings.footerText, businessDetailsText]
+    .filter(Boolean)
+    .join(" | ");
+  const pageCount = doc.getNumberOfPages();
+  const footerY = PAGE_HEIGHT - 8;
+
+  for (let pageIndex = 1; pageIndex <= pageCount; pageIndex += 1) {
+    doc.setPage(pageIndex);
+    setDrawColor(doc, secondaryColor);
+    doc.line(MARGIN, footerY - 3, PAGE_WIDTH - MARGIN, footerY - 3);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    setTextColor(doc, "#49606d");
+
+    if (footerText) {
+      doc.text(footerText, MARGIN, footerY, {
+        maxWidth: CONTENT_WIDTH - 38,
+      });
+    }
+
+    doc.text(`Page ${pageIndex} of ${pageCount}`, PAGE_WIDTH - MARGIN, footerY, {
+      align: "right",
+    });
+  }
+}
+
 export async function generateCommercialRamsPDF(
   document: CommercialRamsDocument,
   businessDetails: RamsBusinessDetails
 ) {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
-  const logoAsset = await loadLogoAsset("/Logo-bg.jpg");
+  const pdfSettings = getRamsPdfSettings(businessDetails);
+  const logoAsset = pdfSettings.showLogo
+    ? await loadLogoAsset(businessDetails.logoUrl)
+    : null;
   const primaryColor = normalizeHexColor(businessDetails.primaryColor, "#d7ff00");
   const secondaryColor = normalizeHexColor(
     businessDetails.secondaryColor,
@@ -632,7 +769,10 @@ export async function generateCommercialRamsPDF(
   let y = drawHeader(
     doc,
     logoAsset,
-    secondaryColor
+    primaryColor,
+    secondaryColor,
+    getRamsCompanyName(businessDetails),
+    pdfSettings
   );
 
   y = drawInfoGrid(
@@ -691,6 +831,7 @@ export async function generateCommercialRamsPDF(
     borderColor
   );
   drawSignOff(doc, y, document, businessDetails, secondaryColor, borderColor);
+  addRamsFooters(doc, businessDetails, secondaryColor, pdfSettings);
 
   const safeReference = normalizeOptionalText(document.referenceNumber)?.replace(
     /[^a-z0-9-_]+/gi,

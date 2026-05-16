@@ -71,6 +71,13 @@ export type DocumentBrandDetails = {
     logoUrl?: string;
     primaryColor?: string;
     secondaryColor?: string;
+    pdfHeaderStyle?: "banner" | "letterhead";
+    pdfLogoBackground?: "none" | "dark" | "light";
+    pdfLogoScale?: number;
+    pdfShowLogo?: boolean;
+    pdfShowFooter?: boolean;
+    pdfShowBusinessDetails?: boolean;
+    pdfFooterText?: string;
 };
 
 type BrandPalette = {
@@ -96,6 +103,16 @@ type LogoAsset = {
     format: "PNG" | "JPEG";
 };
 
+type DocumentPdfSettings = {
+    headerStyle: "banner" | "letterhead";
+    logoBackground: "none" | "dark" | "light";
+    logoScale: number;
+    showLogo: boolean;
+    showFooter: boolean;
+    showBusinessDetails: boolean;
+    footerText: string;
+};
+
 type SummaryRow = {
     label: string;
     value: string;
@@ -114,7 +131,6 @@ const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
 const BODY_BOTTOM = PAGE_HEIGHT - 24;
 const FOOTER_Y = PAGE_HEIGHT - 12;
 const GBP_SYMBOL = String.fromCharCode(163);
-const QUOTE_AND_INVOICE_LOGO_URL = "/Logo-bg.jpg";
 
 function formatMoney(value: number) {
     return `${GBP_SYMBOL}${value.toFixed(2)}`;
@@ -253,6 +269,29 @@ function getBrandPalette(details: DocumentBrandDetails): BrandPalette {
     };
 }
 
+function getDocumentPdfSettings(details: DocumentBrandDetails): DocumentPdfSettings {
+    const rawLogoScale =
+        typeof details.pdfLogoScale === "number"
+            ? details.pdfLogoScale
+            : Number(details.pdfLogoScale);
+    const logoScale = Number.isFinite(rawLogoScale)
+        ? Math.min(160, Math.max(60, rawLogoScale)) / 100
+        : 1;
+
+    return {
+        headerStyle: details.pdfHeaderStyle === "letterhead" ? "letterhead" : "banner",
+        logoBackground:
+            details.pdfLogoBackground === "dark" || details.pdfLogoBackground === "light"
+                ? details.pdfLogoBackground
+                : "none",
+        logoScale,
+        showLogo: details.pdfShowLogo !== false,
+        showFooter: details.pdfShowFooter !== false,
+        showBusinessDetails: details.pdfShowBusinessDetails !== false,
+        footerText: normalizeOptionalText(details.pdfFooterText) ?? "",
+    };
+}
+
 function getCompanyName(details: DocumentBrandDetails) {
     return (
         normalizeOptionalText(details.tradingName) ||
@@ -294,7 +333,11 @@ function buildBusinessCardLines(details: DocumentBrandDetails) {
 }
 
 function resolveLogoUrl(logoUrl?: string) {
-    const candidate = logoUrl?.trim() || QUOTE_AND_INVOICE_LOGO_URL;
+    const candidate = logoUrl?.trim();
+
+    if (!candidate) {
+        return undefined;
+    }
 
     if (/^(https?:|data:)/i.test(candidate)) {
         return candidate;
@@ -308,20 +351,18 @@ function resolveLogoUrl(logoUrl?: string) {
 }
 
 function isVisibleLogoPixel(
-    red: number,
-    green: number,
-    blue: number,
     alpha: number
 ) {
-    if (alpha < 20) {
-        return false;
-    }
-
-    return !(red > 245 && green > 245 && blue > 245);
+    return alpha >= 20;
 }
 
 function shouldPreserveLogoArtwork(logoUrl?: string) {
-    const candidate = resolveLogoUrl(logoUrl).toLowerCase();
+    const candidate = resolveLogoUrl(logoUrl)?.toLowerCase();
+
+    if (!candidate) {
+        return false;
+    }
+
     return /\.jpe?g(?:$|[?#])/i.test(candidate);
 }
 
@@ -335,6 +376,11 @@ async function loadLogoAsset(logoUrl?: string): Promise<LogoAsset | null> {
         image.crossOrigin = "anonymous";
         const resolvedLogoUrl = resolveLogoUrl(logoUrl);
         const preserveArtwork = shouldPreserveLogoArtwork(logoUrl);
+
+        if (!resolvedLogoUrl) {
+            resolve(null);
+            return;
+        }
 
         image.onload = () => {
             const canvas = document.createElement("canvas");
@@ -371,12 +417,9 @@ async function loadLogoAsset(logoUrl?: string): Promise<LogoAsset | null> {
             for (let y = 0; y < height; y += 1) {
                 for (let x = 0; x < width; x += 1) {
                     const index = (y * width + x) * 4;
-                    const red = pixels[index];
-                    const green = pixels[index + 1];
-                    const blue = pixels[index + 2];
                     const alpha = pixels[index + 3];
 
-                    if (!isVisibleLogoPixel(red, green, blue, alpha)) {
+                    if (!isVisibleLogoPixel(alpha)) {
                         continue;
                     }
 
@@ -422,6 +465,12 @@ async function loadLogoAsset(logoUrl?: string): Promise<LogoAsset | null> {
 
             const croppedImageData = croppedContext.getImageData(0, 0, cropWidth, cropHeight);
             const croppedPixels = croppedImageData.data;
+            const hasTransparentPixels = Array.from(
+                { length: croppedPixels.length / 4 },
+                (_, pixelIndex) => croppedPixels[pixelIndex * 4 + 3]
+            ).some((alpha) => alpha < 245);
+            const shouldRemoveWhiteBackground = !hasTransparentPixels;
+            let remainingVisiblePixels = 0;
 
             for (let index = 0; index < croppedPixels.length; index += 4) {
                 const red = croppedPixels[index];
@@ -429,12 +478,22 @@ async function loadLogoAsset(logoUrl?: string): Promise<LogoAsset | null> {
                 const blue = croppedPixels[index + 2];
                 const alpha = croppedPixels[index + 3];
 
-                if (alpha < 20 || (red > 245 && green > 245 && blue > 245)) {
+                if (
+                    alpha < 20 ||
+                    (shouldRemoveWhiteBackground &&
+                        red > 245 &&
+                        green > 245 &&
+                        blue > 245)
+                ) {
                     croppedPixels[index + 3] = 0;
+                } else {
+                    remainingVisiblePixels += 1;
                 }
             }
 
-            croppedContext.putImageData(croppedImageData, 0, 0);
+            if (remainingVisiblePixels > 0) {
+                croppedContext.putImageData(croppedImageData, 0, 0);
+            }
 
             resolve({
                 dataUrl: croppedCanvas.toDataURL("image/png"),
@@ -490,6 +549,45 @@ function fitInside(
     };
 }
 
+function drawLogoAsset(
+    doc: jsPDF,
+    options: {
+        logoAsset: LogoAsset;
+        x: number;
+        y: number;
+        maxWidth: number;
+        maxHeight: number;
+        palette: BrandPalette;
+        background: DocumentPdfSettings["logoBackground"];
+    }
+) {
+    const { logoAsset, x, y, maxWidth, maxHeight, palette, background } = options;
+    const padding = background === "none" ? 0 : 3;
+    const dimensions = fitInside(
+        Math.max(4, maxWidth - padding * 2),
+        Math.max(4, maxHeight - padding * 2),
+        logoAsset.width,
+        logoAsset.height
+    );
+    const imageX = x + padding;
+    const imageY = y + (maxHeight - dimensions.height) / 2;
+
+    if (background !== "none") {
+        setFillColor(doc, background === "dark" ? palette.secondary : palette.white);
+        setDrawColor(doc, background === "dark" ? palette.secondary : palette.border);
+        doc.roundedRect(x, y, dimensions.width + padding * 2, maxHeight, 2, 2, "FD");
+    }
+
+    doc.addImage(
+        logoAsset.dataUrl,
+        logoAsset.format,
+        imageX,
+        imageY,
+        dimensions.width,
+        dimensions.height
+    );
+}
+
 function drawDocumentHeader(
     doc: jsPDF,
     options: {
@@ -497,6 +595,9 @@ function drawDocumentHeader(
         documentNumber: string;
         palette: BrandPalette;
         logoAsset: LogoAsset | null;
+        brandName: string;
+        logoBackground: DocumentPdfSettings["logoBackground"];
+        logoScale: number;
         subtitleLines?: string[];
         boxedTitle?: boolean;
         showDocumentNumber?: boolean;
@@ -508,6 +609,9 @@ function drawDocumentHeader(
         documentNumber,
         palette,
         logoAsset,
+        brandName,
+        logoBackground,
+        logoScale,
         subtitleLines = [],
         boxedTitle = true,
         showDocumentNumber = true,
@@ -521,22 +625,32 @@ function drawDocumentHeader(
     let metaStartY = 30;
 
     if (logoAsset) {
-        const dimensions = fitInside(leftColumnWidth, 22, logoAsset.width, logoAsset.height);
         const imageY = 10;
-        doc.addImage(
-            logoAsset.dataUrl,
-            logoAsset.format,
-            MARGIN,
-            imageY,
-            dimensions.width,
-            dimensions.height
+        const maxLogoHeight = Math.min(32, 22 * logoScale);
+        const maxLogoWidth = Math.min(leftColumnWidth, leftColumnWidth * logoScale);
+        const dimensions = fitInside(
+            maxLogoWidth,
+            maxLogoHeight,
+            logoAsset.width,
+            logoAsset.height
         );
+        drawLogoAsset(doc, {
+            logoAsset,
+            x: MARGIN,
+            y: imageY,
+            maxWidth: maxLogoWidth,
+            maxHeight: maxLogoHeight,
+            palette,
+            background: logoBackground,
+        });
         metaStartY = imageY + dimensions.height + 4;
     } else {
         setTextColor(doc, palette.secondary);
         doc.setFont("helvetica", "bold");
         doc.setFontSize(18);
-        doc.text("YOUR BUSINESS", MARGIN, 18);
+        doc.text(brandName.toUpperCase(), MARGIN, 18, {
+            maxWidth: leftColumnWidth,
+        });
         metaStartY = 23;
     }
 
@@ -576,21 +690,24 @@ function drawDocumentHeader(
         doc.roundedRect(MARGIN, bannerY, CONTENT_WIDTH, bannerHeight, 3, 3, "F");
 
         if (logoAsset) {
-            const dimensions = fitInside(116, 19, logoAsset.width, logoAsset.height);
-            const imageY = bannerY + (bannerHeight - dimensions.height) / 2;
-            doc.addImage(
-                logoAsset.dataUrl,
-                logoAsset.format,
-                MARGIN + bannerPadding,
-                imageY,
-                dimensions.width,
-                dimensions.height
-            );
+            const maxLogoHeight = Math.min(28, 19 * logoScale);
+            const maxLogoWidth = Math.min(130, 116 * logoScale);
+            drawLogoAsset(doc, {
+                logoAsset,
+                x: MARGIN + bannerPadding,
+                y: bannerY + (bannerHeight - maxLogoHeight) / 2,
+                maxWidth: maxLogoWidth,
+                maxHeight: maxLogoHeight,
+                palette,
+                background: logoBackground,
+            });
         } else {
             setTextColor(doc, "#ffffff");
             doc.setFont("helvetica", "bold");
             doc.setFontSize(18);
-            doc.text("YOUR BUSINESS", MARGIN + bannerPadding, bannerY + 18.5);
+            doc.text(brandName.toUpperCase(), MARGIN + bannerPadding, bannerY + 18.5, {
+                maxWidth: 116,
+            });
         }
 
         setTextColor(doc, titleColor || "#ffffff");
@@ -893,7 +1010,7 @@ function drawSimpleTotalBox(
     setFillColor(doc, palette.secondary);
     doc.roundedRect(x, y, width, height, 2.5, 2.5, "F");
 
-    setTextColor(doc, "#ffffff");
+    setTextColor(doc, palette.secondaryText);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
     doc.text(label, x + 5, y + 10);
@@ -915,9 +1032,19 @@ function drawSummaryCard(
         rows: SummaryRow[];
         palette: BrandPalette;
         accentColor?: string | null;
+        emphasizedBackground?: string | null;
     }
 ) {
-    const { x, y, width, title, rows, palette, accentColor = null } = options;
+    const {
+        x,
+        y,
+        width,
+        title,
+        rows,
+        palette,
+        accentColor = null,
+        emphasizedBackground = null,
+    } = options;
     const height = 15 + rows.length * 8.5 + 6;
 
     drawCardShell(doc, x, y, width, height, palette, accentColor);
@@ -929,12 +1056,29 @@ function drawSummaryCard(
     let currentY = y + 17;
 
     rows.forEach((row, index) => {
-        setTextColor(doc, row.emphasized ? palette.secondary : palette.muted);
+        if (row.emphasized && emphasizedBackground) {
+            setFillColor(doc, emphasizedBackground);
+            doc.roundedRect(x + 3, currentY - 5.5, width - 6, 7.8, 2, 2, "F");
+        }
+
+        setTextColor(
+            doc,
+            row.emphasized && emphasizedBackground
+                ? getContrastingTextColor(emphasizedBackground)
+                : row.emphasized
+                  ? palette.secondary
+                  : palette.muted
+        );
         doc.setFont("helvetica", row.emphasized ? "bold" : "normal");
         doc.setFontSize(8);
         doc.text(row.label, x + 5, currentY);
 
-        setTextColor(doc, palette.ink);
+        setTextColor(
+            doc,
+            row.emphasized && emphasizedBackground
+                ? getContrastingTextColor(emphasizedBackground)
+                : palette.ink
+        );
         doc.setFont("helvetica", "bold");
         doc.setFontSize(row.emphasized ? 10.5 : 9);
         doc.text(row.value, x + width - 5, currentY, { align: "right" });
@@ -1024,12 +1168,19 @@ function drawBankTransferCard(
 function addFooters(
     doc: jsPDF,
     businessDetails: DocumentBrandDetails,
-    palette: BrandPalette
+    palette: BrandPalette,
+    pdfSettings: DocumentPdfSettings
 ) {
-    const footerText = [
-        getCompanyName(businessDetails),
-        buildBusinessContactLine(businessDetails),
-    ]
+    if (!pdfSettings.showFooter) {
+        return;
+    }
+
+    const businessDetailsText = pdfSettings.showBusinessDetails
+        ? [getCompanyName(businessDetails), buildBusinessContactLine(businessDetails)]
+              .filter(Boolean)
+              .join(" | ")
+        : "";
+    const footerText = [pdfSettings.footerText, businessDetailsText]
         .filter(Boolean)
         .join(" | ");
     const pageCount = doc.getNumberOfPages();
@@ -1042,7 +1193,11 @@ function addFooters(
         setTextColor(doc, palette.muted);
         doc.setFont("helvetica", "normal");
         doc.setFontSize(8);
-        doc.text(footerText, MARGIN, FOOTER_Y);
+        if (footerText) {
+            doc.text(footerText, MARGIN, FOOTER_Y, {
+                maxWidth: CONTENT_WIDTH - 38,
+            });
+        }
         doc.text(`Page ${pageIndex} of ${pageCount}`, PAGE_WIDTH - MARGIN, FOOTER_Y, {
             align: "right",
         });
@@ -1418,7 +1573,10 @@ async function buildQuotePdfDocument(
 ) {
     const doc = new jsPDF({ unit: "mm", format: "a4" });
     const palette = getBrandPalette(businessDetails);
-    const logoAsset = await loadLogoAsset(QUOTE_AND_INVOICE_LOGO_URL);
+    const pdfSettings = getDocumentPdfSettings(businessDetails);
+    const logoAsset = pdfSettings.showLogo
+        ? await loadLogoAsset(businessDetails.logoUrl)
+        : null;
     const customerLines = buildCustomerLines(quote, true);
     const siteLines = buildSiteLines(quote);
     const businessCardLines = [
@@ -1431,8 +1589,11 @@ async function buildQuotePdfDocument(
         documentNumber: quote.quoteNumber,
         palette,
         logoAsset,
+        brandName: getCompanyName(businessDetails),
+        logoBackground: pdfSettings.logoBackground,
+        logoScale: pdfSettings.logoScale,
         subtitleLines: [],
-        boxedTitle: false,
+        boxedTitle: pdfSettings.headerStyle === "letterhead",
         showDocumentNumber: false,
         titleColor: "#ffffff",
     });
@@ -1565,7 +1726,7 @@ async function buildQuotePdfDocument(
         palette,
     });
 
-    addFooters(doc, businessDetails, palette);
+    addFooters(doc, businessDetails, palette, pdfSettings);
     return doc;
 }
 
@@ -1591,7 +1752,10 @@ async function buildInvoicePdfDocument(
 ) {
     const doc = new jsPDF({ unit: "mm", format: "a4" });
     const palette = getBrandPalette(businessDetails);
-    const logoAsset = await loadLogoAsset(QUOTE_AND_INVOICE_LOGO_URL);
+    const pdfSettings = getDocumentPdfSettings(businessDetails);
+    const logoAsset = pdfSettings.showLogo
+        ? await loadLogoAsset(businessDetails.logoUrl)
+        : null;
     const customerLines = buildCustomerLines(invoice, true);
     const siteLines = buildSiteLines(invoice);
     const businessCardLines = [
@@ -1606,8 +1770,11 @@ async function buildInvoicePdfDocument(
         documentNumber: invoice.invoiceNumber,
         palette,
         logoAsset,
+        brandName: getCompanyName(businessDetails),
+        logoBackground: pdfSettings.logoBackground,
+        logoScale: pdfSettings.logoScale,
         subtitleLines: [],
-        boxedTitle: false,
+        boxedTitle: pdfSettings.headerStyle === "letterhead",
         showDocumentNumber: false,
         titleColor: "#ffffff",
     });
@@ -1768,10 +1935,11 @@ async function buildInvoicePdfDocument(
             { label: "Total Due", value: formatMoney(Number(invoice.total || 0)), emphasized: true },
         ],
         palette,
-        accentColor: null,
+        accentColor: palette.secondary,
+        emphasizedBackground: palette.secondary,
     });
 
-    addFooters(doc, businessDetails, palette);
+    addFooters(doc, businessDetails, palette, pdfSettings);
     return doc;
 }
 

@@ -66,6 +66,12 @@ export const CUSTOMER_FEATURES = [
     description: "Payment tracking and monthly payment controls.",
   },
   {
+    key: "expenses",
+    label: "Expenses",
+    section: "Documents",
+    description: "Expense tracking, suppliers, products, and quote item costs.",
+  },
+  {
     key: "quotes",
     label: "Quotes",
     section: "Documents",

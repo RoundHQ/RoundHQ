@@ -29,6 +29,9 @@ export const dynamic = "force-dynamic";
 
 type SupportSearchParams = {
   ticket?: string;
+  new?: string;
+  subject?: string;
+  body?: string;
   created?: string;
   sent?: string;
   error?: string;
@@ -133,11 +136,16 @@ export default async function SupportPage({
       ? organizationRows[0].name.trim()
       : "RoundHQ Workspace";
   const params = (await searchParams) ?? {};
+  const isNewTicketRequested = params.new === "1";
+  const requestedSubject =
+    typeof params.subject === "string" ? params.subject.slice(0, 160) : "";
+  const requestedBody =
+    typeof params.body === "string" ? params.body.slice(0, 1200) : "";
   const [support, supportSettings] = await Promise.all([
     getCustomerSupportData({
       organizationId,
       workspaceName,
-      selectedTicketId: params.ticket,
+      selectedTicketId: isNewTicketRequested ? undefined : params.ticket,
     }),
     getSupportDeskSettingsData(),
   ]);
@@ -258,7 +266,10 @@ export default async function SupportPage({
               </div>
             ) : null}
 
-            <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-[0_18px_46px_rgba(15,23,42,0.08)]">
+            <section
+              id="new-ticket"
+              className="rounded-lg border border-slate-200 bg-white p-5 shadow-[0_18px_46px_rgba(15,23,42,0.08)]"
+            >
               <div className="flex items-center gap-2">
                 <LifeBuoy aria-hidden="true" className="size-5 text-[#168b43]" />
                 <h2 className="text-lg font-extrabold tracking-normal">
@@ -278,6 +289,8 @@ export default async function SupportPage({
                   <input
                     name="subject"
                     required
+                    defaultValue={requestedSubject}
+                    autoFocus={isNewTicketRequested}
                     className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
                     placeholder="What can we help with?"
                   />
@@ -326,6 +339,7 @@ export default async function SupportPage({
                     name="body"
                     required
                     rows={6}
+                    defaultValue={requestedBody}
                     className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
                     placeholder="Add the details, steps, or question here."
                   />

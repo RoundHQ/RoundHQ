@@ -318,6 +318,7 @@ export default function StaffPage({
 
           <button
             type="button"
+            data-tour="add-staff-button"
             onClick={startCreate}
             disabled={!currentUserIsAdmin || !staffSystemReady}
             className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
@@ -705,7 +706,10 @@ export default function StaffPage({
         </section>
       </div>
 
-      <section className="rounded-3xl border bg-white p-5 shadow-sm">
+      <section
+        data-tour="staff-permissions"
+        className="rounded-3xl border bg-white p-5 shadow-sm"
+      >
         <div>
           <h3 className="text-lg font-black text-slate-900">Role Access</h3>
           <p className="mt-1 text-sm text-slate-500">

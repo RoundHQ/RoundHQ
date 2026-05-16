@@ -72,10 +72,12 @@ set day = case
   when lower(day) like 'wed%' then 'Wednesday'
   when lower(day) like 'thu%' then 'Thursday'
   when lower(day) like 'fri%' then 'Friday'
+  when lower(day) like 'sat%' then 'Saturday'
+  when lower(day) like 'sun%' then 'Sunday'
   else 'Monday'
 end
 where day is null
-   or day not in ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday');
+   or day not in ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday');
 
 update public.customers
 set customer_type = case
@@ -168,7 +170,7 @@ alter table if exists public.customers
 alter table if exists public.customers
   add constraint customers_day_check
   check (
-    day is null or day in ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday')
+    day is null or day in ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')
   );
 
 alter table if exists public.customers

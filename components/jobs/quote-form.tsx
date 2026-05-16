@@ -1,9 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, Plus, ReceiptText, Trash2 } from "lucide-react";
+import DocumentCustomerCreateDialog from "./document-customer-create-dialog";
 import DocumentCustomerPicker from "./document-customer-picker";
-import { QUOTE_STATUS_OPTIONS, type Customer, type QuoteStatus } from "./types";
+import {
+    QUOTE_STATUS_OPTIONS,
+    type Customer,
+    type QuoteStatus,
+    type RotationWeeks,
+} from "./types";
+import type { EditFormCollaboration } from "./edit-collaboration";
 
 type CustomerType = "Residential" | "Commercial";
 
@@ -70,8 +77,12 @@ type Props = DocumentCustomerFields & {
     initialItems?: LineItem[];
     savedServices?: QuoteService[];
     pressureWashRatePerSquareMetre?: number;
+    defaultRotationWeeks?: RotationWeeks;
     allowCommercialTools?: boolean;
+    editCollaboration?: EditFormCollaboration<Quote>;
     onSave: (quote: Quote) => void | boolean | Promise<void | boolean>;
+    onCreateCustomer?: (customer: Customer) => Promise<Customer | null | undefined>;
+    onConvertToInvoice?: (quoteId: string) => void | Promise<void>;
     onBack: () => void;
 };
 
@@ -237,8 +248,12 @@ export default function QuoteForm({
     initialItems,
     savedServices,
     pressureWashRatePerSquareMetre,
+    defaultRotationWeeks,
     allowCommercialTools = true,
+    editCollaboration,
     onSave,
+    onCreateCustomer,
+    onConvertToInvoice,
     onBack,
 }: Props) {
     const isEditingQuote = Boolean(existingQuote);
@@ -259,6 +274,9 @@ export default function QuoteForm({
     const [quoteCustomerName, setQuoteCustomerName] = useState(
         existingQuote?.customerName ?? customerName ?? ""
     );
+    const [isAddingCustomer, setIsAddingCustomer] = useState(false);
+    const [pendingCustomerName, setPendingCustomerName] = useState("");
+    const [createdCustomer, setCreatedCustomer] = useState<Customer | null>(null);
     const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(
         initialSelectedCustomerId
     );
@@ -271,6 +289,7 @@ export default function QuoteForm({
         existingQuote?.status ?? "Draft"
     );
     const [notes, setNotes] = useState(existingQuote?.notes ?? initialNotes ?? "");
+    const [isCreatingInvoice, setIsCreatingInvoice] = useState(false);
     const [includesPressureWash, setIncludesPressureWash] = useState(false);
     const [pressureWashAreas, setPressureWashAreas] = useState<PressureWashArea[]>(() =>
         Array.from(
@@ -292,6 +311,11 @@ export default function QuoteForm({
                   },
               ]
     );
+    const draftQuoteIdRef = useRef(existingQuote?.id ?? crypto.randomUUID());
+    const initialDraftRef = useRef("");
+    const handledSaveRequestRef = useRef(0);
+    const handledDiscardRequestRef = useRef(0);
+    const editCollaborationRef = useRef(editCollaboration);
 
     const reusableServices = useMemo(() => {
         const seenServices = new Set<string>();
@@ -327,8 +351,9 @@ export default function QuoteForm({
         () =>
             selectedCustomerId == null
                 ? null
-                : customers.find((customer) => customer.id === selectedCustomerId) ?? null,
-        [customers, selectedCustomerId]
+                : customers.find((customer) => customer.id === selectedCustomerId) ??
+                  (createdCustomer?.id === selectedCustomerId ? createdCustomer : null),
+        [createdCustomer, customers, selectedCustomerId]
     );
     const {
         customerType: activeCustomerType,
@@ -519,6 +544,94 @@ export default function QuoteForm({
         );
     }, [items]);
 
+    const buildQuoteDraft = useCallback((): Quote => {
+        const cleanedItems = items.filter(
+            (item) =>
+                item.description.trim() !== "" ||
+                Number(item.quantity) > 0 ||
+                Number(item.price) > 0
+        );
+
+        return {
+            id: draftQuoteIdRef.current,
+            quoteNumber: existingQuote?.quoteNumber ?? "",
+            customerId: selectedCustomerId,
+            customerName: quoteCustomerName.trim(),
+            customerType: activeCustomerType,
+            customerAddress: normalizeOptionalText(activeCustomerAddress),
+            customerTown: normalizeOptionalText(activeCustomerTown),
+            customerPostcode: normalizeOptionalText(activeCustomerPostcode),
+            siteName:
+                showCommercialTools
+                    ? normalizeOptionalText(activeSiteName)
+                    : undefined,
+            siteAddress:
+                showCommercialTools
+                    ? normalizeOptionalText(activeSiteAddress)
+                    : undefined,
+            siteTown:
+                showCommercialTools
+                    ? normalizeOptionalText(activeSiteTown)
+                    : undefined,
+            sitePostcode:
+                showCommercialTools
+                    ? normalizeOptionalText(activeSitePostcode)
+                    : undefined,
+            date: quoteDate,
+            status: quoteStatus,
+            items: cleanedItems,
+            notes: notes.trim() || undefined,
+            total,
+        };
+    }, [
+        activeCustomerAddress,
+        activeCustomerPostcode,
+        activeCustomerTown,
+        activeCustomerType,
+        activeSiteAddress,
+        activeSiteName,
+        activeSitePostcode,
+        activeSiteTown,
+        existingQuote?.id,
+        existingQuote?.quoteNumber,
+        items,
+        notes,
+        quoteCustomerName,
+        quoteDate,
+        quoteStatus,
+        selectedCustomerId,
+        showCommercialTools,
+        total,
+    ]);
+
+    useEffect(() => {
+        editCollaborationRef.current = editCollaboration;
+    }, [editCollaboration]);
+
+    useEffect(() => {
+        if (!editCollaborationRef.current || initialDraftRef.current) {
+            return;
+        }
+
+        initialDraftRef.current = JSON.stringify(buildQuoteDraft());
+    }, [buildQuoteDraft]);
+
+    useEffect(() => {
+        const collaboration = editCollaborationRef.current;
+
+        if (!collaboration) {
+            return;
+        }
+
+        const draft = buildQuoteDraft();
+        const draftJson = JSON.stringify(draft);
+        const isDirty = initialDraftRef.current
+            ? draftJson !== initialDraftRef.current
+            : false;
+
+        collaboration.onDraftChange(draft, isDirty);
+    }, [buildQuoteDraft]);
+
     const customerDetails = useMemo(() => {
         const address = [
             showCommercialTools ? normalizeOptionalText(activeSiteName) : undefined,
@@ -563,53 +676,65 @@ export default function QuoteForm({
         showCommercialTools,
     ]);
 
-    async function handleSave() {
-        const cleanedItems = items.filter(
-            (item) =>
-                item.description.trim() !== "" ||
-                Number(item.quantity) > 0 ||
-                Number(item.price) > 0
-        );
-
+    const handleSave = useCallback(async () => {
+        const draft = buildQuoteDraft();
         if (!quoteCustomerName.trim()) {
             return;
         }
 
-        if (cleanedItems.length === 0) {
+        if (draft.items.length === 0) {
             return;
         }
 
-        await onSave({
-            id: existingQuote?.id ?? crypto.randomUUID(),
-            quoteNumber: existingQuote?.quoteNumber ?? "",
-            customerId: selectedCustomerId,
-            customerName: quoteCustomerName.trim(),
-            customerType: activeCustomerType,
-            customerAddress: normalizeOptionalText(activeCustomerAddress),
-            customerTown: normalizeOptionalText(activeCustomerTown),
-            customerPostcode: normalizeOptionalText(activeCustomerPostcode),
-            siteName:
-                showCommercialTools
-                    ? normalizeOptionalText(activeSiteName)
-                    : undefined,
-            siteAddress:
-                showCommercialTools
-                    ? normalizeOptionalText(activeSiteAddress)
-                    : undefined,
-            siteTown:
-                showCommercialTools
-                    ? normalizeOptionalText(activeSiteTown)
-                    : undefined,
-            sitePostcode:
-                showCommercialTools
-                    ? normalizeOptionalText(activeSitePostcode)
-                    : undefined,
-            date: quoteDate,
-            status: quoteStatus,
-            items: cleanedItems,
-            notes: notes.trim() || undefined,
-            total,
-        });
+        const saveResult = await onSave(draft);
+
+        if (saveResult !== false) {
+            editCollaboration?.onSaveComplete();
+        }
+    }, [buildQuoteDraft, editCollaboration, onSave, quoteCustomerName]);
+
+    useEffect(() => {
+        if (
+            !editCollaboration?.saveRequestId ||
+            handledSaveRequestRef.current === editCollaboration.saveRequestId
+        ) {
+            return;
+        }
+
+        handledSaveRequestRef.current = editCollaboration.saveRequestId;
+        void handleSave();
+    }, [editCollaboration?.saveRequestId, handleSave]);
+
+    useEffect(() => {
+        if (
+            !editCollaboration?.discardRequestId ||
+            handledDiscardRequestRef.current === editCollaboration.discardRequestId
+        ) {
+            return;
+        }
+
+        handledDiscardRequestRef.current = editCollaboration.discardRequestId;
+        editCollaboration.onDiscardComplete();
+        onBack();
+    }, [editCollaboration, onBack]);
+
+    const handleBack = useCallback(() => {
+        editCollaborationRef.current?.onDiscardComplete();
+        onBack();
+    }, [onBack]);
+
+    async function handleCreateInvoice() {
+        if (!existingQuote?.id || !onConvertToInvoice || isCreatingInvoice) {
+            return;
+        }
+
+        setIsCreatingInvoice(true);
+
+        try {
+            await onConvertToInvoice(existingQuote.id);
+        } finally {
+            setIsCreatingInvoice(false);
+        }
     }
 
     function addPressureWashAreaToQuote(areaId: string) {
@@ -662,13 +787,40 @@ export default function QuoteForm({
         setDocumentCustomerFields(getDocumentCustomerFieldsFromCustomer(customer));
     }
 
+    function beginCreateCustomer(name: string) {
+        if (!onCreateCustomer) {
+            return;
+        }
+
+        setPendingCustomerName(name);
+        setIsAddingCustomer(true);
+    }
+
+    function handleCustomerCreated(customer: Customer) {
+        setCreatedCustomer(customer);
+        handleCustomerSelect(customer);
+        setPendingCustomerName("");
+        setIsAddingCustomer(false);
+    }
+
     return (
         <div className="space-y-6">
+            {isAddingCustomer && onCreateCustomer ? (
+                <DocumentCustomerCreateDialog
+                    customerName={pendingCustomerName || quoteCustomerName}
+                    defaultRotationWeeks={defaultRotationWeeks}
+                    allowCommercialTools={allowCommercialTools}
+                    onCreateCustomer={onCreateCustomer}
+                    onCreated={handleCustomerCreated}
+                    onCancel={() => setIsAddingCustomer(false)}
+                />
+            ) : null}
+
             <section className="rounded-[24px] bg-gradient-to-r from-[#153c3f] to-[#244d51] px-6 py-5 text-white shadow-sm">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                     <div>
                         <button
-                            onClick={onBack}
+                            onClick={handleBack}
                             className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-sm font-semibold text-white transition hover:bg-white/15"
                         >
                             <ArrowLeft size={16} />
@@ -684,6 +836,18 @@ export default function QuoteForm({
                     </div>
 
                     <div className="flex flex-wrap gap-2">
+                        {existingQuote?.id && onConvertToInvoice ? (
+                            <button
+                                type="button"
+                                onClick={handleCreateInvoice}
+                                disabled={isCreatingInvoice}
+                                className="inline-flex items-center gap-2 rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                <ReceiptText size={16} />
+                                {isCreatingInvoice ? "Creating..." : "Create Invoice"}
+                            </button>
+                        ) : null}
+
                         {existingQuote?.quoteNumber ? (
                             <div className="rounded-full bg-white/10 px-4 py-2 text-sm font-semibold text-white">
                                 {existingQuote.quoteNumber}
@@ -717,6 +881,7 @@ export default function QuoteForm({
                             selectedCustomerId={selectedCustomerId}
                             onChange={handleCustomerNameChange}
                             onSelect={handleCustomerSelect}
+                            onCreateCustomer={onCreateCustomer ? beginCreateCustomer : undefined}
                             placeholder="Customer name"
                         />
                     </div>
@@ -1175,13 +1340,27 @@ export default function QuoteForm({
 
                     <div className="flex flex-wrap gap-2">
                         <button
-                            onClick={onBack}
+                            type="button"
+                            onClick={handleBack}
                             className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                         >
                             Cancel
                         </button>
 
+                        {existingQuote?.id && onConvertToInvoice ? (
+                            <button
+                                type="button"
+                                onClick={handleCreateInvoice}
+                                disabled={isCreatingInvoice}
+                                className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                <ReceiptText size={16} />
+                                {isCreatingInvoice ? "Creating..." : "Create Invoice"}
+                            </button>
+                        ) : null}
+
                         <button
+                            type="button"
                             onClick={handleSave}
                             className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
                         >

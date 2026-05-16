@@ -16,6 +16,13 @@ export type RamsBusinessDetails = {
   logoUrl?: string;
   primaryColor?: string;
   secondaryColor?: string;
+  pdfHeaderStyle?: "banner" | "letterhead";
+  pdfLogoBackground?: "none" | "dark" | "light";
+  pdfLogoScale?: number;
+  pdfShowLogo?: boolean;
+  pdfShowFooter?: boolean;
+  pdfShowBusinessDetails?: boolean;
+  pdfFooterText?: string;
 };
 
 type WorkTypePreset = {

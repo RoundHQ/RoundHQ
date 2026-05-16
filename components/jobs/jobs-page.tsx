@@ -366,7 +366,10 @@ export default function JobsPage({
                         <label className="mb-2 block text-sm font-medium text-slate-700">
                             Search Jobs
                         </label>
-                        <div className="flex items-center gap-3 rounded-xl border border-slate-200 px-3 py-2.5">
+                        <div
+                            data-tour="jobs-search"
+                            className="flex items-center gap-3 rounded-xl border border-slate-200 px-3 py-2.5"
+                        >
                             <Search size={16} className="text-slate-400" />
                             <input
                                 value={search}

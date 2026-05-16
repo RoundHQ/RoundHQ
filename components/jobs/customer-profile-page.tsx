@@ -15,6 +15,7 @@ import {
   DEFAULT_ROTATION_WEEKS,
   getEffectiveRotationWeeks,
   getRotationDays,
+  getRotationCycleLabel,
   getRotationLabel,
   normalizeRotationWeeks,
 } from "./rotation";
@@ -31,9 +32,11 @@ import type {
 import CustomerForm from "./customer-form";
 import DocumentSendDialog from "./document-send-dialog";
 import { sendInvoiceDocument } from "./document-delivery";
+import type { EditFormCollaboration } from "./edit-collaboration";
 import {
   ArrowLeft,
   Building2,
+  CalendarDays,
   ExternalLink,
   FileText,
   History as HistoryIcon,
@@ -67,6 +70,13 @@ type BusinessDetails = {
   logoUrl?: string;
   primaryColor?: string;
   secondaryColor?: string;
+  pdfHeaderStyle?: "banner" | "letterhead";
+  pdfLogoBackground?: "none" | "dark" | "light";
+  pdfLogoScale?: number;
+  pdfShowLogo?: boolean;
+  pdfShowFooter?: boolean;
+  pdfShowBusinessDetails?: boolean;
+  pdfFooterText?: string;
   emailFromName?: string;
   emailFromAddress?: string;
   emailReplyTo?: string;
@@ -105,6 +115,9 @@ type Props = {
   onOpenPayments: () => void;
   onTogglePaid: (visitId: number | string) => void;
   onUpdateCustomer: (customer: Customer) => Promise<void>;
+  getCustomerEditCollaboration?: (
+    customer: Customer
+  ) => EditFormCollaboration<Customer> | undefined;
   onCreateQuote: (customerId: number) => void;
   onCreateInvoice: (customerId: number) => void;
   onOpenInvoice: (invoiceId: string) => void;
@@ -263,6 +276,7 @@ export default function CustomerProfilePage({
   onOpenPayments,
   onTogglePaid,
   onUpdateCustomer,
+                                              getCustomerEditCollaboration,
                                               onCreateQuote,
                                               onCreateInvoice,
                                               onOpenInvoice,
@@ -279,6 +293,10 @@ export default function CustomerProfilePage({
       normalizedDefaultRotationWeeks
   );
   const effectiveRotationLabel = getRotationLabel(effectiveRotationWeeks);
+  const customerRoundLabel = `${getRotationCycleLabel(
+    customer.week,
+    effectiveRotationWeeks
+  )} - ${customer.day}`;
   const nextVisit = getNextVisit(
       customer,
       visits,
@@ -377,6 +395,9 @@ export default function CustomerProfilePage({
                   {effectiveRotationLabel}
                 </span>
                     <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white">
+                  {customerRoundLabel}
+                </span>
+                    <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white">
                   {customer.paymentMethod ?? "Monthly"}
                 </span>
                   </>
@@ -392,6 +413,7 @@ export default function CustomerProfilePage({
                     existing={customer}
                     defaultRotationWeeks={normalizedDefaultRotationWeeks}
                     allowCommercialTools={allowCommercialTools}
+                    editCollaboration={getCustomerEditCollaboration?.(customer)}
                     onSave={saveProfileEdits}
                     onCancel={() => setIsEditing(false)}
                 />
@@ -477,6 +499,23 @@ export default function CustomerProfilePage({
                     </div>
                   </div>
                 </div>
+
+                {customer.isGrassCuttingCustomer && (
+                    <div className="rounded-2xl bg-slate-50 p-4">
+                      <div className="flex items-start gap-3">
+                        <CalendarDays size={18} className="mt-0.5 text-slate-400" />
+                        <div>
+                          <p className="text-xs text-slate-500">Round Week and Day</p>
+                          <p className="mt-1 font-semibold text-slate-900">
+                            {customerRoundLabel}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {effectiveRotationLabel} round
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                )}
 
                 <div className="rounded-2xl bg-slate-50 p-4">
                   <div className="flex items-start gap-3">

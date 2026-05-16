@@ -479,6 +479,9 @@ export default function DashboardPage({
     selectedWeek,
     roundRotationWeeks
   );
+  const todayDate = new Date();
+  const todayWeek = getCycleWeek(todayDate, roundRotationWeeks);
+  const todayDayLabel = getWorkdayFromDate(todayDate).dayLabel;
   const selectedWorkDate = useMemo(
     () => getSelectedWorkDate(selectedWeek, selectedDay, roundRotationWeeks),
     [roundRotationWeeks, selectedDay, selectedWeek]
@@ -1014,9 +1017,7 @@ export default function DashboardPage({
     "rounded-[20px] border border-[#e5e7eb] bg-white shadow-[0_18px_45px_rgba(7,20,38,0.06)]";
   const subtleButtonClassName =
     "inline-flex items-center justify-center gap-2 rounded-xl border border-[#e5e7eb] bg-white px-4 py-3 text-sm font-semibold text-[#071426] shadow-[0_10px_24px_rgba(7,20,38,0.05)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:text-emerald-700";
-  const topSectionClassName = showPaymentOverview
-    ? "grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-start"
-    : "grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(540px,0.82fr)] xl:items-stretch";
+  const topSectionClassName = "space-y-3";
   const statGridClassName = showPaymentOverview
     ? "grid gap-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-5"
     : "grid gap-3 sm:grid-cols-2 2xl:grid-cols-4";
@@ -1222,157 +1223,162 @@ export default function DashboardPage({
 
   return (
     <div className="space-y-5 text-[#071426]">
-      <section className={topSectionClassName}>
+      <section data-tour="dashboard-overview" className={topSectionClassName}>
+        <div className={`${panelClassName} p-4`}>
+          <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
+            Today is {todayWeek}, {todayDayLabel}. You are currently viewing
+          </p>
+          <div className="mt-3 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="grid gap-2 sm:max-w-md sm:grid-cols-2 xl:min-w-[360px]">
+              <select
+                value={selectedWeek}
+                onChange={(event) => onWeekChange?.(event.target.value)}
+                className="rounded-xl border border-[#e5e7eb] bg-[#f7faf9] px-3 py-2.5 text-sm font-semibold text-[#071426] outline-none transition focus:border-emerald-400"
+              >
+                {weekFilters.map((week) => (
+                  <option key={week} value={week}>
+                    {getRotationCycleLabel(week, roundRotationWeeks)}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={selectedDay}
+                onChange={(event) => onDayChange?.(event.target.value)}
+                className="rounded-xl border border-[#e5e7eb] bg-[#f7faf9] px-3 py-2.5 text-sm font-semibold text-[#071426] outline-none transition focus:border-emerald-400"
+              >
+                {dayFilters.map((day) => (
+                  <option key={day} value={day}>
+                    {day}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-wrap gap-2 xl:flex-nowrap">
+              <button
+                type="button"
+                onClick={onGoToCustomers}
+                className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#20c766] px-4 py-3 text-sm font-bold text-white shadow-[0_16px_35px_rgba(32,199,102,0.28)] transition hover:-translate-y-0.5 hover:bg-[#16ad55] xl:flex-none"
+              >
+                <UserPlus size={17} />
+                New Customer
+              </button>
+              <button type="button" onClick={onGoToQuoteForm} className={subtleButtonClassName}>
+                <FilePlus2 size={16} />
+                Quote
+              </button>
+              <button type="button" onClick={onGoToInvoiceForm} className={subtleButtonClassName}>
+                <ReceiptText size={16} />
+                Invoice
+              </button>
+              <button
+                type="button"
+                onClick={onGoToPayments}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#003c35] px-4 py-3 text-sm font-bold text-white shadow-[0_16px_32px_rgba(0,60,53,0.2)] transition hover:-translate-y-0.5 hover:bg-[#022f2a]"
+              >
+                <CreditCard size={16} />
+                Payments
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div className={statGridClassName}>
-          <button
-            type="button"
-            onClick={onGoToSchedule}
-            className={`${panelClassName} p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_22px_50px_rgba(7,20,38,0.09)]`}
-          >
-            <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
-              Today&apos;s Jobs
-            </p>
-            <p className="mt-4 text-3xl font-black tracking-tight text-[#071426]">
-              {scheduledWorkCount}
-            </p>
-            <p className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-emerald-600">
-              <CheckCircle2 size={15} />
-              {scheduledWorkCount === 0
-                ? "No scheduled work"
-                : openScheduledWorkCount === 0
-                  ? "All complete"
-                  : `${openScheduledWorkCount} open`}
-            </p>
-          </button>
-
-          <button
-            type="button"
-            onClick={hasRoundWork ? onGoToRounds : onGoToSchedule}
-            className={`${panelClassName} p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_22px_50px_rgba(7,20,38,0.09)]`}
-          >
-            <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
-              Todays Work
-            </p>
-            <p className="mt-4 text-3xl font-black tracking-tight text-[#071426]">
-              {workItemCount}
-            </p>
-            <p className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-emerald-600">
-              <Route size={15} />
-              {workStatusLabel}
-            </p>
-          </button>
-
-          <button
-            type="button"
-            onClick={hasRoundWork ? onGoToRounds : onGoToSchedule}
-            className={`${panelClassName} p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_22px_50px_rgba(7,20,38,0.09)]`}
-          >
-            <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
-              Visit Status
-            </p>
-            <p className="mt-4 text-3xl font-black tracking-tight text-[#071426]">
-              {workCompletedCount} / {workTotalCount}
-            </p>
-            <p
-              className={`mt-3 inline-flex items-center gap-2 text-sm font-semibold ${
-                workIssueCount > 0 ? "text-orange-600" : "text-emerald-600"
-              }`}
+            <button
+              type="button"
+              onClick={onGoToSchedule}
+              className={`${panelClassName} p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_22px_50px_rgba(7,20,38,0.09)]`}
             >
-              <CircleAlert size={15} />
-              {workProgressLabel}
-            </p>
-          </button>
+              <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
+                Today&apos;s Jobs
+              </p>
+              <p className="mt-4 text-3xl font-black tracking-tight text-[#071426]">
+                {scheduledWorkCount}
+              </p>
+              <p className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-emerald-600">
+                <CheckCircle2 size={15} />
+                {scheduledWorkCount === 0
+                  ? "No scheduled work"
+                  : openScheduledWorkCount === 0
+                    ? "All complete"
+                    : `${openScheduledWorkCount} open`}
+              </p>
+            </button>
 
-          {showPaymentOverview ? (
+            <button
+              type="button"
+              onClick={hasRoundWork ? onGoToRounds : onGoToSchedule}
+              className={`${panelClassName} p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_22px_50px_rgba(7,20,38,0.09)]`}
+            >
+              <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
+                Todays Work
+              </p>
+              <p className="mt-4 text-3xl font-black tracking-tight text-[#071426]">
+                {workItemCount}
+              </p>
+              <p className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-emerald-600">
+                <Route size={15} />
+                {workStatusLabel}
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={hasRoundWork ? onGoToRounds : onGoToSchedule}
+              className={`${panelClassName} p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_22px_50px_rgba(7,20,38,0.09)]`}
+            >
+              <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
+                Visit Status
+              </p>
+              <p className="mt-4 text-3xl font-black tracking-tight text-[#071426]">
+                {workCompletedCount} / {workTotalCount}
+              </p>
+              <p
+                className={`mt-3 inline-flex items-center gap-2 text-sm font-semibold ${
+                  workIssueCount > 0 ? "text-orange-600" : "text-emerald-600"
+                }`}
+              >
+                <CircleAlert size={15} />
+                {workProgressLabel}
+              </p>
+            </button>
+
+            {showPaymentOverview ? (
+              <button
+                type="button"
+                onClick={onGoToPayments}
+                className={`${panelClassName} p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_22px_50px_rgba(7,20,38,0.09)]`}
+              >
+                <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
+                  Total Owed
+                </p>
+                <p className="mt-4 text-3xl font-black tracking-tight text-[#071426]">
+                  {formatMoney(outstandingPaymentSnapshot.total)}
+                </p>
+                <p className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-emerald-600">
+                  <CheckCircle2 size={15} />
+                  View arrears
+                </p>
+              </button>
+            ) : null}
+
             <button
               type="button"
               onClick={onGoToPayments}
               className={`${panelClassName} p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_22px_50px_rgba(7,20,38,0.09)]`}
             >
               <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
-                Total Owed
+                Day Value
               </p>
               <p className="mt-4 text-3xl font-black tracking-tight text-[#071426]">
-                {formatMoney(outstandingPaymentSnapshot.total)}
+                {formatWholeMoney(dayValueTotal)}
               </p>
               <p className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-emerald-600">
                 <CheckCircle2 size={15} />
-                View arrears
+                Round + scheduled
               </p>
             </button>
-          ) : null}
-
-          <button
-            type="button"
-            onClick={onGoToPayments}
-            className={`${panelClassName} p-4 text-left transition hover:-translate-y-0.5 hover:shadow-[0_22px_50px_rgba(7,20,38,0.09)]`}
-          >
-            <p className="text-xs font-semibold uppercase tracking-wide text-[#667085]">
-              Day Value
-            </p>
-            <p className="mt-4 text-3xl font-black tracking-tight text-[#071426]">
-              {formatWholeMoney(dayValueTotal)}
-            </p>
-            <p className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-emerald-600">
-              <CheckCircle2 size={15} />
-              Round + scheduled
-            </p>
-          </button>
-        </div>
-
-        <div className={`${panelClassName} flex flex-col gap-3 p-4 xl:min-w-[540px]`}>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <select
-              value={selectedWeek}
-              onChange={(event) => onWeekChange?.(event.target.value)}
-              className="rounded-xl border border-[#e5e7eb] bg-[#f7faf9] px-3 py-2.5 text-sm font-semibold text-[#071426] outline-none transition focus:border-emerald-400"
-            >
-              {weekFilters.map((week) => (
-                <option key={week} value={week}>
-                  {getRotationCycleLabel(week, roundRotationWeeks)}
-                </option>
-              ))}
-            </select>
-            <select
-              value={selectedDay}
-              onChange={(event) => onDayChange?.(event.target.value)}
-              className="rounded-xl border border-[#e5e7eb] bg-[#f7faf9] px-3 py-2.5 text-sm font-semibold text-[#071426] outline-none transition focus:border-emerald-400"
-            >
-              {dayFilters.map((day) => (
-                <option key={day} value={day}>
-                  {day}
-                </option>
-              ))}
-            </select>
           </div>
-
-          <div className="flex flex-wrap gap-2 xl:flex-nowrap">
-            <button
-              type="button"
-              onClick={onGoToCustomers}
-              className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#20c766] px-4 py-3 text-sm font-bold text-white shadow-[0_16px_35px_rgba(32,199,102,0.28)] transition hover:-translate-y-0.5 hover:bg-[#16ad55]"
-            >
-              <UserPlus size={17} />
-              New Customer
-            </button>
-            <button type="button" onClick={onGoToQuoteForm} className={subtleButtonClassName}>
-              <FilePlus2 size={16} />
-              Quote
-            </button>
-            <button type="button" onClick={onGoToInvoiceForm} className={subtleButtonClassName}>
-              <ReceiptText size={16} />
-              Invoice
-            </button>
-            <button
-              type="button"
-              onClick={onGoToPayments}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#003c35] px-4 py-3 text-sm font-bold text-white shadow-[0_16px_32px_rgba(0,60,53,0.2)] transition hover:-translate-y-0.5 hover:bg-[#022f2a]"
-            >
-              <CreditCard size={16} />
-              Payments
-            </button>
-          </div>
-        </div>
       </section>
 
       <div className={roundMapGridClassName}>

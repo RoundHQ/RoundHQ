@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCustomerEmailAddresses, normalizeGrassCutAreas } from "./helpers";
 import {
     DEFAULT_ROTATION_WEEKS,
@@ -25,18 +25,22 @@ import {
     type WeekNumber,
 } from "./types";
 import AddressAutocompleteInput from "./address-autocomplete-input";
+import type { EditFormCollaboration } from "./edit-collaboration";
 
 type Props = {
     existing?: Customer;
+    initialName?: string;
     defaultRotationWeeks?: RotationWeeks;
     allowCommercialTools?: boolean;
-    onSave: (customer: Customer) => void;
+    editCollaboration?: EditFormCollaboration<Customer>;
+    onSave: (customer: Customer) => void | Promise<void>;
     onCancel: () => void;
 };
 
 function buildInitialCustomer(
     existing: Customer | undefined,
-    defaultRotationWeeks: RotationWeeks
+    defaultRotationWeeks: RotationWeeks,
+    initialName = ""
 ): Customer {
     if (existing) {
         const effectiveRotationWeeks = getEffectiveRotationWeeks(
@@ -64,7 +68,7 @@ function buildInitialCustomer(
 
     return {
         id: Date.now(),
-        name: "",
+        name: initialName.trim(),
         address: "",
         postcode: "",
         town: "",
@@ -104,16 +108,22 @@ function normalizeContactEmails(emails: string[] | undefined) {
 
 export default function CustomerForm({
     existing,
+    initialName = "",
     defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
     allowCommercialTools = true,
+    editCollaboration,
     onSave,
     onCancel,
 }: Props) {
     const normalizedDefaultRotationWeeks =
         normalizeRotationWeeks(defaultRotationWeeks);
     const [form, setForm] = useState<Customer>(() =>
-        buildInitialCustomer(existing, normalizedDefaultRotationWeeks)
+        buildInitialCustomer(existing, normalizedDefaultRotationWeeks, initialName)
     );
+    const initialDraftRef = useRef("");
+    const handledSaveRequestRef = useRef(0);
+    const handledDiscardRequestRef = useRef(0);
+    const editCollaborationRef = useRef(editCollaboration);
 
     const [postcodeLocked, setPostcodeLocked] = useState(
         Boolean(existing?.postcode)
@@ -178,6 +188,72 @@ export default function CustomerForm({
         form.rotationWeeksOverride == null ? "default" : String(form.rotationWeeksOverride);
     const commercialEmailInputs =
         form.contactEmails && form.contactEmails.length > 0 ? form.contactEmails : [""];
+
+    const getCleanCustomerDraft = useCallback((): Customer => {
+        const draftEffectiveRotationWeeks = getEffectiveRotationWeeks(
+            form,
+            normalizedDefaultRotationWeeks
+        );
+        const cleanedPrimaryEmail = form.email?.trim() || "";
+        const cleanedContactEmails = showCommercialTools
+            ? normalizeContactEmails(form.contactEmails)
+            : [];
+
+        return {
+            ...form,
+            name: form.name.trim(),
+            address: form.address.trim(),
+            town: form.town?.trim() || undefined,
+            postcode: form.postcode?.trim() || undefined,
+            phone: form.phone?.trim() || undefined,
+            email: showCommercialTools
+                ? cleanedContactEmails[0] ?? undefined
+                : cleanedPrimaryEmail || undefined,
+            contactEmails: showCommercialTools ? cleanedContactEmails : undefined,
+            rotationWeeksOverride: normalizeNullableRotationWeeks(
+                form.rotationWeeksOverride
+            ),
+            cutFrequency: getCutFrequencyFromRotationWeeks(draftEffectiveRotationWeeks),
+            week: normalizeWeekNumber(form.week, draftEffectiveRotationWeeks),
+            grassCutAreas: form.isGrassCuttingCustomer
+                ? normalizeGrassCutAreas(form.grassCutAreas, true)
+                : [],
+            siteName: form.siteName?.trim() || undefined,
+            siteAddress: form.siteAddress?.trim() || undefined,
+            siteTown: form.siteTown?.trim() || undefined,
+            sitePostcode: form.sitePostcode?.trim() || undefined,
+            notes: form.notes?.trim() || undefined,
+            accessNotes: form.accessNotes?.trim() || undefined,
+        };
+    }, [form, normalizedDefaultRotationWeeks, showCommercialTools]);
+
+    useEffect(() => {
+        editCollaborationRef.current = editCollaboration;
+    }, [editCollaboration]);
+
+    useEffect(() => {
+        if (!editCollaborationRef.current || initialDraftRef.current) {
+            return;
+        }
+
+        initialDraftRef.current = JSON.stringify(getCleanCustomerDraft());
+    }, [getCleanCustomerDraft]);
+
+    useEffect(() => {
+        const collaboration = editCollaborationRef.current;
+
+        if (!collaboration) {
+            return;
+        }
+
+        const draft = getCleanCustomerDraft();
+        const draftJson = JSON.stringify(draft);
+        const isDirty = initialDraftRef.current
+            ? draftJson !== initialDraftRef.current
+            : false;
+
+        collaboration.onDraftChange(draft, isDirty);
+    }, [getCleanCustomerDraft]);
 
     function updateCustomerType(nextType: CustomerType) {
         setForm((prev) => {
@@ -253,44 +329,40 @@ export default function CustomerForm({
         });
     }
 
-    function handleSave() {
-        const saveEffectiveRotationWeeks = getEffectiveRotationWeeks(
-            form,
-            normalizedDefaultRotationWeeks
-        );
-        const cleanedPrimaryEmail = form.email?.trim() || "";
-        const cleanedContactEmails = showCommercialTools
-            ? normalizeContactEmails(form.contactEmails)
-            : [];
-        const nextCustomer: Customer = {
-            ...form,
-            name: form.name.trim(),
-            address: form.address.trim(),
-            town: form.town?.trim() || undefined,
-            postcode: form.postcode?.trim() || undefined,
-            phone: form.phone?.trim() || undefined,
-            email: showCommercialTools
-                ? cleanedContactEmails[0] ?? undefined
-                : cleanedPrimaryEmail || undefined,
-            contactEmails: showCommercialTools ? cleanedContactEmails : undefined,
-            rotationWeeksOverride: normalizeNullableRotationWeeks(
-                form.rotationWeeksOverride
-            ),
-            cutFrequency: getCutFrequencyFromRotationWeeks(saveEffectiveRotationWeeks),
-            week: normalizeWeekNumber(form.week, saveEffectiveRotationWeeks),
-            grassCutAreas: form.isGrassCuttingCustomer
-                ? normalizeGrassCutAreas(form.grassCutAreas, true)
-                : [],
-            siteName: form.siteName?.trim() || undefined,
-            siteAddress: form.siteAddress?.trim() || undefined,
-            siteTown: form.siteTown?.trim() || undefined,
-            sitePostcode: form.sitePostcode?.trim() || undefined,
-            notes: form.notes?.trim() || undefined,
-            accessNotes: form.accessNotes?.trim() || undefined,
-        };
+    const handleSave = useCallback(async () => {
+        await Promise.resolve(onSave(getCleanCustomerDraft()));
+        editCollaboration?.onSaveComplete();
+    }, [editCollaboration, getCleanCustomerDraft, onSave]);
 
-        onSave(nextCustomer);
-    }
+    useEffect(() => {
+        if (
+            !editCollaboration?.saveRequestId ||
+            handledSaveRequestRef.current === editCollaboration.saveRequestId
+        ) {
+            return;
+        }
+
+        handledSaveRequestRef.current = editCollaboration.saveRequestId;
+        void handleSave();
+    }, [editCollaboration?.saveRequestId, handleSave]);
+
+    useEffect(() => {
+        if (
+            !editCollaboration?.discardRequestId ||
+            handledDiscardRequestRef.current === editCollaboration.discardRequestId
+        ) {
+            return;
+        }
+
+        handledDiscardRequestRef.current = editCollaboration.discardRequestId;
+        editCollaboration.onDiscardComplete();
+        onCancel();
+    }, [editCollaboration, onCancel]);
+
+    const handleCancel = useCallback(() => {
+        editCollaborationRef.current?.onDiscardComplete();
+        onCancel();
+    }, [onCancel]);
 
     return (
         <div className="rounded-[24px] border border-slate-200 bg-white p-6 shadow-sm">
@@ -341,7 +413,10 @@ export default function CustomerForm({
                             <label className="mb-2 block text-sm font-medium text-slate-700">
                                 Service Round
                             </label>
-                            <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
+                            <label
+                                data-tour="customer-service-round"
+                                className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700"
+                            >
                                 <input
                                     type="checkbox"
                                     checked={form.isGrassCuttingCustomer}
@@ -359,6 +434,7 @@ export default function CustomerForm({
                                 Customer Name
                             </label>
                             <input
+                                data-tour="customer-name-input"
                                 className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
                                 placeholder="Name"
                                 value={form.name}
@@ -372,6 +448,7 @@ export default function CustomerForm({
                             </label>
                             <AddressAutocompleteInput
                                 value={form.address}
+                                dataTour="customer-address-input"
                                 onChange={(value) => update("address", value)}
                                 onSelectAddress={({
                                     formattedAddress,
@@ -588,6 +665,7 @@ export default function CustomerForm({
                                     Service rotation
                                 </label>
                                 <select
+                                    data-tour="customer-service-rotation"
                                     className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
                                     value={rotationSelectValue}
                                     onChange={(e) => updateServiceRotation(e.target.value)}
@@ -616,6 +694,7 @@ export default function CustomerForm({
                                     Service Amount
                                 </label>
                                 <input
+                                    data-tour="customer-service-amount"
                                     type="number"
                                     className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
                                     placeholder="Price per visit"
@@ -634,6 +713,7 @@ export default function CustomerForm({
                                     Week
                                 </label>
                                 <select
+                                    data-tour="customer-service-week"
                                     className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
                                     value={form.week}
                                     onChange={(e) =>
@@ -662,6 +742,7 @@ export default function CustomerForm({
                                     Day
                                 </label>
                                 <select
+                                    data-tour="customer-service-day"
                                     className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
                                     value={form.day}
                                     onChange={(e) => update("day", e.target.value as DayName)}
@@ -671,6 +752,8 @@ export default function CustomerForm({
                                     <option value="Wednesday">Wednesday</option>
                                     <option value="Thursday">Thursday</option>
                                     <option value="Friday">Friday</option>
+                                    <option value="Saturday">Saturday</option>
+                                    <option value="Sunday">Sunday</option>
                                 </select>
                             </div>
 
@@ -695,7 +778,10 @@ export default function CustomerForm({
                                 <label className="mb-2 block text-sm font-medium text-slate-700">
                                     Service Areas
                                 </label>
-                                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                                <div
+                                    data-tour="customer-service-areas"
+                                    className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
+                                >
                                     {GRASS_CUT_AREA_OPTIONS.map((area) => (
                                         <label
                                             key={area}
@@ -729,6 +815,7 @@ export default function CustomerForm({
                                 General Notes
                             </label>
                             <textarea
+                                data-tour="customer-notes"
                                 className="min-h-[110px] w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
                                 placeholder="Customer notes"
                                 value={form.notes ?? ""}
@@ -741,6 +828,7 @@ export default function CustomerForm({
                                 Access Notes
                             </label>
                             <textarea
+                                data-tour="customer-access-notes"
                                 className="min-h-[110px] w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
                                 placeholder="Gate codes, side access, pets, bins, etc."
                                 value={form.accessNotes ?? ""}
@@ -753,6 +841,7 @@ export default function CustomerForm({
 
             <div className="mt-6 flex flex-wrap gap-2 border-t border-slate-100 pt-5">
                 <button
+                    data-tour="customer-save-button"
                     onClick={handleSave}
                     className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
                 >
@@ -760,7 +849,7 @@ export default function CustomerForm({
                 </button>
 
                 <button
-                    onClick={onCancel}
+                    onClick={handleCancel}
                     className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
                     Cancel

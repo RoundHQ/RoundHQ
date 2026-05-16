@@ -14,6 +14,7 @@ import {
   ClipboardList,
   FileText,
   Receipt,
+  ReceiptText,
   ArrowLeft,
   CheckCircle2,
   Mail,
@@ -52,9 +53,29 @@ import QuotesPage from "@/components/jobs/quotes-page";
 import QuoteForm from "@/components/jobs/quote-form";
 import InvoicesPage from "@/components/jobs/invoices-page";
 import InvoiceForm from "@/components/jobs/invoice-form";
+import ExpensesPage, {
+  type ExpenseProduct,
+  type ExpenseProductDraft,
+  type ExpenseRecord,
+  type ExpenseRecordDraft,
+  type ExpenseSupplier,
+  type ExpenseSupplierDraft,
+} from "@/components/jobs/expenses-page";
 import WorkflowMessageDialog from "@/components/jobs/workflow-message-dialog";
 import PaymentsPage from "@/components/jobs/payments-page";
 import SettingsPage from "@/components/jobs/settings-page";
+import HelpProvider from "@/components/help/HelpProvider";
+import type { HelpTourActions, HelpTourPage } from "@/components/help/helpTours";
+import {
+  getEditResourceKey,
+  normalizeEditInactiveAction,
+  normalizeEditInactiveMinutes,
+  type EditFormCollaboration,
+  type EditInactiveAction,
+  type EditResource,
+  type EditableResourceType,
+  type EditSessionRecord,
+} from "@/components/jobs/edit-collaboration";
 import CommercialDocsPage from "@/components/jobs/commercial-docs-page";
 import type { RouteChangeRecord } from "@/components/jobs/route-efficiency";
 import {
@@ -165,6 +186,10 @@ import {
   type WeekNumber,
 } from "@/components/jobs/types";
 
+type SupabaseRealtimeChannel = ReturnType<
+  ReturnType<typeof createSupabaseClient>["channel"]
+>;
+
 type QuoteService = {
   id: string;
   title: string;
@@ -175,6 +200,8 @@ type QuoteService = {
 };
 
 type WorkflowMessageMethod = DocumentDeliveryMethod;
+type PdfHeaderStyle = "banner" | "letterhead";
+type PdfLogoBackground = "none" | "dark" | "light";
 
 type AppSettings = {
   businessName: string;
@@ -195,6 +222,16 @@ type AppSettings = {
   themeMode: "light" | "dark" | "system";
   compactMode: boolean;
   currencyCode: CurrencyCode;
+  pdfHeaderStyle: PdfHeaderStyle;
+  pdfLogoBackground: PdfLogoBackground;
+  pdfLogoScale: number;
+  pdfShowLogo: boolean;
+  pdfShowFooter: boolean;
+  pdfShowBusinessDetails: boolean;
+  pdfFooterText: string;
+  editInactivityMinutes: number;
+  editInactiveAction: EditInactiveAction;
+  helpEnabled: boolean;
 
   defaultGrassCutPrice: number;
   defaultHedgeCutPrice: number;
@@ -275,6 +312,7 @@ type PageKey =
     | "customers"
     | "customerProfit"
     | "payments"
+    | "expenses"
     | "customerProfile"
     | "actions"
     | "map"
@@ -286,7 +324,49 @@ type PageKey =
     | "commercialDocs"
     | "settings";
 
-type DayName = "Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday";
+const WORKSPACE_ROUTE_PAGE_KEYS = [
+  "dashboard",
+  "schedule",
+  "jobs",
+  "scheduledJobProfile",
+  "rounds",
+  "commercial",
+  "routeEfficiency",
+  "history",
+  "leads",
+  "customers",
+  "customerProfit",
+  "payments",
+  "expenses",
+  "customerProfile",
+  "actions",
+  "map",
+  "staff",
+  "quotes",
+  "quoteForm",
+  "invoices",
+  "invoiceForm",
+  "commercialDocs",
+  "settings",
+] as const satisfies readonly PageKey[];
+
+type WorkspaceRouteState = {
+  page: PageKey;
+  selectedCustomerId: number | null;
+  selectedScheduledJobId: string | null;
+  jobProfileBackPage: "schedule" | "jobs";
+  selectedQuoteId: string | null;
+  selectedInvoiceId: string | null;
+};
+
+type DayName =
+    | "Monday"
+    | "Tuesday"
+    | "Wednesday"
+    | "Thursday"
+    | "Friday"
+    | "Saturday"
+    | "Sunday";
 type WeekName = WeekNumber;
 type CustomerType = "Residential" | "Commercial";
 
@@ -438,6 +518,9 @@ type PersistedAppState = {
   routeNotes: Record<string, string>;
   quotes: Quote[];
   invoices: Invoice[];
+  expenseSuppliers: ExpenseSupplier[];
+  expenseProducts: ExpenseProduct[];
+  expenses: ExpenseRecord[];
   recurringInvoiceTemplates: RecurringInvoiceTemplateRecord[];
   lockedRounds: Record<string, boolean>;
   activeRoundCycles: Record<string, number>;
@@ -746,6 +829,8 @@ const VISIT_ROUND_METADATA_SETUP_NOTICE =
     "Supabase is connected, but the visits table needs the latest round metadata columns. Run the visit round metadata SQL setup script and refresh.";
 
 const SETTINGS_STORAGE_KEY = "roundhq_settings";
+const HELP_ENABLED_STORAGE_KEY = "roundhq_help_enabled";
+const ONBOARDING_COMPLETED_STORAGE_KEY = "roundhq_onboarding_completed";
 
 const DEFAULT_APP_SETTINGS: AppSettings = {
   businessName: "Your Business",
@@ -766,6 +851,16 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   themeMode: "light",
   compactMode: false,
   currencyCode: DEFAULT_CURRENCY_CODE,
+  pdfHeaderStyle: "banner",
+  pdfLogoBackground: "none",
+  pdfLogoScale: 100,
+  pdfShowLogo: true,
+  pdfShowFooter: true,
+  pdfShowBusinessDetails: true,
+  pdfFooterText: "",
+  editInactivityMinutes: 5,
+  editInactiveAction: "notify",
+  helpEnabled: true,
 
   defaultGrassCutPrice: 15,
   defaultHedgeCutPrice: 40,
@@ -862,6 +957,32 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   termsAndConditionsUrl: "",
 };
 
+function readStoredBooleanPreference(key: string, fallback: boolean) {
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+
+  const raw = window.localStorage.getItem(key);
+
+  if (raw === "true") {
+    return true;
+  }
+
+  if (raw === "false") {
+    return false;
+  }
+
+  return fallback;
+}
+
+function writeStoredBooleanPreference(key: string, value: boolean) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(key, value ? "true" : "false");
+}
+
 const STAFF_ROLES: StaffRole[] = ["Admin", "Staff", "Operator"];
 const EDITABLE_STAFF_ROLES: Array<Exclude<StaffRole, "Admin">> = ["Staff", "Operator"];
 const STAFF_PAGE_OPTIONS: {
@@ -869,18 +990,19 @@ const STAFF_PAGE_OPTIONS: {
   label: string;
   section: string;
 }[] = [
-  { key: "dashboard", label: "Dashboard", section: "Dashboard" },
-  { key: "schedule", label: "Schedule", section: "Dashboard" },
-  { key: "rounds", label: "Rounds", section: "Service Schedule" },
-  { key: "history", label: "History", section: "Service Schedule" },
-  { key: "map", label: "Map", section: "Service Schedule" },
-  { key: "actions", label: "Actions", section: "Service Schedule" },
-  { key: "commercialDocs", label: "RAMS & Documents", section: "Commercial" },
+  { key: "dashboard", label: "Overview", section: "Overview" },
+  { key: "schedule", label: "Schedule", section: "Work" },
+  { key: "rounds", label: "Rounds", section: "Work" },
+  { key: "history", label: "History", section: "Work" },
+  { key: "map", label: "Map", section: "Work" },
+  { key: "actions", label: "Actions", section: "Work" },
+  { key: "commercialDocs", label: "RAMS & Documents", section: "Documents" },
   { key: "customers", label: "All Customers", section: "Customers" },
-  { key: "quotes", label: "Quotes", section: "Customers" },
-  { key: "invoices", label: "Invoices", section: "Customers" },
-  { key: "staff", label: "Staff", section: "Staff" },
-  { key: "settings", label: "Settings", section: "System" },
+  { key: "expenses", label: "Expenses", section: "Money" },
+  { key: "quotes", label: "Quotes", section: "Documents" },
+  { key: "invoices", label: "Invoices", section: "Documents" },
+  { key: "staff", label: "Staff", section: "Team" },
+  { key: "settings", label: "Settings", section: "Settings" },
 ];
 const ADMIN_ONLY_PAGE_KEYS = new Set<StaffPageAccessKey>(["staff", "settings"]);
 const PAGE_PERMISSION_OVERRIDES: Record<PageKey, StaffPageAccessKey> = {
@@ -896,6 +1018,7 @@ const PAGE_PERMISSION_OVERRIDES: Record<PageKey, StaffPageAccessKey> = {
   customers: "customers",
   customerProfit: "customers",
   payments: "customers",
+  expenses: "expenses",
   customerProfile: "customers",
   actions: "actions",
   map: "map",
@@ -921,6 +1044,7 @@ const CUSTOMER_FEATURE_PAGE_OVERRIDES: Record<PageKey, CustomerFeatureKey> = {
   customers: "customers",
   customerProfit: "customerProfit",
   payments: "payments",
+  expenses: "expenses",
   customerProfile: "customers",
   actions: "actions",
   map: "map",
@@ -942,11 +1066,30 @@ const DEFAULT_ROLE_PAGE_ACCESS: Record<Exclude<StaffRole, "Admin">, StaffPageAcc
     "actions",
     "commercialDocs",
     "customers",
+    "expenses",
     "quotes",
     "invoices",
   ],
   Operator: ["dashboard", "rounds", "history", "map", "actions"],
 };
+
+function normalizePdfHeaderStyle(value: unknown): PdfHeaderStyle {
+  return value === "letterhead" ? "letterhead" : "banner";
+}
+
+function normalizePdfLogoBackground(value: unknown): PdfLogoBackground {
+  return value === "dark" || value === "light" ? value : "none";
+}
+
+function normalizePdfLogoScale(value: unknown) {
+  const numericValue = typeof value === "number" ? value : Number(value);
+
+  if (!Number.isFinite(numericValue)) {
+    return 100;
+  }
+
+  return Math.min(160, Math.max(60, Math.round(numericValue)));
+}
 
 function mergeAppSettings(value?: Partial<AppSettings> | null): AppSettings {
   const quoteFollowUpMethod = "email";
@@ -957,6 +1100,19 @@ function mergeAppSettings(value?: Partial<AppSettings> | null): AppSettings {
     ...(value || {}),
     defaultRotationWeeks: normalizeRotationWeeks(value?.defaultRotationWeeks),
     currencyCode: normalizeCurrencyCode(value?.currencyCode),
+    pdfHeaderStyle: normalizePdfHeaderStyle(value?.pdfHeaderStyle),
+    pdfLogoBackground: normalizePdfLogoBackground(value?.pdfLogoBackground),
+    pdfLogoScale: normalizePdfLogoScale(value?.pdfLogoScale),
+    pdfShowLogo: value?.pdfShowLogo !== false,
+    pdfShowFooter: value?.pdfShowFooter !== false,
+    pdfShowBusinessDetails: value?.pdfShowBusinessDetails !== false,
+    pdfFooterText:
+        typeof value?.pdfFooterText === "string" ? value.pdfFooterText : "",
+    editInactivityMinutes: normalizeEditInactiveMinutes(
+        value?.editInactivityMinutes
+    ),
+    editInactiveAction: normalizeEditInactiveAction(value?.editInactiveAction),
+    helpEnabled: value?.helpEnabled !== false,
     quoteFollowUpMethod,
     invoiceReminderMethod,
     quoteServices: normalizeQuoteServices(value?.quoteServices),
@@ -970,11 +1126,26 @@ function loadAppSettings(): AppSettings {
 
   try {
     const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
-    if (!raw) return DEFAULT_APP_SETTINGS;
-    return mergeAppSettings(JSON.parse(raw));
+    const storedSettings = raw
+        ? mergeAppSettings(JSON.parse(raw))
+        : DEFAULT_APP_SETTINGS;
+
+    return {
+      ...storedSettings,
+      helpEnabled: readStoredBooleanPreference(
+          HELP_ENABLED_STORAGE_KEY,
+          storedSettings.helpEnabled
+      ),
+    };
   } catch (error) {
     console.error("Failed to load app settings:", error);
-    return DEFAULT_APP_SETTINGS;
+    return {
+      ...DEFAULT_APP_SETTINGS,
+      helpEnabled: readStoredBooleanPreference(
+          HELP_ENABLED_STORAGE_KEY,
+          DEFAULT_APP_SETTINGS.helpEnabled
+      ),
+    };
   }
 }
 
@@ -1152,6 +1323,162 @@ function mapQuoteServiceToCatalogItemRow(service: QuoteService): CatalogItemWrit
   };
 }
 
+function createLocalEntityId(prefix: string) {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+
+  return `${prefix}-${Date.now().toString(36)}-${Math.random()
+      .toString(36)
+      .slice(2, 10)}`;
+}
+
+function getStoredString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function getStoredNumber(value: unknown) {
+  const numericValue = typeof value === "number" ? value : Number(value ?? 0);
+
+  return Number.isFinite(numericValue) ? Math.max(0, numericValue) : 0;
+}
+
+function getStoredTimestamp(value: unknown) {
+  const timestamp = typeof value === "string" ? value.trim() : "";
+  const parsedDate = timestamp ? new Date(timestamp) : null;
+
+  return parsedDate && !Number.isNaN(parsedDate.getTime())
+      ? parsedDate.toISOString()
+      : new Date().toISOString();
+}
+
+function normalizeExpenseSupplier(
+    value: unknown,
+    index: number
+): ExpenseSupplier | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const name = getStoredString(value.name);
+
+  if (!name) {
+    return null;
+  }
+
+  return {
+    id: getStoredString(value.id) || `supplier-${index + 1}`,
+    name,
+    contactName: getStoredString(value.contactName),
+    email: getStoredString(value.email),
+    phone: getStoredString(value.phone),
+    website: getStoredString(value.website),
+    notes: getStoredString(value.notes),
+    createdAt: getStoredTimestamp(value.createdAt),
+    updatedAt: getStoredString(value.updatedAt) || undefined,
+  };
+}
+
+function normalizeExpenseProduct(
+    value: unknown,
+    index: number
+): ExpenseProduct | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const name = getStoredString(value.name);
+
+  if (!name) {
+    return null;
+  }
+
+  const unitCost = getStoredNumber(value.unitCost);
+  const quotePrice =
+      getStoredNumber(value.quotePrice) ||
+      getStoredNumber(value.salePrice) ||
+      unitCost;
+
+  return {
+    id: getStoredString(value.id) || `product-${index + 1}`,
+    name,
+    supplierId: getStoredString(value.supplierId) || null,
+    sku: getStoredString(value.sku),
+    category: getStoredString(value.category) || "Materials",
+    unitCost,
+    quotePrice,
+    isQuoteItem: Boolean(value.isQuoteItem),
+    notes: getStoredString(value.notes),
+    createdAt: getStoredTimestamp(value.createdAt),
+    updatedAt: getStoredString(value.updatedAt) || undefined,
+  };
+}
+
+function normalizeExpenseRecord(
+    value: unknown,
+    index: number
+): ExpenseRecord | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const description = getStoredString(value.description);
+
+  if (!description) {
+    return null;
+  }
+
+  return {
+    id: getStoredString(value.id) || `expense-${index + 1}`,
+    date: getInputDateValue(getStoredString(value.date)) || getTodayDateInputValue(),
+    supplierId: getStoredString(value.supplierId) || null,
+    productId: getStoredString(value.productId) || null,
+    category: getStoredString(value.category) || "Other",
+    description,
+    amount: getStoredNumber(value.amount),
+    paymentMethod: getStoredString(value.paymentMethod),
+    receiptReference: getStoredString(value.receiptReference),
+    notes: getStoredString(value.notes),
+    createdAt: getStoredTimestamp(value.createdAt),
+    updatedAt: getStoredString(value.updatedAt) || undefined,
+  };
+}
+
+function mapExpenseProductToQuoteService(product: ExpenseProduct): QuoteService {
+  const category = product.category.trim() || "Products";
+
+  return {
+    id: buildQuoteServiceId({
+      title: product.name,
+      category,
+      itemType: "product",
+    }),
+    title: product.name.trim(),
+    category,
+    itemType: "product",
+    price: roundCurrency(product.quotePrice || product.unitCost),
+    buyPrice: roundCurrency(product.unitCost),
+  };
+}
+
+function mergeQuoteService(
+    services: QuoteService[],
+    nextService: QuoteService
+): QuoteService[] {
+  const nextKey = getQuoteServiceKey(nextService);
+  const existingIndex = services.findIndex(
+      (service) => getQuoteServiceKey(service) === nextKey
+  );
+
+  if (existingIndex === -1) {
+    return [...services, nextService];
+  }
+
+  return services.map((service, index) =>
+      index === existingIndex ? { ...service, ...nextService } : service
+  );
+}
+
 function roundCurrency(value: number) {
   return Math.round(value * 100) / 100;
 }
@@ -1295,6 +1622,8 @@ const DAY_OPTIONS: DayName[] = [
   "Wednesday",
   "Thursday",
   "Friday",
+  "Saturday",
+  "Sunday",
 ];
 const APP_STATE_TABLE = "app_state";
 const APP_STATE_ROW_ID = "primary";
@@ -1312,6 +1641,121 @@ const DEFAULT_STAFF_TABLES_READY: StaffTablesReady = {
   staffMembers: false,
   rolePermissions: false,
 };
+const EDIT_SESSIONS_STORAGE_KEY = "roundhq_edit_sessions_v1";
+const EDIT_SESSION_CHANNEL_NAME = "roundhq-edit-sessions";
+const EDIT_SESSION_REALTIME_EVENT = "sync";
+const EDIT_SESSION_HEARTBEAT_MS = 15 * 1000;
+const EDIT_SESSION_STALE_MS = 90 * 60 * 1000;
+const EDIT_SESSION_FINISHED_RETENTION_MS = 5 * 60 * 1000;
+
+function createEditSessionId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `edit-${Date.now().toString(36)}-${Math.random()
+      .toString(36)
+      .slice(2, 10)}`;
+}
+
+function readStoredEditSessions(): EditSessionRecord[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(
+        window.localStorage.getItem(EDIT_SESSIONS_STORAGE_KEY) || "[]"
+    );
+
+    return normalizeEditSessionRecords(parsed);
+  } catch {
+    return [];
+  }
+}
+
+function normalizeEditSessionRecords(value: unknown): EditSessionRecord[] {
+  return Array.isArray(value)
+      ? value.filter((entry): entry is EditSessionRecord => isRecord(entry))
+      : [];
+}
+
+function getEditSessionUpdatedAt(session: EditSessionRecord) {
+  const timestamp = new Date(
+      session.updatedAt || session.lastActiveAt || session.startedAt
+  ).getTime();
+
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function mergeEditSessionRecords(
+    ...sessionGroups: EditSessionRecord[][]
+): EditSessionRecord[] {
+  const mergedSessions = new Map<string, EditSessionRecord>();
+
+  sessionGroups.flat().forEach((session) => {
+    const existingSession = mergedSessions.get(session.sessionId);
+
+    if (
+        !existingSession ||
+        getEditSessionUpdatedAt(session) >= getEditSessionUpdatedAt(existingSession)
+    ) {
+      mergedSessions.set(session.sessionId, session);
+    }
+  });
+
+  return Array.from(mergedSessions.values());
+}
+
+function pruneEditSessions(sessions: EditSessionRecord[]) {
+  const now = Date.now();
+
+  return sessions.filter((session) => {
+    const updatedAt = new Date(session.updatedAt || session.lastActiveAt).getTime();
+
+    if (!Number.isFinite(updatedAt)) {
+      return false;
+    }
+
+    if (session.status === "active") {
+      return now - updatedAt <= EDIT_SESSION_STALE_MS;
+    }
+
+    return now - updatedAt <= EDIT_SESSION_FINISHED_RETENTION_MS;
+  });
+}
+
+function getEditResourceLabel(resourceType: EditableResourceType, draft: unknown) {
+  if (!isRecord(draft)) {
+    return resourceType === "customer"
+        ? "New customer"
+        : resourceType === "quote"
+          ? "New quote"
+          : "New invoice";
+  }
+
+  if (resourceType === "customer") {
+    return typeof draft.name === "string" && draft.name.trim()
+        ? draft.name.trim()
+        : "New customer";
+  }
+
+  if (resourceType === "quote") {
+    const quoteNumber = typeof draft.quoteNumber === "string" ? draft.quoteNumber.trim() : "";
+    const customerName =
+        typeof draft.customerName === "string" ? draft.customerName.trim() : "";
+
+    return [quoteNumber || "New quote", customerName].filter(Boolean).join(" - ");
+  }
+
+  const invoiceNumber =
+      typeof draft.invoiceNumber === "string" ? draft.invoiceNumber.trim() : "";
+  const customerName =
+      typeof draft.customerName === "string" ? draft.customerName.trim() : "";
+
+  return [invoiceNumber || "New invoice", customerName].filter(Boolean).join(" - ");
+}
+
 const DEFAULT_SCHEDULED_JOB_CHECKLIST: ScheduledJobChecklistState = {
   arrived: false,
   accessConfirmed: false,
@@ -1333,6 +1777,9 @@ const DEFAULT_PERSISTED_APP_STATE: PersistedAppState = {
   routeNotes: {},
   quotes: [],
   invoices: [],
+  expenseSuppliers: [],
+  expenseProducts: [],
+  expenses: [],
   recurringInvoiceTemplates: [],
   lockedRounds: {},
   activeRoundCycles: {},
@@ -1750,7 +2197,7 @@ function getActiveRoundKey(
 function normalizeStoredRoundStateKey(key: string) {
   const [baseKey, cycleSuffix] = key.split("::");
   const legacyMatch = baseKey.match(
-      /^(Week [1-4])-(Monday|Tuesday|Wednesday|Thursday|Friday)-(Residential|Commercial)$/
+      /^(Week [1-4])-(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)-(Residential|Commercial)$/
   );
 
   if (!legacyMatch) {
@@ -1767,7 +2214,7 @@ function normalizeStoredRoundStateKey(key: string) {
 function normalizeStoredRoundBaseKey(key: string) {
   const baseKey = key.split("::")[0];
   const legacyMatch = baseKey.match(
-      /^(Week [1-4])-(Monday|Tuesday|Wednesday|Thursday|Friday)-(Residential|Commercial)$/
+      /^(Week [1-4])-(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)-(Residential|Commercial)$/
   );
 
   if (!legacyMatch) {
@@ -1893,6 +2340,21 @@ function normalizePersistedAppState(value: unknown): PersistedAppState {
     quotes: Array.isArray(state.quotes) ? (state.quotes as Quote[]) : [],
     invoices: Array.isArray(state.invoices)
         ? sortInvoices(state.invoices as Invoice[])
+        : [],
+    expenseSuppliers: Array.isArray(state.expenseSuppliers)
+        ? state.expenseSuppliers
+              .map(normalizeExpenseSupplier)
+              .filter((supplier): supplier is ExpenseSupplier => Boolean(supplier))
+        : [],
+    expenseProducts: Array.isArray(state.expenseProducts)
+        ? state.expenseProducts
+              .map(normalizeExpenseProduct)
+              .filter((product): product is ExpenseProduct => Boolean(product))
+        : [],
+    expenses: Array.isArray(state.expenses)
+        ? state.expenses
+              .map(normalizeExpenseRecord)
+              .filter((expense): expense is ExpenseRecord => Boolean(expense))
         : [],
     recurringInvoiceTemplates: Array.isArray(state.recurringInvoiceTemplates)
         ? sortRecurringInvoiceTemplates(
@@ -2788,55 +3250,83 @@ const NAV_SECTIONS: {
   }[];
 }[] = [
   {
-    title: "Dashboard",
+    title: "Overview",
     items: [
-      { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { key: "dashboard", label: "Overview", icon: LayoutDashboard },
       { key: "leads", label: "Leads", icon: Inbox },
+    ],
+  },
+  {
+    title: "Work",
+    items: [
       { key: "schedule", label: "Schedule", icon: Calendar },
       { key: "jobs", label: "Jobs", icon: BriefcaseBusiness },
-    ],
-  },
-  {
-    title: "Service Schedule",
-    items: [
       { key: "rounds", label: "Rounds", icon: Repeat },
       { key: "routeEfficiency", label: "Route Insights", icon: Navigation },
-      { key: "history", label: "History", icon: HistoryIcon },
       { key: "map", label: "Map", icon: MapIcon },
       { key: "actions", label: "Actions", icon: ClipboardList },
-    ],
-  },
-  {
-    title: "Commercial",
-    items: [
-      { key: "commercialDocs", label: "RAMS & Documents", icon: FileText },
+      { key: "history", label: "History", icon: HistoryIcon },
     ],
   },
   {
     title: "Customers",
     items: [
       { key: "customers", label: "All Customers", icon: Users },
-      { key: "customerProfit", label: "Profit", icon: TrendingUp },
-      { key: "payments", label: "Payments", icon: CreditCard },
-      { key: "quotes", label: "Quotes", icon: FileText },
-      { key: "invoices", label: "Invoices", icon: Receipt },
     ],
   },
   {
-    title: "Staff",
+    title: "Documents",
+    items: [
+      { key: "quotes", label: "Quotes", icon: FileText },
+      { key: "invoices", label: "Invoices", icon: Receipt },
+      { key: "commercialDocs", label: "RAMS & Documents", icon: FileText },
+    ],
+  },
+  {
+    title: "Cashflow",
+    items: [
+      { key: "payments", label: "Payments", icon: CreditCard },
+      { key: "expenses", label: "Expenses", icon: ReceiptText },
+      { key: "customerProfit", label: "Profit", icon: TrendingUp },
+    ],
+  },
+  {
+    title: "Team",
     items: [{ key: "staff", label: "Staff", icon: UserCog }],
   },
   {
-    title: "System",
+    title: "Settings",
     items: [{ key: "settings", label: "Settings", icon: SettingsIcon }],
   },
 ];
 
+const NAV_TOUR_TARGETS: Partial<Record<PageKey, string>> = {
+  dashboard: "sidebar-dashboard",
+  leads: "sidebar-leads",
+  schedule: "sidebar-schedule",
+  jobs: "sidebar-jobs",
+  rounds: "sidebar-rounds",
+  routeEfficiency: "sidebar-route-efficiency",
+  map: "sidebar-map",
+  actions: "sidebar-actions",
+  history: "sidebar-history",
+  customers: "sidebar-customers",
+  quotes: "sidebar-quotes",
+  invoices: "sidebar-invoices",
+  commercialDocs: "sidebar-documents",
+  payments: "sidebar-payments",
+  expenses: "sidebar-expenses",
+  customerProfit: "sidebar-profit",
+  staff: "sidebar-staff",
+  settings: "sidebar-system",
+};
+
 const PAGE_NAV_SECTION_OVERRIDES: Partial<Record<PageKey, string>> = {
-  scheduledJobProfile: "Dashboard",
+  commercial: "Work",
+  scheduledJobProfile: "Work",
   customerProfile: "Customers",
-  quoteForm: "Customers",
-  invoiceForm: "Customers",
+  quoteForm: "Documents",
+  invoiceForm: "Documents",
 };
 
 function getNavSectionTitle(page: PageKey) {
@@ -3330,6 +3820,7 @@ function ScheduledJobProfileSection({
             </button>
 
             <button
+                data-tour="complete-job-button"
                 onClick={handleToggleCompleted}
                 disabled={isCompleting || isDeleting}
                 className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white transition disabled:cursor-not-allowed ${
@@ -4035,6 +4526,90 @@ function getCompactWeatherLabel(weatherCode: number | null) {
   return "Forecast";
 }
 
+function normalizeWorkspaceRoutePage(value: unknown): PageKey {
+  return WORKSPACE_ROUTE_PAGE_KEYS.includes(value as PageKey)
+      ? (value as PageKey)
+      : "dashboard";
+}
+
+function getWorkspaceRouteNumber(value: string | null) {
+  const numericValue = Number(value);
+
+  return Number.isInteger(numericValue) && numericValue > 0 ? numericValue : null;
+}
+
+function getWorkspaceRouteText(value: string | null) {
+  const text = value?.trim() ?? "";
+
+  return text || null;
+}
+
+function getWorkspaceRouteFromLocation(): WorkspaceRouteState {
+  if (typeof window === "undefined") {
+    return {
+      page: "dashboard",
+      selectedCustomerId: null,
+      selectedScheduledJobId: null,
+      jobProfileBackPage: "schedule",
+      selectedQuoteId: null,
+      selectedInvoiceId: null,
+    };
+  }
+
+  const params = new URLSearchParams(window.location.search);
+
+  return {
+    page: normalizeWorkspaceRoutePage(params.get("page")),
+    selectedCustomerId: getWorkspaceRouteNumber(params.get("customer")),
+    selectedScheduledJobId: getWorkspaceRouteText(params.get("job")),
+    jobProfileBackPage: params.get("jobBack") === "jobs" ? "jobs" : "schedule",
+    selectedQuoteId: getWorkspaceRouteText(params.get("quote")),
+    selectedInvoiceId: getWorkspaceRouteText(params.get("invoice")),
+  };
+}
+
+function getWorkspaceRouteUrl(route: WorkspaceRouteState) {
+  const params = new URLSearchParams(window.location.search);
+
+  if (route.page === "dashboard") {
+    params.delete("page");
+  } else {
+    params.set("page", route.page);
+  }
+
+  params.delete("customer");
+  params.delete("job");
+  params.delete("jobBack");
+  params.delete("quote");
+  params.delete("invoice");
+
+  if (
+      (route.page === "customerProfile" ||
+          route.page === "quoteForm" ||
+          route.page === "invoiceForm") &&
+      route.selectedCustomerId != null
+  ) {
+    params.set("customer", String(route.selectedCustomerId));
+  }
+
+  if (route.page === "scheduledJobProfile" && route.selectedScheduledJobId) {
+    params.set("job", route.selectedScheduledJobId);
+    params.set("jobBack", route.jobProfileBackPage);
+  }
+
+  if (route.page === "quoteForm" && route.selectedQuoteId) {
+    params.set("quote", route.selectedQuoteId);
+  }
+
+  if (route.page === "invoiceForm" && route.selectedInvoiceId) {
+    params.set("invoice", route.selectedInvoiceId);
+  }
+
+  const query = params.toString();
+
+  return `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
+}
+
 export default function JobsApp({
   featureAccess,
   subscriptionPlan,
@@ -4065,9 +4640,14 @@ export default function JobsApp({
       () => getSubscriptionStaffLimit(subscriptionPlan, staffAddonQuantity),
       [staffAddonQuantity, subscriptionPlan]
   );
-  const [page, setPage] = useState<PageKey>("dashboard");
+  const initialWorkspaceRouteRef = useRef<WorkspaceRouteState | null>(null);
+  if (initialWorkspaceRouteRef.current === null) {
+    initialWorkspaceRouteRef.current = getWorkspaceRouteFromLocation();
+  }
+  const initialWorkspaceRoute = initialWorkspaceRouteRef.current;
+  const [page, setPage] = useState<PageKey>(initialWorkspaceRoute.page);
   const [expandedNavSections, setExpandedNavSections] = useState<Record<string, boolean>>(
-      () => getExpandedNavSections(getNavSectionTitle("dashboard"))
+      () => getExpandedNavSections(getNavSectionTitle(initialWorkspaceRoute.page))
   );
 
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -4114,6 +4694,15 @@ export default function JobsApp({
   const [invoices, setInvoices] = useState<Invoice[]>(
       DEFAULT_PERSISTED_APP_STATE.invoices
   );
+  const [expenseSuppliers, setExpenseSuppliers] = useState<ExpenseSupplier[]>(
+      DEFAULT_PERSISTED_APP_STATE.expenseSuppliers
+  );
+  const [expenseProducts, setExpenseProducts] = useState<ExpenseProduct[]>(
+      DEFAULT_PERSISTED_APP_STATE.expenseProducts
+  );
+  const [expenses, setExpenses] = useState<ExpenseRecord[]>(
+      DEFAULT_PERSISTED_APP_STATE.expenses
+  );
   const [invoicesWriteFallbackActive, setInvoicesWriteFallbackActive] = useState(
       DEFAULT_PERSISTED_APP_STATE.invoicesWriteFallbackActive
   );
@@ -4123,11 +4712,21 @@ export default function JobsApp({
   const [recurringInvoiceTemplatesFallbackActive, setRecurringInvoiceTemplatesFallbackActive] =
       useState(DEFAULT_PERSISTED_APP_STATE.recurringInvoiceTemplatesFallbackActive);
 
-  const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
-  const [selectedScheduledJobId, setSelectedScheduledJobId] = useState<string | null>(null);
-  const [jobProfileBackPage, setJobProfileBackPage] = useState<"schedule" | "jobs">("schedule");
-  const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(null);
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(
+      initialWorkspaceRoute.selectedCustomerId
+  );
+  const [selectedScheduledJobId, setSelectedScheduledJobId] = useState<string | null>(
+      initialWorkspaceRoute.selectedScheduledJobId
+  );
+  const [jobProfileBackPage, setJobProfileBackPage] = useState<"schedule" | "jobs">(
+      initialWorkspaceRoute.jobProfileBackPage
+  );
+  const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(
+      initialWorkspaceRoute.selectedQuoteId
+  );
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(
+      initialWorkspaceRoute.selectedInvoiceId
+  );
   const [pendingQuoteSchedule, setPendingQuoteSchedule] =
       useState<PendingQuoteSchedule | null>(null);
   const [pendingLeadQuoteDraft, setPendingLeadQuoteDraft] =
@@ -4170,11 +4769,37 @@ export default function JobsApp({
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
   const [loggedInStaffName, setLoggedInStaffName] = useState("Staff Member");
+  const [editSessions, setEditSessions] = useState<EditSessionRecord[]>([]);
+  const [editSaveRequest, setEditSaveRequest] = useState<{
+    resourceKey: string;
+    requestId: number;
+  } | null>(null);
+  const [editDiscardRequest, setEditDiscardRequest] = useState<{
+    resourceKey: string;
+    requestId: number;
+  } | null>(null);
+  const [inactiveEditResourceKey, setInactiveEditResourceKey] = useState<string | null>(
+      null
+  );
+  const [refreshEditNotice, setRefreshEditNotice] =
+      useState<EditSessionRecord | null>(null);
+  const editSessionIdsRef = useRef<Record<string, string>>({});
+  const editSessionChannelRef = useRef<BroadcastChannel | null>(null);
+  const editRealtimeChannelRef = useRef<SupabaseRealtimeChannel | null>(null);
+  const editSessionsRef = useRef<EditSessionRecord[]>([]);
+  const handledFinishedSessionIdsRef = useRef<Set<string>>(new Set());
+  const lastInactiveActionKeyRef = useRef<string | null>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [headerWeather, setHeaderWeather] = useState<HeaderWeatherState | null>(null);
   const [headerWeatherLoading, setHeaderWeatherLoading] = useState(true);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isHelpLauncherOpen, setIsHelpLauncherOpen] = useState(false);
+  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(() =>
+      readStoredBooleanPreference(ONBOARDING_COMPLETED_STORAGE_KEY, false)
+  );
+  const [addCustomerHelpRequestId, setAddCustomerHelpRequestId] = useState(0);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
+  const shouldReplaceWorkspaceRouteRef = useRef(true);
 
   const staffSystemReady =
       staffTablesReady.staffMembers && staffTablesReady.rolePermissions;
@@ -4419,12 +5044,93 @@ export default function JobsApp({
   }, [firstAccessiblePage, hasPageAccess, page]);
 
   useEffect(() => {
+    function handleWorkspacePopState() {
+      const nextRoute = getWorkspaceRouteFromLocation();
+
+      shouldReplaceWorkspaceRouteRef.current = true;
+      setIsUserMenuOpen(false);
+      setSelectedCustomerId(nextRoute.selectedCustomerId);
+      setSelectedScheduledJobId(nextRoute.selectedScheduledJobId);
+      setJobProfileBackPage(nextRoute.jobProfileBackPage);
+      setSelectedQuoteId(nextRoute.selectedQuoteId);
+      setSelectedInvoiceId(nextRoute.selectedInvoiceId);
+      if (nextRoute.page !== "quoteForm") {
+        setPendingLeadQuoteDraft(null);
+      }
+      setExpandedNavSections(
+          getExpandedNavSections(getNavSectionTitle(nextRoute.page))
+      );
+      setPage(nextRoute.page);
+    }
+
+    window.addEventListener("popstate", handleWorkspacePopState);
+
+    return () => {
+      window.removeEventListener("popstate", handleWorkspacePopState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const nextUrl = getWorkspaceRouteUrl({
+      page,
+      selectedCustomerId,
+      selectedScheduledJobId,
+      jobProfileBackPage,
+      selectedQuoteId,
+      selectedInvoiceId,
+    });
+    const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+
+    if (nextUrl === currentUrl) {
+      shouldReplaceWorkspaceRouteRef.current = false;
+      return;
+    }
+
+    if (shouldReplaceWorkspaceRouteRef.current) {
+      window.history.replaceState(null, "", nextUrl);
+      shouldReplaceWorkspaceRouteRef.current = false;
+      return;
+    }
+
+    window.history.pushState(null, "", nextUrl);
+  }, [
+    jobProfileBackPage,
+    page,
+    selectedCustomerId,
+    selectedInvoiceId,
+    selectedQuoteId,
+    selectedScheduledJobId,
+  ]);
+
+  useEffect(() => {
     function handleStorage(event: StorageEvent) {
-      if (event.key !== SETTINGS_STORAGE_KEY) {
+      if (event.key === SETTINGS_STORAGE_KEY) {
+        setAppSettings(loadAppSettings());
         return;
       }
 
-      setAppSettings(loadAppSettings());
+      if (event.key === HELP_ENABLED_STORAGE_KEY) {
+        setAppSettings((previousSettings) =>
+            mergeAppSettings({
+              ...previousSettings,
+              helpEnabled: readStoredBooleanPreference(
+                  HELP_ENABLED_STORAGE_KEY,
+                  previousSettings.helpEnabled
+              ),
+            })
+        );
+        return;
+      }
+
+      if (event.key === ONBOARDING_COMPLETED_STORAGE_KEY) {
+        setHasCompletedOnboarding(
+            readStoredBooleanPreference(ONBOARDING_COMPLETED_STORAGE_KEY, false)
+        );
+      }
     }
 
     window.addEventListener("storage", handleStorage);
@@ -4481,6 +5187,7 @@ export default function JobsApp({
 
     if (typeof window !== "undefined") {
       window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(merged));
+      writeStoredBooleanPreference(HELP_ENABLED_STORAGE_KEY, merged.helpEnabled);
     }
 
     setAppSettings(merged);
@@ -4538,6 +5245,27 @@ export default function JobsApp({
     workflowTablesReady,
   ]);
 
+  const updateHelpEnabled = useCallback((enabled: boolean) => {
+    setAppSettings((previousSettings) => {
+      const merged = mergeAppSettings({
+        ...previousSettings,
+        helpEnabled: enabled,
+      });
+
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(merged));
+        writeStoredBooleanPreference(HELP_ENABLED_STORAGE_KEY, enabled);
+      }
+
+      return merged;
+    });
+  }, []);
+
+  const markOnboardingCompleted = useCallback(() => {
+    writeStoredBooleanPreference(ONBOARDING_COMPLETED_STORAGE_KEY, true);
+    setHasCompletedOnboarding(true);
+  }, []);
+
   const buildPersistedAppState = useCallback(
       (overrides: Partial<PersistedAppState> = {}): PersistedAppState => ({
         version: 1,
@@ -4552,6 +5280,9 @@ export default function JobsApp({
         routeNotes,
         quotes,
         invoices,
+        expenseSuppliers,
+        expenseProducts,
+        expenses,
         recurringInvoiceTemplates,
         lockedRounds,
         activeRoundCycles,
@@ -4567,6 +5298,9 @@ export default function JobsApp({
       [
         activeRoundCycles,
         appSettings,
+        expenseProducts,
+        expenseSuppliers,
+        expenses,
         ignoredMoveSuggestionIds,
         invoiceHistory,
         invoiceReminders,
@@ -4610,6 +5344,257 @@ export default function JobsApp({
         getDatabaseSetupNotice(workflowTablesReady, staffTablesReady)
     );
   }, [staffTablesReady, workflowTablesReady]);
+
+  const persistExpenseWorkspaceData = useCallback(
+      async ({
+        nextSuppliers = expenseSuppliers,
+        nextProducts = expenseProducts,
+        nextExpenses = expenses,
+        nextSettings = appSettings,
+      }: {
+        nextSuppliers?: ExpenseSupplier[];
+        nextProducts?: ExpenseProduct[];
+        nextExpenses?: ExpenseRecord[];
+        nextSettings?: AppSettings;
+      }) => {
+        if (!isDatabaseReady || !canSyncAppState) {
+          return;
+        }
+
+        await persistAppStateSnapshot(
+            buildPersistedAppState({
+              expenseSuppliers: nextSuppliers,
+              expenseProducts: nextProducts,
+              expenses: nextExpenses,
+              appSettings: nextSettings,
+            })
+        );
+      },
+      [
+        appSettings,
+        buildPersistedAppState,
+        canSyncAppState,
+        expenseProducts,
+        expenseSuppliers,
+        expenses,
+        isDatabaseReady,
+        persistAppStateSnapshot,
+      ]
+  );
+
+  const saveExpenseSupplier = useCallback(
+      async (supplierDraft: ExpenseSupplierDraft) => {
+        const now = new Date().toISOString();
+        const supplier: ExpenseSupplier = {
+          id: createLocalEntityId("supplier"),
+          name: supplierDraft.name.trim(),
+          contactName: supplierDraft.contactName?.trim() ?? "",
+          email: supplierDraft.email?.trim() ?? "",
+          phone: supplierDraft.phone?.trim() ?? "",
+          website: supplierDraft.website?.trim() ?? "",
+          notes: supplierDraft.notes?.trim() ?? "",
+          createdAt: now,
+          updatedAt: now,
+        };
+        const nextSuppliers = [...expenseSuppliers, supplier];
+
+        setExpenseSuppliers(nextSuppliers);
+        await persistExpenseWorkspaceData({ nextSuppliers });
+      },
+      [expenseSuppliers, persistExpenseWorkspaceData]
+  );
+
+  const deleteExpenseSupplier = useCallback(
+      async (supplierId: string) => {
+        const now = new Date().toISOString();
+        const nextSuppliers = expenseSuppliers.filter(
+            (supplier) => supplier.id !== supplierId
+        );
+        const nextProducts = expenseProducts.map((product) =>
+            product.supplierId === supplierId
+                ? { ...product, supplierId: null, updatedAt: now }
+                : product
+        );
+        const nextExpenses = expenses.map((expense) =>
+            expense.supplierId === supplierId
+                ? { ...expense, supplierId: null, updatedAt: now }
+                : expense
+        );
+
+        setExpenseSuppliers(nextSuppliers);
+        setExpenseProducts(nextProducts);
+        setExpenses(nextExpenses);
+        await persistExpenseWorkspaceData({
+          nextSuppliers,
+          nextProducts,
+          nextExpenses,
+        });
+      },
+      [expenseProducts, expenseSuppliers, expenses, persistExpenseWorkspaceData]
+  );
+
+  const saveQuoteItemSettings = useCallback(
+      async (
+          nextQuoteServices: QuoteService[],
+          persistenceOverrides: {
+            nextProducts?: ExpenseProduct[];
+            nextSuppliers?: ExpenseSupplier[];
+            nextExpenses?: ExpenseRecord[];
+          } = {}
+      ) => {
+        const nextSettings = mergeAppSettings({
+          ...appSettings,
+          quoteServices: nextQuoteServices,
+        });
+
+        setAppSettings(nextSettings);
+
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem(
+              SETTINGS_STORAGE_KEY,
+              JSON.stringify(nextSettings)
+          );
+          writeStoredBooleanPreference(
+              HELP_ENABLED_STORAGE_KEY,
+              nextSettings.helpEnabled
+          );
+        }
+
+        await syncQuoteItemsTable(nextSettings.quoteServices);
+        await persistExpenseWorkspaceData({
+          ...persistenceOverrides,
+          nextSettings,
+        });
+      },
+      [appSettings, persistExpenseWorkspaceData, syncQuoteItemsTable]
+  );
+
+  const saveExpenseProduct = useCallback(
+      async (productDraft: ExpenseProductDraft) => {
+        const now = new Date().toISOString();
+        const product: ExpenseProduct = {
+          id: createLocalEntityId("product"),
+          name: productDraft.name.trim(),
+          supplierId: productDraft.supplierId || null,
+          sku: productDraft.sku?.trim() ?? "",
+          category: productDraft.category.trim() || "Materials",
+          unitCost: roundCurrency(productDraft.unitCost),
+          quotePrice: roundCurrency(productDraft.quotePrice || productDraft.unitCost),
+          isQuoteItem: Boolean(productDraft.isQuoteItem),
+          notes: productDraft.notes?.trim() ?? "",
+          createdAt: now,
+          updatedAt: now,
+        };
+        const nextProducts = [...expenseProducts, product];
+
+        setExpenseProducts(nextProducts);
+
+        if (product.isQuoteItem) {
+          await saveQuoteItemSettings(
+              mergeQuoteService(
+                  appSettings.quoteServices,
+                  mapExpenseProductToQuoteService(product)
+              ),
+              { nextProducts }
+          );
+          return;
+        }
+
+        await persistExpenseWorkspaceData({ nextProducts });
+      },
+      [
+        appSettings.quoteServices,
+        expenseProducts,
+        persistExpenseWorkspaceData,
+        saveQuoteItemSettings,
+      ]
+  );
+
+  const deleteExpenseProduct = useCallback(
+      async (productId: string) => {
+        const now = new Date().toISOString();
+        const nextProducts = expenseProducts.filter(
+            (product) => product.id !== productId
+        );
+        const nextExpenses = expenses.map((expense) =>
+            expense.productId === productId
+                ? { ...expense, productId: null, updatedAt: now }
+                : expense
+        );
+
+        setExpenseProducts(nextProducts);
+        setExpenses(nextExpenses);
+        await persistExpenseWorkspaceData({ nextProducts, nextExpenses });
+      },
+      [expenseProducts, expenses, persistExpenseWorkspaceData]
+  );
+
+  const addExpenseProductToQuoteItems = useCallback(
+      async (productId: string) => {
+        const existingProduct = expenseProducts.find(
+            (product) => product.id === productId
+        );
+
+        if (!existingProduct) {
+          throw new Error("Product not found.");
+        }
+
+        const now = new Date().toISOString();
+        const quoteReadyProduct: ExpenseProduct = {
+          ...existingProduct,
+          isQuoteItem: true,
+          updatedAt: now,
+        };
+        const nextProducts = expenseProducts.map((product) =>
+            product.id === productId ? quoteReadyProduct : product
+        );
+
+        setExpenseProducts(nextProducts);
+        await saveQuoteItemSettings(
+            mergeQuoteService(
+                appSettings.quoteServices,
+                mapExpenseProductToQuoteService(quoteReadyProduct)
+            ),
+            { nextProducts }
+        );
+      },
+      [appSettings.quoteServices, expenseProducts, saveQuoteItemSettings]
+  );
+
+  const saveExpenseRecord = useCallback(
+      async (expenseDraft: ExpenseRecordDraft) => {
+        const now = new Date().toISOString();
+        const expense: ExpenseRecord = {
+          id: createLocalEntityId("expense"),
+          date: getInputDateValue(expenseDraft.date) || getTodayDateInputValue(),
+          supplierId: expenseDraft.supplierId || null,
+          productId: expenseDraft.productId || null,
+          category: expenseDraft.category.trim() || "Other",
+          description: expenseDraft.description.trim(),
+          amount: roundCurrency(expenseDraft.amount),
+          paymentMethod: expenseDraft.paymentMethod?.trim() ?? "",
+          receiptReference: expenseDraft.receiptReference?.trim() ?? "",
+          notes: expenseDraft.notes?.trim() ?? "",
+          createdAt: now,
+          updatedAt: now,
+        };
+        const nextExpenses = [expense, ...expenses];
+
+        setExpenses(nextExpenses);
+        await persistExpenseWorkspaceData({ nextExpenses });
+      },
+      [expenses, persistExpenseWorkspaceData]
+  );
+
+  const deleteExpenseRecord = useCallback(
+      async (expenseId: string) => {
+        const nextExpenses = expenses.filter((expense) => expense.id !== expenseId);
+
+        setExpenses(nextExpenses);
+        await persistExpenseWorkspaceData({ nextExpenses });
+      },
+      [expenses, persistExpenseWorkspaceData]
+  );
 
   const syncRecurringInvoiceTemplatesFallback = useCallback(
       async (
@@ -5202,6 +6187,9 @@ export default function JobsApp({
         setQuotes(nextQuotes);
         setQuotesTableInitialized(nextQuotesTableInitialized);
         setInvoices(nextInvoices);
+        setExpenseSuppliers(nextState.expenseSuppliers);
+        setExpenseProducts(nextState.expenseProducts);
+        setExpenses(nextState.expenses);
         setInvoicesWriteFallbackActive(nextInvoicesWriteFallbackActive);
         setRecurringInvoiceTemplates(nextRecurringInvoiceTemplates);
         setRecurringInvoiceTemplatesFallbackActive(
@@ -5226,6 +6214,12 @@ export default function JobsApp({
         const resolvedAppSettings = mergeAppSettings({
           ...(hasPersistedAppSettings ? nextState.appSettings : localAppSettings),
           quoteServices: nextQuoteServices,
+          helpEnabled: readStoredBooleanPreference(
+              HELP_ENABLED_STORAGE_KEY,
+              hasPersistedAppSettings
+                  ? nextState.appSettings.helpEnabled
+                  : localAppSettings.helpEnabled
+          ),
           defaultRotationWeeks:
               organizationDefaultRotationWeeks ??
               (hasPersistedAppSettings
@@ -5237,6 +6231,10 @@ export default function JobsApp({
           window.localStorage.setItem(
               SETTINGS_STORAGE_KEY,
               JSON.stringify(resolvedAppSettings)
+          );
+          writeStoredBooleanPreference(
+              HELP_ENABLED_STORAGE_KEY,
+              resolvedAppSettings.helpEnabled
           );
         }
         setWorkflowTablesReady(nextWorkflowTablesReady);
@@ -7998,22 +8996,22 @@ export default function JobsApp({
   ]);
 
   useEffect(() => {
-    if (page !== "scheduledJobProfile" || selectedScheduledJob) {
+    if (isHydrating || page !== "scheduledJobProfile" || selectedScheduledJob) {
       return;
     }
 
     setSelectedScheduledJobId(null);
     navigateToPage(jobProfileBackPage);
-  }, [jobProfileBackPage, page, selectedScheduledJob]);
+  }, [isHydrating, jobProfileBackPage, page, selectedScheduledJob]);
 
   useEffect(() => {
-    if (page !== "customerProfile" || selectedCustomer) {
+    if (isHydrating || page !== "customerProfile" || selectedCustomer) {
       return;
     }
 
     setSelectedCustomerId(null);
     navigateToPage("customers");
-  }, [page, selectedCustomer]);
+  }, [isHydrating, page, selectedCustomer]);
 
   useEffect(() => {
     if (!pendingQuoteSchedule) {
@@ -8568,10 +9566,6 @@ export default function JobsApp({
   }
 
   async function convertQuoteToInvoice(quoteId: string) {
-    if (!hasGrowthPlan) {
-      return;
-    }
-
     const quote = quotes.find((q) => q.id === quoteId);
     if (!quote) return;
 
@@ -8605,11 +9599,21 @@ export default function JobsApp({
       linkedQuoteId: quote.id,
     };
 
-    const invoiceCreated = await createInvoiceRecord(newInvoice);
+    const invoiceCreated = await createInvoiceRecord(newInvoice, {
+      navigateAfterSave: false,
+    });
 
     if (!invoiceCreated) {
       return;
     }
+
+    appendInvoiceHistory(
+        newInvoice.id,
+        createDocumentHistoryEntry(
+            "created",
+            `Created invoice ${newInvoice.invoiceNumber} from quote ${quote.quoteNumber}.`
+        )
+    );
 
     const relatedJobs = scheduledJobs.filter((job) =>
         (job.quoteIds ?? []).includes(quote.id)
@@ -8621,6 +9625,10 @@ export default function JobsApp({
         invoiceIds: Array.from(new Set([...(job.invoiceIds ?? []), newInvoice.id])),
       });
     }
+
+    setSelectedInvoiceId(newInvoice.id);
+    setSelectedCustomerId(newInvoice.customerId ?? null);
+    navigateToPage("invoiceForm");
   }
 
   async function deleteCustomer(customerId: number) {
@@ -8724,7 +9732,7 @@ export default function JobsApp({
 
     ensureCustomerRouteOrder(nextCustomer);
 
-    await createCustomer(nextCustomer as Customer);
+    return await createCustomer(nextCustomer as Customer);
   }
 
   async function updateCustomer(updated: Customer) {
@@ -9097,6 +10105,513 @@ export default function JobsApp({
     navigateToPage(nextPage);
   }
 
+  const publishEditSessions = useCallback((nextSessions: EditSessionRecord[]) => {
+    const prunedSessions = pruneEditSessions(nextSessions);
+
+    setEditSessions(prunedSessions);
+    editSessionsRef.current = prunedSessions;
+
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(
+          EDIT_SESSIONS_STORAGE_KEY,
+          JSON.stringify(prunedSessions)
+      );
+    }
+
+    editSessionChannelRef.current?.postMessage(prunedSessions);
+    void editRealtimeChannelRef.current?.send({
+      type: "broadcast",
+      event: EDIT_SESSION_REALTIME_EVENT,
+      payload: prunedSessions,
+    });
+  }, []);
+
+  const updateEditSessions = useCallback(
+      (
+          updater: (
+              sessions: EditSessionRecord[]
+          ) => EditSessionRecord[]
+      ) => {
+        const currentSessions = pruneEditSessions(
+            mergeEditSessionRecords(readStoredEditSessions(), editSessions)
+        );
+
+        publishEditSessions(updater(currentSessions));
+      },
+      [editSessions, publishEditSessions]
+  );
+
+  useEffect(() => {
+    editSessionsRef.current = editSessions;
+  }, [editSessions]);
+
+  useEffect(() => {
+    setEditSessions(pruneEditSessions(readStoredEditSessions()));
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== EDIT_SESSIONS_STORAGE_KEY) {
+        return;
+      }
+
+      const storedSessions = pruneEditSessions(readStoredEditSessions());
+      setEditSessions((currentSessions) =>
+          pruneEditSessions(mergeEditSessionRecords(currentSessions, storedSessions))
+      );
+    };
+
+    window.addEventListener("storage", handleStorage);
+
+    if ("BroadcastChannel" in window) {
+      const channel = new BroadcastChannel(EDIT_SESSION_CHANNEL_NAME);
+      editSessionChannelRef.current = channel;
+      channel.onmessage = (event: MessageEvent<unknown>) => {
+        if (!Array.isArray(event.data)) {
+          return;
+        }
+
+        const incomingSessions = pruneEditSessions(
+            normalizeEditSessionRecords(event.data)
+        );
+        setEditSessions((currentSessions) =>
+            pruneEditSessions(
+                mergeEditSessionRecords(currentSessions, incomingSessions)
+            )
+        );
+      };
+    }
+
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      editSessionChannelRef.current?.close();
+      editSessionChannelRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!currentOrganizationId) {
+      return;
+    }
+
+    const supabase = createSupabaseClient();
+    const channel = supabase.channel(
+        `${EDIT_SESSION_CHANNEL_NAME}:${currentOrganizationId}`
+    );
+    editRealtimeChannelRef.current = channel;
+
+    channel
+        .on("broadcast", { event: EDIT_SESSION_REALTIME_EVENT }, (message) => {
+          const incomingSessions = pruneEditSessions(
+              normalizeEditSessionRecords(
+                  (message as { payload?: unknown }).payload
+              )
+          );
+
+          if (incomingSessions.length === 0) {
+            return;
+          }
+
+          setEditSessions((currentSessions) =>
+              pruneEditSessions(
+                  mergeEditSessionRecords(currentSessions, incomingSessions)
+              )
+          );
+        })
+        .subscribe();
+
+    const heartbeatId = window.setInterval(() => {
+      const activeSessions = pruneEditSessions(editSessionsRef.current).filter(
+          (session) => session.status === "active"
+      );
+
+      if (activeSessions.length === 0) {
+        return;
+      }
+
+      void channel.send({
+        type: "broadcast",
+        event: EDIT_SESSION_REALTIME_EVENT,
+        payload: activeSessions,
+      });
+    }, EDIT_SESSION_HEARTBEAT_MS);
+
+    return () => {
+      window.clearInterval(heartbeatId);
+
+      if (editRealtimeChannelRef.current === channel) {
+        editRealtimeChannelRef.current = null;
+      }
+
+      void channel.unsubscribe();
+    };
+  }, [currentOrganizationId]);
+
+  const currentEditorIdentity = useMemo(
+      () => ({
+        userId: currentUserId ?? "local-user",
+        staffId: currentStaffMember?.id ?? null,
+        name: currentStaffMember?.fullName || loggedInStaffName,
+        email: currentStaffMember?.email ?? currentUserEmail,
+        phone: currentStaffMember?.phone ?? null,
+        isAdmin: currentUserIsAdmin,
+      }),
+      [
+        currentStaffMember?.email,
+        currentStaffMember?.fullName,
+        currentStaffMember?.id,
+        currentStaffMember?.phone,
+        currentUserEmail,
+        currentUserId,
+        currentUserIsAdmin,
+        loggedInStaffName,
+      ]
+  );
+
+  const upsertLocalEditSession = useCallback(
+      (resource: EditResource, draft: unknown, dirty: boolean) => {
+        const resourceKey = getEditResourceKey(resource);
+        const now = new Date().toISOString();
+        const existingSessionId =
+            editSessionIdsRef.current[resourceKey] ?? createEditSessionId();
+        editSessionIdsRef.current[resourceKey] = existingSessionId;
+
+        updateEditSessions((sessions) => {
+          const existingSession =
+              sessions.find((session) => session.sessionId === existingSessionId) ??
+              null;
+          const nextSession: EditSessionRecord = {
+            ...existingSession,
+            sessionId: existingSessionId,
+            resourceKey,
+            resourceType: resource.type,
+            resourceId: resource.id,
+            resourceLabel: getEditResourceLabel(resource.type, draft) || resource.label,
+            editorUserId: currentEditorIdentity.userId,
+            editorStaffId: currentEditorIdentity.staffId,
+            editorName: currentEditorIdentity.name,
+            editorEmail: currentEditorIdentity.email,
+            editorPhone: currentEditorIdentity.phone,
+            editorIsAdmin: currentEditorIdentity.isAdmin,
+            dirty,
+            draft,
+            status: "active",
+            startedAt: existingSession?.startedAt ?? now,
+            lastActiveAt: now,
+            updatedAt: now,
+            finishedAt: undefined,
+            finishedByUserId: undefined,
+          };
+
+          return [
+            nextSession,
+            ...sessions.filter((session) => session.sessionId !== existingSessionId),
+          ];
+        });
+
+        if (inactiveEditResourceKey === resourceKey) {
+          setInactiveEditResourceKey(null);
+          lastInactiveActionKeyRef.current = null;
+        }
+      },
+      [currentEditorIdentity, inactiveEditResourceKey, updateEditSessions]
+  );
+
+  const finishLocalEditSession = useCallback(
+      (resourceKey: string, status: EditSessionRecord["status"]) => {
+        const now = new Date().toISOString();
+
+        updateEditSessions((sessions) =>
+            sessions.map((session) =>
+                session.resourceKey === resourceKey &&
+                session.editorUserId === currentEditorIdentity.userId &&
+                session.status === "active"
+                    ? {
+                        ...session,
+                        dirty: false,
+                        status,
+                        updatedAt: now,
+                        finishedAt: now,
+                        finishedByUserId: currentEditorIdentity.userId,
+                      }
+                    : session
+            )
+        );
+        delete editSessionIdsRef.current[resourceKey];
+        setInactiveEditResourceKey(null);
+        lastInactiveActionKeyRef.current = null;
+      },
+      [currentEditorIdentity.userId, updateEditSessions]
+  );
+
+  const getEditFormCollaboration = useCallback(
+      <TDraft,>(resource: EditResource): EditFormCollaboration<TDraft> => {
+        const resourceKey = getEditResourceKey(resource);
+
+        return {
+          saveRequestId:
+              editSaveRequest?.resourceKey === resourceKey
+                  ? editSaveRequest.requestId
+                  : 0,
+          discardRequestId:
+              editDiscardRequest?.resourceKey === resourceKey
+                  ? editDiscardRequest.requestId
+                  : 0,
+          onDraftChange: (draft, dirty) => {
+            upsertLocalEditSession(resource, draft, dirty);
+          },
+          onSaveComplete: () => finishLocalEditSession(resourceKey, "saved"),
+          onDiscardComplete: () => finishLocalEditSession(resourceKey, "discarded"),
+        };
+      },
+      [
+        editDiscardRequest,
+        editSaveRequest,
+        finishLocalEditSession,
+        upsertLocalEditSession,
+      ]
+  );
+
+  const requestEditSave = useCallback((resourceKey: string) => {
+    setEditSaveRequest({ resourceKey, requestId: Date.now() });
+    setInactiveEditResourceKey(null);
+  }, []);
+
+  const requestEditDiscard = useCallback((resourceKey: string) => {
+    setEditDiscardRequest({ resourceKey, requestId: Date.now() });
+    setInactiveEditResourceKey(null);
+  }, []);
+
+  const markStillWorking = useCallback(
+      (session: EditSessionRecord) => {
+        const now = new Date().toISOString();
+
+        updateEditSessions((sessions) =>
+            sessions.map((entry) =>
+                entry.sessionId === session.sessionId
+                    ? { ...entry, lastActiveAt: now, updatedAt: now, status: "active" }
+                    : entry
+            )
+        );
+        setInactiveEditResourceKey(null);
+        lastInactiveActionKeyRef.current = null;
+      },
+      [updateEditSessions]
+  );
+
+  const activeLocalDirtySession = useMemo(
+      () =>
+          editSessions.find(
+              (session) =>
+                  session.editorUserId === currentEditorIdentity.userId &&
+                  session.status === "active" &&
+                  session.dirty
+          ) ?? null,
+      [currentEditorIdentity.userId, editSessions]
+  );
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      const session = activeLocalDirtySession;
+
+      if (!session) {
+        setInactiveEditResourceKey(null);
+        lastInactiveActionKeyRef.current = null;
+        return;
+      }
+
+      const inactiveForMs = Date.now() - new Date(session.lastActiveAt).getTime();
+      const warningAfterMs = appSettings.editInactivityMinutes * 60 * 1000;
+
+      if (inactiveForMs < warningAfterMs) {
+        return;
+      }
+
+      const actionKey = `${session.sessionId}:${session.lastActiveAt}:${appSettings.editInactiveAction}`;
+
+      if (lastInactiveActionKeyRef.current === actionKey) {
+        return;
+      }
+
+      lastInactiveActionKeyRef.current = actionKey;
+
+      if (appSettings.editInactiveAction === "auto_save") {
+        requestEditSave(session.resourceKey);
+        return;
+      }
+
+      if (appSettings.editInactiveAction === "auto_discard") {
+        requestEditDiscard(session.resourceKey);
+        return;
+      }
+
+      setInactiveEditResourceKey(session.resourceKey);
+    }, 10000);
+
+    return () => window.clearInterval(intervalId);
+  }, [
+    activeLocalDirtySession,
+    appSettings.editInactiveAction,
+    appSettings.editInactivityMinutes,
+    requestEditDiscard,
+    requestEditSave,
+  ]);
+
+  const visibleEditResourceKeys = useMemo(() => {
+    const keys = new Set<string>();
+
+    if (page === "customerProfile" && selectedCustomer) {
+      keys.add(getEditResourceKey({
+        type: "customer",
+        id: String(selectedCustomer.id),
+        label: selectedCustomer.name,
+      }));
+    }
+
+    if (page === "quoteForm") {
+      keys.add(
+          getEditResourceKey({
+            type: "quote",
+            id: selectedQuote?.id ?? `new-${currentEditorIdentity.userId}`,
+            label: selectedQuote?.quoteNumber ?? "New quote",
+          })
+      );
+    }
+
+    if (page === "invoiceForm") {
+      keys.add(
+          getEditResourceKey({
+            type: "invoice",
+            id: selectedInvoice?.id ?? `new-${currentEditorIdentity.userId}`,
+            label: selectedInvoice?.invoiceNumber ?? "New invoice",
+          })
+      );
+    }
+
+    return keys;
+  }, [
+    currentEditorIdentity.userId,
+    page,
+    selectedCustomer,
+    selectedInvoice,
+    selectedQuote,
+  ]);
+
+  const otherActiveEditSessions = useMemo(
+      () =>
+          editSessions.filter(
+              (session) =>
+                  session.status === "active" &&
+                  session.editorUserId !== currentEditorIdentity.userId
+          ),
+      [currentEditorIdentity.userId, editSessions]
+  );
+
+  useEffect(() => {
+    const finishedSession = editSessions.find((session) => {
+      if (
+          session.editorUserId === currentEditorIdentity.userId ||
+          session.status !== "saved" ||
+          handledFinishedSessionIdsRef.current.has(session.sessionId)
+      ) {
+        return false;
+      }
+
+      if (visibleEditResourceKeys.size === 0) {
+        return page === `${session.resourceType}s`;
+      }
+
+      return visibleEditResourceKeys.has(session.resourceKey);
+    });
+
+    if (!finishedSession) {
+      return;
+    }
+
+    handledFinishedSessionIdsRef.current.add(finishedSession.sessionId);
+    setRefreshEditNotice(finishedSession);
+  }, [currentEditorIdentity.userId, editSessions, page, visibleEditResourceKeys]);
+
+  useEffect(() => {
+    const externallyClosedSession = editSessions.find(
+        (session) =>
+            session.editorUserId === currentEditorIdentity.userId &&
+            (session.status === "discarded" || session.status === "saved") &&
+            session.finishedByUserId &&
+            session.finishedByUserId !== currentEditorIdentity.userId &&
+            !handledFinishedSessionIdsRef.current.has(session.sessionId)
+    );
+
+    if (!externallyClosedSession) {
+      return;
+    }
+
+    handledFinishedSessionIdsRef.current.add(externallyClosedSession.sessionId);
+    requestEditDiscard(externallyClosedSession.resourceKey);
+  }, [currentEditorIdentity.userId, editSessions, requestEditDiscard]);
+
+  async function handleAdminSaveEditSession(session: EditSessionRecord) {
+    if (!currentUserIsAdmin || !session.draft) {
+      return;
+    }
+
+    if (session.resourceType === "customer") {
+      const draftCustomer = session.draft as Customer;
+      const existingCustomer =
+          customers.find((customer) => customer.id === draftCustomer.id) ?? null;
+
+      if (existingCustomer) {
+        await saveCustomer(draftCustomer);
+      } else {
+        await createCustomer(draftCustomer);
+      }
+    }
+
+    if (session.resourceType === "quote") {
+      await addQuote(session.draft as Quote);
+    }
+
+    if (session.resourceType === "invoice") {
+      await addInvoice(session.draft as Invoice);
+    }
+
+    const now = new Date().toISOString();
+    updateEditSessions((sessions) =>
+        sessions.map((entry) =>
+            entry.sessionId === session.sessionId
+                ? {
+                    ...entry,
+                    dirty: false,
+                    status: "saved",
+                    updatedAt: now,
+                    finishedAt: now,
+                    finishedByUserId: currentEditorIdentity.userId,
+                  }
+                : entry
+        )
+    );
+  }
+
+  function handleAdminDiscardEditSession(session: EditSessionRecord) {
+    if (!currentUserIsAdmin) {
+      return;
+    }
+
+    const now = new Date().toISOString();
+    updateEditSessions((sessions) =>
+        sessions.map((entry) =>
+            entry.sessionId === session.sessionId
+                ? {
+                    ...entry,
+                    dirty: false,
+                    status: "discarded",
+                    updatedAt: now,
+                    finishedAt: now,
+                    finishedByUserId: currentEditorIdentity.userId,
+                  }
+                : entry
+        )
+    );
+  }
+
   function PlaceholderPage({
                              title,
                              description,
@@ -9135,7 +10650,17 @@ export default function JobsApp({
   const headerSubtitle =
       page === "dashboard"
           ? "Here's what's happening with your business today."
-          : `${todayPanel.week} - ${todayPanel.dayLabel}`;
+          : `Today is ${todayPanel.week}, ${todayPanel.dayLabel}. You are currently viewing`;
+  const roundStatusLabel = todayPanel.selectedDay
+      ? isTodayLocked
+          ? "Round is locked"
+          : "Round is active"
+      : "No round scheduled today";
+  const roundStatusClassName = todayPanel.selectedDay
+      ? isTodayLocked
+          ? "border-rose-200 bg-rose-50 text-rose-700"
+          : "border-emerald-200 bg-emerald-50 text-emerald-700"
+      : "border-slate-200 bg-slate-50 text-slate-600";
   const notificationCount = dashboardAttentionItems.length + newLeadsCount;
   const weatherTemperatureLabel =
       headerWeather?.temperature !== null && headerWeather?.temperature !== undefined
@@ -9150,6 +10675,53 @@ export default function JobsApp({
       : headerWeatherLoading
           ? "Loading"
           : "Unavailable";
+  const inactiveEditSession =
+      inactiveEditResourceKey && activeLocalDirtySession?.resourceKey === inactiveEditResourceKey
+          ? activeLocalDirtySession
+          : null;
+  const visibleOtherActiveEditSessions = otherActiveEditSessions
+      .filter((session) => {
+        if (currentUserIsAdmin && session.dirty) {
+          return true;
+        }
+
+        if (visibleEditResourceKeys.size > 0) {
+          return visibleEditResourceKeys.has(session.resourceKey);
+        }
+
+        return page === `${session.resourceType}s`;
+      })
+      .slice(0, 3);
+  const helpTourActions: HelpTourActions = {
+    navigateToPage: (nextPage: HelpTourPage) => {
+      navigateToPage(nextPage as PageKey);
+    },
+    openAddCustomer: () => {
+      navigateToPage("customers");
+      window.setTimeout(
+          () => setAddCustomerHelpRequestId((requestId) => requestId + 1),
+          160
+      );
+    },
+    openUserMenu: () => {
+      setIsUserMenuOpen(true);
+    },
+    raiseSupportTicket: (searchTerm) => {
+      const requestedGuide = searchTerm?.trim() ?? "";
+      const params = new URLSearchParams({ new: "1" });
+
+      if (requestedGuide) {
+        params.set("subject", `Guide request: ${requestedGuide}`);
+        params.set(
+          "body",
+          `I searched In App Help for "${requestedGuide}" but could not find a guide.`
+        );
+      }
+
+      window.location.href = `/support?${params.toString()}#new-ticket`;
+    },
+  };
+
   if (isHydrating) {
     return (
         <div className="flex min-h-screen items-center justify-center bg-[#edf1f2] p-6">
@@ -9169,15 +10741,31 @@ export default function JobsApp({
   }
 
   return (
+      <HelpProvider
+          helpEnabled={appSettings.helpEnabled}
+          hasCompletedOnboarding={hasCompletedOnboarding}
+          launcherOpen={isHelpLauncherOpen}
+          onLauncherOpenChange={setIsHelpLauncherOpen}
+          onHelpEnabledChange={updateHelpEnabled}
+          onOnboardingCompleted={markOnboardingCompleted}
+          actions={helpTourActions}
+      >
       <div className="min-h-screen bg-[#f7faf9] text-[#071426]">
         <div className="flex min-h-screen">
           <aside className="hidden w-[280px] shrink-0 flex-col bg-[#003c35] px-4 py-6 text-white shadow-[20px_0_60px_rgba(0,60,53,0.18)] lg:flex">
             <div className="px-2">
-              <img
-                  src="/roundhq-logo-long-white.png"
-                  alt="RoundHQ"
-                  className="h-auto max-h-12 w-[178px] object-contain"
-              />
+              <button
+                  type="button"
+                  onClick={() => navigateToPage("dashboard")}
+                  aria-label="Go to dashboard"
+                  className="rounded-xl p-1 transition hover:bg-white/[0.07] focus:outline-none focus:ring-2 focus:ring-[#20c766]"
+              >
+                <img
+                    src="/roundhq-logo-long-white.png"
+                    alt="RoundHQ"
+                    className="h-auto max-h-12 w-[178px] object-contain"
+                />
+              </button>
             </div>
 
             <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-left">
@@ -9207,19 +10795,28 @@ export default function JobsApp({
             <nav className="mt-8 flex-1 space-y-3 overflow-y-auto pr-1">
               {accessibleNavSections.map((section) => {
                 const activeSection = getNavSectionTitle(page) === section.title;
+                const sectionIsSingleItem = section.items.length === 1;
                 const sectionIsExpanded =
                     expandedNavSections[section.title] ?? activeSection;
                 const SectionChevron = sectionIsExpanded ? ChevronDown : ChevronRight;
                 const SectionIcon = section.items[0]?.icon ?? LayoutDashboard;
                 const sectionBadgeCount =
                     section.items.some((item) => item.key === "leads") ? newLeadsCount : 0;
+                const sectionTourTarget = section.items
+                    .map((item) => NAV_TOUR_TARGETS[item.key])
+                    .find(Boolean);
 
                 return (
                     <div key={section.title} className="space-y-1.5">
                       <button
                           type="button"
-                          onClick={() => toggleNavSection(section.title)}
-                          aria-expanded={sectionIsExpanded}
+                          data-tour={sectionTourTarget}
+                          onClick={() =>
+                              sectionIsSingleItem
+                                  ? handleSidebarNavigation(section.items[0].key)
+                                  : toggleNavSection(section.title)
+                          }
+                          aria-expanded={sectionIsSingleItem ? undefined : sectionIsExpanded}
                           className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm transition ${
                               activeSection
                                   ? "bg-[#20c766]/15 text-white shadow-[inset_0_0_0_1px_rgba(32,199,102,0.2)]"
@@ -9241,15 +10838,17 @@ export default function JobsApp({
                               {sectionBadgeCount}
                             </span>
                         ) : null}
-                        <SectionChevron
-                            size={16}
-                            className={`shrink-0 transition ${
-                                sectionIsExpanded ? "rotate-0 text-white" : "text-white/50"
-                            }`}
-                        />
+                        {sectionIsSingleItem ? null : (
+                            <SectionChevron
+                                size={16}
+                                className={`shrink-0 transition ${
+                                    sectionIsExpanded ? "rotate-0 text-white" : "text-white/50"
+                                }`}
+                            />
+                        )}
                       </button>
 
-                      {sectionIsExpanded ? (
+                      {!sectionIsSingleItem && sectionIsExpanded ? (
                           <div className="space-y-1 pl-3">
                             {section.items.map(({ key, label, icon: Icon }) => {
                               const active = page === key;
@@ -9259,6 +10858,7 @@ export default function JobsApp({
                                   <button
                                       key={key}
                                       type="button"
+                                      data-tour={NAV_TOUR_TARGETS[key]}
                                       onClick={() => handleSidebarNavigation(key)}
                                       className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] transition ${
                                           active
@@ -9320,6 +10920,7 @@ export default function JobsApp({
                             <button
                                 key={key}
                                 type="button"
+                                data-tour={NAV_TOUR_TARGETS[key]}
                                 onClick={() => handleSidebarNavigation(key)}
                                 className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold ${
                                     active
@@ -9341,50 +10942,53 @@ export default function JobsApp({
                   <h1 className="text-3xl font-black tracking-tight text-[#071426]">
                     {headerTitle}
                   </h1>
-                  <p className="mt-1 text-sm font-medium text-[#667085]">
-                    {headerSubtitle}
-                  </p>
-                  {page !== "dashboard" ? (
-                      <div className="mt-4 flex flex-wrap items-center gap-2">
-                        <span
-                            className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
-                                todayPanel.selectedDay
-                                    ? isTodayLocked
-                                        ? "bg-rose-100 text-rose-700"
-                                        : "bg-emerald-100 text-emerald-700"
-                                    : "bg-slate-100 text-slate-600"
-                            }`}
-                        >
-                          {todayPanel.selectedDay
-                              ? isTodayLocked
-                                  ? "Round is locked"
-                                  : "Round is active"
-                              : "No round scheduled today"}
-                        </span>
-                        <select
-                            value={selectedWeek}
-                            onChange={(e) => setSelectedWeek(e.target.value as WeekName)}
-                            className="rounded-xl border border-[#e5e7eb] bg-white px-3 py-2 text-xs font-semibold text-[#071426] outline-none transition hover:bg-[#f7faf9]"
-                        >
-                          {activeWeekOptions.map((week) => (
-                              <option key={week} value={week}>
-                                {getRotationCycleLabel(week, activeRotationWeeks)}
-                              </option>
-                          ))}
-                        </select>
-                        <select
-                            value={selectedDay}
-                            onChange={(e) => setSelectedDay(e.target.value as DayName)}
-                            className="rounded-xl border border-[#e5e7eb] bg-white px-3 py-2 text-xs font-semibold text-[#071426] outline-none transition hover:bg-[#f7faf9]"
-                        >
-                          {DAY_OPTIONS.map((day) => (
-                              <option key={day} value={day}>
-                                {day}
-                              </option>
-                          ))}
-                        </select>
+                  {page === "dashboard" ? (
+                      <p className="mt-1 text-sm font-medium text-[#667085]">
+                        {headerSubtitle}
+                      </p>
+                  ) : (
+                      <div className="mt-3 inline-flex max-w-full flex-col gap-2 rounded-2xl border border-[#d7efe5] bg-white/90 p-2 shadow-[0_10px_26px_rgba(7,20,38,0.05)]">
+                        <p className="px-2 pt-1 text-xs font-semibold uppercase tracking-[0.08em] text-[#667085]">
+                          Today is{" "}
+                          <span className="font-black text-[#003c35]">
+                            {todayPanel.week}, {todayPanel.dayLabel}
+                          </span>
+                          . You are currently viewing
+                        </p>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <select
+                              value={selectedWeek}
+                              aria-label="Select week to view"
+                              onChange={(e) => setSelectedWeek(e.target.value as WeekName)}
+                              className="h-9 rounded-xl border border-[#d7efe5] bg-[#f7faf9] px-3 text-xs font-bold text-[#071426] outline-none transition hover:border-emerald-200 hover:bg-white focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                          >
+                            {activeWeekOptions.map((week) => (
+                                <option key={week} value={week}>
+                                  {getRotationCycleLabel(week, activeRotationWeeks)}
+                                </option>
+                            ))}
+                          </select>
+                          <select
+                              value={selectedDay}
+                              aria-label="Select day to view"
+                              onChange={(e) => setSelectedDay(e.target.value as DayName)}
+                              className="h-9 rounded-xl border border-[#d7efe5] bg-[#f7faf9] px-3 text-xs font-bold text-[#071426] outline-none transition hover:border-emerald-200 hover:bg-white focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                          >
+                            {DAY_OPTIONS.map((day) => (
+                                <option key={day} value={day}>
+                                  {day}
+                                </option>
+                            ))}
+                          </select>
+                          <span
+                              className={`inline-flex h-9 items-center rounded-xl border px-3 text-xs font-bold ${roundStatusClassName}`}
+                          >
+                            {roundStatusLabel}
+                          </span>
+                        </div>
                       </div>
-                  ) : null}
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -9417,9 +11021,23 @@ export default function JobsApp({
                         <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-[#20c766] ring-2 ring-white" />
                     ) : null}
                   </button>
+                  <button
+                      type="button"
+                      aria-label="Need help?"
+                      title="Need Help?"
+                      data-tour="in-app-help-button"
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
+                        setIsHelpLauncherOpen(true);
+                      }}
+                      className="flex h-11 w-11 items-center justify-center rounded-full border border-[#e5e7eb] bg-white text-[#071426] shadow-[0_10px_24px_rgba(7,20,38,0.05)] transition hover:-translate-y-0.5 hover:text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                  >
+                    <HelpCircle size={19} />
+                  </button>
                   <div ref={userMenuRef} className="relative">
                     <button
                         type="button"
+                        data-tour="user-menu-pill"
                         onClick={() => setIsUserMenuOpen((open) => !open)}
                         aria-haspopup="menu"
                         aria-expanded={isUserMenuOpen}
@@ -9452,6 +11070,7 @@ export default function JobsApp({
                           <a
                               href="/support"
                               role="menuitem"
+                              data-tour="support-menu-item"
                               onClick={() => setIsUserMenuOpen(false)}
                               className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-[#071426] transition hover:bg-[#f7faf9] hover:text-emerald-700"
                           >
@@ -9459,7 +11078,7 @@ export default function JobsApp({
                               <HelpCircle size={17} />
                             </span>
                             <span>
-                              <span className="block">Help and support</span>
+                              <span className="block">Helpdesk</span>
                               <span className="text-xs font-medium text-[#667085]">
                                 View guides and raise tickets
                               </span>
@@ -9468,6 +11087,7 @@ export default function JobsApp({
                           <a
                               href="/billing"
                               role="menuitem"
+                              data-tour="billing-menu-item"
                               onClick={() => setIsUserMenuOpen(false)}
                               className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-[#071426] transition hover:bg-[#f7faf9] hover:text-emerald-700"
                           >
@@ -9515,6 +11135,135 @@ export default function JobsApp({
                     {databaseError}
                   </section>
               )}
+
+              {refreshEditNotice ? (
+                  <section className="mb-5 rounded-3xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 shadow-sm">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="font-black">Changes have been made.</p>
+                        <p className="mt-1 text-emerald-800">
+                          {refreshEditNotice.editorName} finished editing{" "}
+                          {refreshEditNotice.resourceLabel}. Would you like to refresh?
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                            type="button"
+                            onClick={() => window.location.reload()}
+                            className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white transition hover:bg-emerald-700"
+                        >
+                          Refresh now
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setRefreshEditNotice(null)}
+                            className="rounded-xl border border-emerald-200 bg-white px-4 py-2 text-sm font-black text-emerald-800 transition hover:bg-emerald-100"
+                        >
+                          Later
+                        </button>
+                      </div>
+                    </div>
+                  </section>
+              ) : null}
+
+              {inactiveEditSession ? (
+                  <section className="mb-5 rounded-3xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-sm">
+                    <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                      <div>
+                        <p className="font-black">You have been inactive.</p>
+                        <p className="mt-1 text-amber-900">
+                          Unsaved changes on {inactiveEditSession.resourceLabel} could be discarded.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                            type="button"
+                            onClick={() => markStillWorking(inactiveEditSession)}
+                            className="rounded-xl border border-amber-300 bg-white px-4 py-2 text-sm font-black text-amber-900 transition hover:bg-amber-100"
+                        >
+                          I&apos;m still working
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => requestEditSave(inactiveEditSession.resourceKey)}
+                            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-black text-white transition hover:bg-slate-800"
+                        >
+                          I&apos;m finished, save changes
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => requestEditDiscard(inactiveEditSession.resourceKey)}
+                            className="rounded-xl border border-red-200 bg-white px-4 py-2 text-sm font-black text-red-700 transition hover:bg-red-50"
+                        >
+                          Discard changes
+                        </button>
+                      </div>
+                    </div>
+                  </section>
+              ) : null}
+
+              {visibleOtherActiveEditSessions.length > 0 ? (
+                  <section className="mb-5 rounded-3xl border border-blue-100 bg-white px-4 py-3 text-sm shadow-sm">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div>
+                        <p className="font-black text-slate-900">Active edits</p>
+                        <div className="mt-2 space-y-2">
+                          {visibleOtherActiveEditSessions.map((session) => (
+                              <div
+                                  key={session.sessionId}
+                                  className="rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2"
+                              >
+                                <p className="font-semibold text-slate-900">
+                                  {session.editorName} is editing {session.resourceLabel}
+                                  {session.dirty ? " with unsaved changes" : ""}.
+                                </p>
+                                <div className="mt-1 flex flex-wrap gap-3 text-xs font-semibold text-slate-500">
+                                  {session.editorPhone ? (
+                                      <a
+                                          href={`tel:${session.editorPhone}`}
+                                          className="inline-flex items-center gap-1 text-emerald-700 hover:text-emerald-900"
+                                      >
+                                        <Phone size={13} />
+                                        {session.editorPhone}
+                                      </a>
+                                  ) : null}
+                                  {session.editorEmail ? <span>{session.editorEmail}</span> : null}
+                                </div>
+                                {currentUserIsAdmin && session.dirty ? (
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                      <button
+                                          type="button"
+                                          onClick={() => void handleAdminSaveEditSession(session)}
+                                          className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white transition hover:bg-emerald-700"
+                                      >
+                                        <Save size={14} />
+                                        Save unsaved changes
+                                      </button>
+                                      <button
+                                          type="button"
+                                          onClick={() => handleAdminDiscardEditSession(session)}
+                                          className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-black text-red-700 transition hover:bg-red-50"
+                                      >
+                                        <Trash2 size={14} />
+                                        Discard unsaved changes
+                                      </button>
+                                    </div>
+                                ) : null}
+                              </div>
+                          ))}
+                        </div>
+                      </div>
+                      <button
+                          type="button"
+                          onClick={() => setEditSessions([])}
+                          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 transition hover:bg-slate-50"
+                      >
+                        <X size={14} />
+                        Hide
+                      </button>
+                    </div>
+                  </section>
+              ) : null}
 
               {!hasPageAccess(page) ? (
                   <AccessPendingPage />
@@ -9730,10 +11479,18 @@ export default function JobsApp({
                       defaultRotationWeeks={defaultRotationWeeks}
                       customerLimit={activeSubscriptionPlan.customerLimit}
                       allowCommercialTools={hasGrowthPlan}
+                      autoOpenAddCustomerRequestId={addCustomerHelpRequestId}
                       onAdd={addCustomer as any}
                       onUpdate={updateCustomer as any}
                       onDelete={deleteCustomer}
                       onOpenCustomer={openCustomerProfile}
+                      getCustomerEditCollaboration={(customer) =>
+                          getEditFormCollaboration<Customer>({
+                            type: "customer",
+                            id: customer ? String(customer.id) : `new-${currentEditorIdentity.userId}`,
+                            label: customer?.name ?? "New customer",
+                          })
+                      }
                   />
               )}
 
@@ -9770,6 +11527,22 @@ export default function JobsApp({
                   />
               )}
 
+              {page === "expenses" && (
+                  <ExpensesPage
+                      suppliers={expenseSuppliers}
+                      products={expenseProducts}
+                      expenses={expenses}
+                      currencyCode={appSettings.currencyCode}
+                      onSaveSupplier={saveExpenseSupplier}
+                      onDeleteSupplier={deleteExpenseSupplier}
+                      onSaveProduct={saveExpenseProduct}
+                      onDeleteProduct={deleteExpenseProduct}
+                      onSaveExpense={saveExpenseRecord}
+                      onDeleteExpense={deleteExpenseRecord}
+                      onAddProductToQuoteItems={addExpenseProductToQuoteItems}
+                  />
+              )}
+
               {page === "customerProfile" && selectedCustomer && (
                   <CustomerProfilePage
                       customer={selectedCustomer}
@@ -9796,9 +11569,16 @@ export default function JobsApp({
                         bankSortCode: appSettings.bankSortCode,
                         bankAccountNumber: appSettings.bankAccountNumber,
                         bankPaymentReference: appSettings.bankPaymentReference,
-                        logoUrl: appSettings.logoUrl || "/logo.png",
+                        logoUrl: appSettings.logoUrl,
                         primaryColor: appSettings.primaryColor,
                         secondaryColor: appSettings.secondaryColor,
+                        pdfHeaderStyle: appSettings.pdfHeaderStyle,
+                        pdfLogoBackground: appSettings.pdfLogoBackground,
+                        pdfLogoScale: appSettings.pdfLogoScale,
+                        pdfShowLogo: appSettings.pdfShowLogo,
+                        pdfShowFooter: appSettings.pdfShowFooter,
+                        pdfShowBusinessDetails: appSettings.pdfShowBusinessDetails,
+                        pdfFooterText: appSettings.pdfFooterText,
                         emailFromName: appSettings.emailFromName,
                         emailFromAddress: appSettings.emailFromAddress,
                         emailReplyTo: appSettings.emailReplyTo,
@@ -9819,6 +11599,13 @@ export default function JobsApp({
                       onOpenPayments={() => navigateToPage("payments")}
                       onTogglePaid={togglePaid}
                       onUpdateCustomer={updateCustomer}
+                      getCustomerEditCollaboration={(customer) =>
+                          getEditFormCollaboration<Customer>({
+                            type: "customer",
+                            id: String(customer.id),
+                            label: customer.name,
+                          })
+                      }
                       onCreateQuote={(customerId: number) => openNewQuoteForm(customerId)}
                       onCreateInvoice={(customerId: number) =>
                           openNewInvoiceForm(customerId)
@@ -9898,9 +11685,16 @@ export default function JobsApp({
                         county: appSettings.county,
                         postcode: appSettings.postcode,
                         defaultQuoteTerms: appSettings.defaultQuoteTerms,
-                        logoUrl: appSettings.logoUrl || "/logo.png",
+                        logoUrl: appSettings.logoUrl,
                         primaryColor: appSettings.primaryColor,
                         secondaryColor: appSettings.secondaryColor,
+                        pdfHeaderStyle: appSettings.pdfHeaderStyle,
+                        pdfLogoBackground: appSettings.pdfLogoBackground,
+                        pdfLogoScale: appSettings.pdfLogoScale,
+                        pdfShowLogo: appSettings.pdfShowLogo,
+                        pdfShowFooter: appSettings.pdfShowFooter,
+                        pdfShowBusinessDetails: appSettings.pdfShowBusinessDetails,
+                        pdfFooterText: appSettings.pdfFooterText,
                         emailFromName: appSettings.emailFromName,
                         emailFromAddress: appSettings.emailFromAddress,
                         emailReplyTo: appSettings.emailReplyTo,
@@ -9979,8 +11773,18 @@ export default function JobsApp({
                       initialItems={pendingLeadQuoteDraft?.initialItems}
                       savedServices={appSettings.quoteServices}
                       pressureWashRatePerSquareMetre={appSettings.defaultPressureWashRate}
+                      defaultRotationWeeks={defaultRotationWeeks}
                       allowCommercialTools={hasGrowthPlan}
+                      editCollaboration={getEditFormCollaboration<Quote>({
+                        type: "quote",
+                        id: selectedQuote?.id ?? `new-${currentEditorIdentity.userId}`,
+                        label: selectedQuote?.quoteNumber ?? "New quote",
+                      })}
                       onSave={addQuote as any}
+                      onCreateCustomer={addCustomer}
+                      onConvertToInvoice={
+                          selectedQuote ? convertQuoteToInvoice : undefined
+                      }
                       onBack={() => {
                         setPendingLeadQuoteDraft(null);
                         navigateToPage("quotes");
@@ -10013,9 +11817,16 @@ export default function JobsApp({
                         bankSortCode: appSettings.bankSortCode,
                         bankAccountNumber: appSettings.bankAccountNumber,
                         bankPaymentReference: appSettings.bankPaymentReference,
-                        logoUrl: appSettings.logoUrl || "/logo.png",
+                        logoUrl: appSettings.logoUrl,
                         primaryColor: appSettings.primaryColor,
                         secondaryColor: appSettings.secondaryColor,
+                        pdfHeaderStyle: appSettings.pdfHeaderStyle,
+                        pdfLogoBackground: appSettings.pdfLogoBackground,
+                        pdfLogoScale: appSettings.pdfLogoScale,
+                        pdfShowLogo: appSettings.pdfShowLogo,
+                        pdfShowFooter: appSettings.pdfShowFooter,
+                        pdfShowBusinessDetails: appSettings.pdfShowBusinessDetails,
+                        pdfFooterText: appSettings.pdfFooterText,
                         emailFromName: appSettings.emailFromName,
                         emailFromAddress: appSettings.emailFromAddress,
                         emailReplyTo: appSettings.emailReplyTo,
@@ -10073,8 +11884,15 @@ export default function JobsApp({
                       defaultPaymentTermsDays={appSettings.paymentTermsDays}
                       defaultVatRegistered={appSettings.vatRegistered}
                       defaultVatRate={appSettings.vatRate}
+                      defaultRotationWeeks={defaultRotationWeeks}
                       allowCommercialTools={hasGrowthPlan}
+                      editCollaboration={getEditFormCollaboration<Invoice>({
+                        type: "invoice",
+                        id: selectedInvoice?.id ?? `new-${currentEditorIdentity.userId}`,
+                        label: selectedInvoice?.invoiceNumber ?? "New invoice",
+                      })}
                       onSave={addInvoice as any}
+                      onCreateCustomer={addCustomer}
                       onBack={() => navigateToPage("invoices")}
                   />
               )}
@@ -10091,9 +11909,16 @@ export default function JobsApp({
                         businessEmail: appSettings.businessEmail,
                         businessPhone: appSettings.businessPhone,
                         website: appSettings.website,
-                        logoUrl: appSettings.logoUrl || "/logo.png",
+                        logoUrl: appSettings.logoUrl,
                         primaryColor: appSettings.primaryColor,
                         secondaryColor: appSettings.secondaryColor,
+                        pdfHeaderStyle: appSettings.pdfHeaderStyle,
+                        pdfLogoBackground: appSettings.pdfLogoBackground,
+                        pdfLogoScale: appSettings.pdfLogoScale,
+                        pdfShowLogo: appSettings.pdfShowLogo,
+                        pdfShowFooter: appSettings.pdfShowFooter,
+                        pdfShowBusinessDetails: appSettings.pdfShowBusinessDetails,
+                        pdfFooterText: appSettings.pdfFooterText,
                       }}
                       onCreate={createCommercialRamsRecord}
                       onUpdate={saveCommercialRamsRecord}
@@ -10104,6 +11929,7 @@ export default function JobsApp({
               {page === "settings" && (
                   <SettingsPage
                       initialSettings={appSettings}
+                      accountEmail={currentUserEmail}
                       showGrowthSettings={hasGrowthPlan}
                       onSave={handleSaveSettings}
                   />
@@ -10151,5 +11977,6 @@ export default function JobsApp({
           </main>
         </div>
       </div>
+      </HelpProvider>
   );
 }

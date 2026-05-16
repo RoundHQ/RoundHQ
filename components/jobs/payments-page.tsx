@@ -77,6 +77,8 @@ const DAY_FILTER_OPTIONS: DayName[] = [
   "Wednesday",
   "Thursday",
   "Friday",
+  "Saturday",
+  "Sunday",
 ];
 type WeekFilter = "all" | WeekNumber;
 type DayFilter = "all" | DayName;
@@ -713,7 +715,10 @@ export default function PaymentsPage({
 
   function renderOutstandingPaymentsSection() {
     return (
-      <section className="rounded-[22px] border border-amber-200 bg-white p-5 shadow-sm">
+      <section
+        data-tour="payment-status"
+        className="rounded-[22px] border border-amber-200 bg-white p-5 shadow-sm"
+      >
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-amber-600">
@@ -1095,6 +1100,7 @@ export default function PaymentsPage({
                                 Payment Date
                               </label>
                               <input
+                                data-tour="record-payment-button"
                                 type="date"
                                 value={currentValue}
                                 disabled={!monthlyPaymentsReady}
@@ -1413,6 +1419,7 @@ export default function PaymentsPage({
                                 Payment Date
                               </label>
                               <input
+                                data-tour="record-payment-button"
                                 type="date"
                                 value={currentValue}
                                 disabled={!visit || isRemoving}

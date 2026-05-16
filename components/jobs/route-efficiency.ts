@@ -106,6 +106,8 @@ export const ROUTE_DAYS: DayName[] = [
   "Wednesday",
   "Thursday",
   "Friday",
+  "Saturday",
+  "Sunday",
 ];
 
 export function getRouteKey(week: WeekNumber, day: DayName): RouteKey {

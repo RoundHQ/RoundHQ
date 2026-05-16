@@ -6,6 +6,20 @@ import { getBaseUrl, getStripe, isStripeConfigured } from "@/lib/stripe/server";
 
 export const runtime = "nodejs";
 
+function normalizeReturnPath(value: unknown) {
+  if (typeof value !== "string") {
+    return "/billing";
+  }
+
+  const trimmed = value.trim();
+
+  if (!trimmed.startsWith("/") || trimmed.startsWith("//")) {
+    return "/billing";
+  }
+
+  return trimmed;
+}
+
 export async function POST(request: NextRequest) {
   try {
     if (!(await isStripeConfigured())) {
@@ -35,9 +49,13 @@ export async function POST(request: NextRequest) {
     }
 
     const stripe = await getStripe();
+    const requestBody = (await request.json().catch(() => null)) as
+      | { returnPath?: unknown }
+      | null;
+    const returnPath = normalizeReturnPath(requestBody?.returnPath);
     const portalSession = await stripe.billingPortal.sessions.create({
       customer: subscription.stripe_customer_id,
-      return_url: `${getBaseUrl(request.url)}/billing`,
+      return_url: `${getBaseUrl(request.url)}${returnPath}`,
     });
 
     return NextResponse.json({ url: portalSession.url });

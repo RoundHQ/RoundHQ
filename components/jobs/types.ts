@@ -5,6 +5,7 @@ export type PageKey =
   | "routeEfficiency"
   | "history"
   | "customers"
+  | "expenses"
   | "payments"
   | "customerProfile"
   | "staff"
@@ -16,7 +17,9 @@ export type DayName =
   | "Tuesday"
   | "Wednesday"
   | "Thursday"
-  | "Friday";
+  | "Friday"
+  | "Saturday"
+  | "Sunday";
 
 export type RotationWeeks = 1 | 2 | 3 | 4;
 export type WeekNumber = "Week 1" | "Week 2" | "Week 3" | "Week 4";
@@ -65,6 +68,7 @@ export type StaffPageAccessKey =
   | "commercial"
   | "commercialDocs"
   | "customers"
+  | "expenses"
   | "quotes"
   | "invoices"
   | "staff"

@@ -67,6 +67,13 @@ type Props = {
     logoUrl?: string;
     primaryColor?: string;
     secondaryColor?: string;
+    pdfHeaderStyle?: "banner" | "letterhead";
+    pdfLogoBackground?: "none" | "dark" | "light";
+    pdfLogoScale?: number;
+    pdfShowLogo?: boolean;
+    pdfShowFooter?: boolean;
+    pdfShowBusinessDetails?: boolean;
+    pdfFooterText?: string;
     emailFromName?: string;
     emailFromAddress?: string;
     emailReplyTo?: string;
@@ -317,6 +324,7 @@ export default function QuotesPage({
 
           <button
             onClick={onCreate}
+            data-tour="quote-new-button"
             className="rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 transition hover:bg-slate-100"
           >
             New Quote
@@ -339,7 +347,10 @@ export default function QuotesPage({
 
       <section className="rounded-[22px] border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 px-4 py-4">
-          <div className="inline-flex flex-wrap gap-2 rounded-2xl bg-slate-100 p-1">
+          <div
+            data-tour="quote-filters"
+            className="inline-flex flex-wrap gap-2 rounded-2xl bg-slate-100 p-1"
+          >
             {QUOTE_FILTER_OPTIONS.map((filterOption) => {
               const isActive = activeFilter === filterOption;
 

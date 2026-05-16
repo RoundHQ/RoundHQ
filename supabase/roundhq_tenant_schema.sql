@@ -495,6 +495,7 @@ create table if not exists public.role_permissions (
       'commercial',
       'commercialDocs',
       'customers',
+      'expenses',
       'quotes',
       'invoices',
       'staff',
@@ -505,6 +506,30 @@ create table if not exists public.role_permissions (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   primary key (organization_id, role, page_key)
+);
+
+alter table public.role_permissions
+drop constraint if exists role_permissions_page_key_check;
+
+alter table public.role_permissions
+add constraint role_permissions_page_key_check
+check (
+  page_key in (
+    'dashboard',
+    'schedule',
+    'rounds',
+    'history',
+    'map',
+    'actions',
+    'commercial',
+    'commercialDocs',
+    'customers',
+    'expenses',
+    'quotes',
+    'invoices',
+    'staff',
+    'settings'
+  )
 );
 
 create table if not exists public.customers (
@@ -522,7 +547,7 @@ create table if not exists public.customers (
   grass_cut_areas jsonb not null default '["All"]'::jsonb,
   week integer not null default 1 check (week in (1, 2, 3, 4)),
   day text null check (
-    day is null or day in ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday')
+    day is null or day in ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')
   ),
   customer_type text not null default 'Residential' check (
     customer_type in ('Residential', 'Commercial')
@@ -562,6 +587,15 @@ drop constraint if exists customers_week_check;
 alter table public.customers
 add constraint customers_week_check
 check (week in (1, 2, 3, 4));
+
+alter table public.customers
+drop constraint if exists customers_day_check;
+
+alter table public.customers
+add constraint customers_day_check
+check (
+  day is null or day in ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')
+);
 
 alter table public.customers
 drop constraint if exists customers_cut_frequency_check;
@@ -665,7 +699,7 @@ create table if not exists public.visits (
   visit_date date not null,
   week integer null check (week is null or week in (1, 2, 3, 4)),
   day text null check (
-    day is null or day in ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday')
+    day is null or day in ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')
   ),
   status text not null check (status in ('completed', 'not_cut')),
   notes text null,
@@ -698,6 +732,15 @@ drop constraint if exists visits_week_check;
 alter table public.visits
 add constraint visits_week_check
 check (week is null or week in (1, 2, 3, 4));
+
+alter table public.visits
+drop constraint if exists visits_day_check;
+
+alter table public.visits
+add constraint visits_day_check
+check (
+  day is null or day in ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday')
+);
 
 create index if not exists visits_org_date_idx
 on public.visits (organization_id, visit_date desc);

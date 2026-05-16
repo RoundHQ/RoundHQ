@@ -669,7 +669,7 @@ export default function RouteEfficiencyPage({
           </div>
         </div>
 
-        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
           {routeSummaries.map((summary) => (
             <button
               key={summary.key}

@@ -23,7 +23,11 @@ import {
     Image as ImageIcon,
     Trash2,
     Settings2,
+    UserCircle,
+    KeyRound,
+    HelpCircle,
 } from "lucide-react";
+import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import {
     DEFAULT_GRASS_CUT_SEASON_END,
     DEFAULT_GRASS_CUT_SEASON_START,
@@ -44,11 +48,19 @@ import {
     normalizeCurrencyCode,
     type CurrencyCode,
 } from "./currency";
+import {
+    normalizeEditInactiveAction,
+    normalizeEditInactiveMinutes,
+    type EditInactiveAction,
+} from "./edit-collaboration";
 import type { RotationWeeks } from "./types";
 
 type PaymentMethod = "cash" | "bank_transfer" | "direct_debit" | "invoice";
 type CutType = "front_only" | "front_back" | "full_garden";
 type ThemeMode = "light" | "dark" | "system";
+type PdfHeaderStyle = "banner" | "letterhead";
+type PdfLogoBackground = "none" | "dark" | "light";
+type PdfPreviewDocumentType = "quote" | "invoice" | "rams";
 type QuoteServiceType = "service" | "product";
 type WorkflowMessageMethod = "email";
 type QuoteService = {
@@ -60,8 +72,9 @@ type QuoteService = {
     buyPrice: number;
 };
 type SettingsTab =
+    | "account"
     | "business"
-    | "branding"
+    | "documents"
     | "pricing"
     | "jobs"
     | "quotes"
@@ -89,6 +102,16 @@ export type SettingsData = {
     themeMode: ThemeMode;
     compactMode: boolean;
     currencyCode: CurrencyCode;
+    pdfHeaderStyle: PdfHeaderStyle;
+    pdfLogoBackground: PdfLogoBackground;
+    pdfLogoScale: number;
+    pdfShowLogo: boolean;
+    pdfShowFooter: boolean;
+    pdfShowBusinessDetails: boolean;
+    pdfFooterText: string;
+    editInactivityMinutes: number;
+    editInactiveAction: EditInactiveAction;
+    helpEnabled: boolean;
 
     defaultGrassCutPrice: number;
     defaultHedgeCutPrice: number;
@@ -157,11 +180,13 @@ export type SettingsData = {
 
 type Props = {
     initialSettings?: Partial<SettingsData>;
+    accountEmail?: string | null;
     showGrowthSettings?: boolean;
     onSave?: (settings: SettingsData) => Promise<void> | void;
 };
 
 const STORAGE_KEY = "roundhq_settings";
+const HELP_ENABLED_STORAGE_KEY = "roundhq_help_enabled";
 
 const visitDays = [
     "Monday",
@@ -193,6 +218,16 @@ const defaultSettings: SettingsData = {
     themeMode: "light",
     compactMode: false,
     currencyCode: DEFAULT_CURRENCY_CODE,
+    pdfHeaderStyle: "banner",
+    pdfLogoBackground: "none",
+    pdfLogoScale: 100,
+    pdfShowLogo: true,
+    pdfShowFooter: true,
+    pdfShowBusinessDetails: true,
+    pdfFooterText: "",
+    editInactivityMinutes: 5,
+    editInactiveAction: "notify",
+    helpEnabled: true,
 
     defaultGrassCutPrice: 15,
     defaultHedgeCutPrice: 40,
@@ -415,19 +450,42 @@ function normalizeQuoteServices(value: unknown): QuoteService[] {
     return normalized;
 }
 
+function normalizePdfHeaderStyle(value: unknown): PdfHeaderStyle {
+    return value === "letterhead" ? "letterhead" : "banner";
+}
+
+function normalizePdfLogoBackground(value: unknown): PdfLogoBackground {
+    return value === "dark" || value === "light" ? value : "none";
+}
+
+function normalizePdfLogoScale(value: unknown) {
+    const numericValue = typeof value === "number" ? value : Number(value);
+
+    if (!Number.isFinite(numericValue)) {
+        return 100;
+    }
+
+    return Math.min(160, Math.max(60, Math.round(numericValue)));
+}
+
 function Card({
                   title,
                   description,
                   icon: Icon,
                   children,
+                  dataTour,
               }: {
     title: string;
     description?: string;
     icon: React.ComponentType<{ className?: string }>;
     children: React.ReactNode;
+    dataTour?: string;
 }) {
     return (
-        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <section
+            data-tour={dataTour}
+            className="rounded-2xl border border-slate-200 bg-white shadow-sm"
+        >
             <div className="border-b border-slate-100 p-5">
                 <div className="flex items-start gap-3">
                     <div className="rounded-xl bg-emerald-50 p-2">
@@ -516,14 +574,19 @@ function Toggle({
                     onChange,
                     label,
                     description,
+                    dataTour,
                 }: {
     checked: boolean;
     onChange: (value: boolean) => void;
     label: string;
     description?: string;
+    dataTour?: string;
 }) {
     return (
-        <div className="flex items-start justify-between gap-4 rounded-xl border border-slate-200 p-4">
+        <div
+            data-tour={dataTour}
+            className="flex items-start justify-between gap-4 rounded-xl border border-slate-200 p-4"
+        >
             <div className="pr-4">
                 <p className="text-sm font-medium text-slate-800">{label}</p>
                 {description ? (
@@ -576,6 +639,196 @@ function NumberInput({
     );
 }
 
+function getPreviewDocumentTitle(type: PdfPreviewDocumentType) {
+    if (type === "invoice") return "Invoice";
+    if (type === "rams") return "RAMS";
+    return "Quote";
+}
+
+function DocumentPdfPreview({
+                                settings,
+                                documentType,
+                            }: {
+    settings: SettingsData;
+    documentType: PdfPreviewDocumentType;
+}) {
+    const brandName =
+        settings.tradingName.trim() || settings.businessName.trim() || "Your Business";
+    const documentTitle = getPreviewDocumentTitle(documentType);
+    const isBanner = settings.pdfHeaderStyle === "banner";
+    const logoScale = settings.pdfLogoScale / 100;
+    const logoBackgroundClass =
+        settings.pdfLogoBackground === "dark"
+            ? "bg-slate-950/80"
+            : settings.pdfLogoBackground === "light"
+              ? "bg-white"
+              : "";
+    const logoFrameClass = cn(
+        "flex min-h-10 min-w-28 max-w-[58%] items-center justify-center rounded-md px-2 py-1",
+        logoBackgroundClass
+    );
+    const metaLabel =
+        documentType === "invoice"
+            ? "Due in 7 days"
+            : documentType === "rams"
+              ? "Risk assessment"
+              : "Valid for 30 days";
+
+    return (
+        <div className="rounded-2xl border border-slate-200 bg-slate-100 p-4">
+            <div className="mx-auto aspect-[1/1.414] max-w-[360px] overflow-hidden rounded-lg bg-white shadow-xl ring-1 ring-slate-200">
+                <div className="flex h-full flex-col">
+                    <div
+                        className={cn(
+                            "flex items-center justify-between gap-4 px-5 py-4",
+                            isBanner ? "text-white" : "border-b border-slate-200 bg-white"
+                        )}
+                        style={isBanner ? { backgroundColor: settings.secondaryColor } : undefined}
+                    >
+                        <div className={logoFrameClass}>
+                            {settings.pdfShowLogo && settings.logoUrl ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                    src={settings.logoUrl}
+                                    alt="Document logo preview"
+                                    className="max-h-11 max-w-full object-contain"
+                                    style={{
+                                        maxHeight: `${44 * logoScale}px`,
+                                        maxWidth: `${170 * logoScale}px`,
+                                    }}
+                                />
+                            ) : (
+                                <p
+                                    className={cn(
+                                        "truncate text-sm font-black uppercase tracking-normal",
+                                        isBanner ? "text-white" : "text-slate-950"
+                                    )}
+                                >
+                                    {brandName}
+                                </p>
+                            )}
+                        </div>
+
+                        <div className="text-right">
+                            <p
+                                className={cn(
+                                    "text-xl font-black uppercase tracking-normal",
+                                    isBanner ? "text-white" : "text-slate-950"
+                                )}
+                            >
+                                {documentTitle}
+                            </p>
+                            <p
+                                className={cn(
+                                    "mt-1 text-[10px] font-semibold",
+                                    isBanner ? "text-white/75" : "text-slate-500"
+                                )}
+                            >
+                                {documentType === "invoice"
+                                    ? "INV-1001"
+                                    : documentType === "rams"
+                                      ? "RAMS-001"
+                                      : "Q-001"}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 px-5 py-4">
+                        <div className="rounded-lg border border-slate-200 p-3">
+                            <p className="text-[9px] font-bold uppercase text-slate-400">
+                                Prepared for
+                            </p>
+                            <p className="mt-1 text-xs font-bold text-slate-950">
+                                Example Customer
+                            </p>
+                            <p className="mt-1 text-[10px] leading-4 text-slate-500">
+                                12 Oak Road
+                                <br />
+                                East Kilbride
+                            </p>
+                        </div>
+
+                        <div className="rounded-lg border border-slate-200 p-3">
+                            <p className="text-[9px] font-bold uppercase text-slate-400">
+                                Details
+                            </p>
+                            <p className="mt-1 text-xs font-bold text-slate-950">
+                                {metaLabel}
+                            </p>
+                            <p className="mt-1 text-[10px] leading-4 text-slate-500">
+                                {brandName}
+                                <br />
+                                {settings.businessEmail || "mail@roundhq.co.uk"}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="mx-5 overflow-hidden rounded-lg border border-slate-200">
+                        <div
+                            className="grid grid-cols-[1fr_54px] px-3 py-2 text-[9px] font-bold uppercase text-white"
+                            style={{ backgroundColor: settings.secondaryColor }}
+                        >
+                            <span>Description</span>
+                            <span className="text-right">Total</span>
+                        </div>
+                        {[
+                            ["Scheduled service", "85.00"],
+                            [
+                                documentType === "rams"
+                                    ? "Site controls and method statement"
+                                    : "Materials",
+                                documentType === "rams" ? "Included" : "35.00",
+                            ],
+                        ].map(([label, value]) => (
+                            <div
+                                key={label}
+                                className="grid grid-cols-[1fr_54px] border-t border-slate-100 px-3 py-2 text-[10px]"
+                            >
+                                <span className="text-slate-700">{label}</span>
+                                <span className="text-right font-bold text-slate-950">
+                                    {value}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="mt-auto px-5 pb-4">
+                        <div className="ml-auto w-28 rounded-lg p-3 text-right text-white" style={{ backgroundColor: settings.secondaryColor }}>
+                            <p className="text-[9px] font-bold uppercase opacity-80">
+                                {documentType === "rams" ? "Status" : "Total"}
+                            </p>
+                            <p className="text-lg font-black">
+                                {documentType === "rams" ? "Ready" : "£120"}
+                            </p>
+                        </div>
+
+                        {settings.pdfShowFooter ? (
+                            <div className="mt-4 border-t pt-2" style={{ borderColor: settings.primaryColor }}>
+                                <p className="truncate text-[9px] text-slate-500">
+                                    {[
+                                        settings.pdfFooterText.trim(),
+                                        settings.pdfShowBusinessDetails
+                                            ? [
+                                                  brandName,
+                                                  settings.businessPhone.trim(),
+                                                  settings.businessEmail.trim(),
+                                              ]
+                                                  .filter(Boolean)
+                                                  .join(" | ")
+                                            : "",
+                                    ]
+                                        .filter(Boolean)
+                                        .join(" | ") || "Page 1 of 1"}
+                                </p>
+                            </div>
+                        ) : null}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function TabButton({
                        active,
                        onClick,
@@ -610,6 +863,19 @@ function safeMergeSettings(source?: Partial<SettingsData> | null): SettingsData 
         ...(source || {}),
         defaultRotationWeeks: normalizeRotationWeeks(source?.defaultRotationWeeks),
         currencyCode: normalizeCurrencyCode(source?.currencyCode),
+        pdfHeaderStyle: normalizePdfHeaderStyle(source?.pdfHeaderStyle),
+        pdfLogoBackground: normalizePdfLogoBackground(source?.pdfLogoBackground),
+        pdfLogoScale: normalizePdfLogoScale(source?.pdfLogoScale),
+        pdfShowLogo: source?.pdfShowLogo !== false,
+        pdfShowFooter: source?.pdfShowFooter !== false,
+        pdfShowBusinessDetails: source?.pdfShowBusinessDetails !== false,
+        pdfFooterText:
+            typeof source?.pdfFooterText === "string" ? source.pdfFooterText : "",
+        editInactivityMinutes: normalizeEditInactiveMinutes(
+            source?.editInactivityMinutes
+        ),
+        editInactiveAction: normalizeEditInactiveAction(source?.editInactiveAction),
+        helpEnabled: source?.helpEnabled !== false,
         quoteFollowUpMethod,
         invoiceReminderMethod,
         quoteServices: normalizeQuoteServices(source?.quoteServices),
@@ -618,6 +884,7 @@ function safeMergeSettings(source?: Partial<SettingsData> | null): SettingsData 
 
 export default function SettingsPage({
                                          initialSettings,
+                                         accountEmail,
                                          showGrowthSettings = true,
                                          onSave,
                                      }: Props) {
@@ -644,6 +911,14 @@ export default function SettingsPage({
     const [newQuoteServiceBuyPrice, setNewQuoteServiceBuyPrice] = useState("0");
     const [testEmailRecipient, setTestEmailRecipient] = useState("");
     const [isSendingTestEmail, setIsSendingTestEmail] = useState(false);
+    const [documentPreviewType, setDocumentPreviewType] =
+        useState<PdfPreviewDocumentType>("quote");
+    const [accountEmailDraft, setAccountEmailDraft] = useState(accountEmail ?? "");
+    const [isUpdatingAccountEmail, setIsUpdatingAccountEmail] = useState(false);
+    const [newPassword, setNewPassword] = useState("");
+    const [confirmNewPassword, setConfirmNewPassword] = useState("");
+    const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+    const [isOpeningBillingPortal, setIsOpeningBillingPortal] = useState(false);
     const quoteServiceCategories = useMemo(
         () =>
             Array.from(
@@ -665,6 +940,10 @@ export default function SettingsPage({
     useEffect(() => {
         setSettings(mergedSettings);
     }, [mergedSettings]);
+
+    useEffect(() => {
+        setAccountEmailDraft(accountEmail ?? "");
+    }, [accountEmail]);
 
     useEffect(() => {
         setSelectedQuoteServiceCategory((current) =>
@@ -696,7 +975,14 @@ export default function SettingsPage({
             const raw = localStorage.getItem(STORAGE_KEY);
             if (!raw) return;
             const parsed = JSON.parse(raw) as Partial<SettingsData>;
-            setSettings(safeMergeSettings(parsed));
+            const merged = safeMergeSettings(parsed);
+            const storedHelpEnabled = localStorage.getItem(HELP_ENABLED_STORAGE_KEY);
+
+            setSettings(
+                storedHelpEnabled === "true" || storedHelpEnabled === "false"
+                    ? { ...merged, helpEnabled: storedHelpEnabled === "true" }
+                    : merged
+            );
         } catch (error) {
             console.error("Failed to load local settings:", error);
         }
@@ -777,6 +1063,10 @@ export default function SettingsPage({
 
     function saveLocally(nextSettings: SettingsData) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(nextSettings));
+        localStorage.setItem(
+            HELP_ENABLED_STORAGE_KEY,
+            nextSettings.helpEnabled ? "true" : "false"
+        );
     }
 
     async function persistSettings(
@@ -869,6 +1159,118 @@ export default function SettingsPage({
         }
     }
 
+    async function handleUpdateAccountEmail() {
+        const nextEmail = accountEmailDraft.trim();
+
+        if (!nextEmail) {
+            showMessage("Enter the new account email address.", "error");
+            return;
+        }
+
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
+            showMessage("Enter a valid account email address.", "error");
+            return;
+        }
+
+        try {
+            setIsUpdatingAccountEmail(true);
+            setMessage("");
+
+            const supabase = createSupabaseClient();
+            const { error } = await supabase.auth.updateUser({ email: nextEmail });
+
+            if (error) {
+                throw error;
+            }
+
+            showMessage(
+                "Email change requested. Check the new email address to confirm the change.",
+                "success"
+            );
+        } catch (error) {
+            console.error("Failed to update account email:", error);
+            showMessage(
+                error instanceof Error && error.message.trim()
+                    ? error.message
+                    : "Unable to update the account email address.",
+                "error"
+            );
+        } finally {
+            setIsUpdatingAccountEmail(false);
+        }
+    }
+
+    async function handleUpdatePassword() {
+        if (newPassword.length < 8) {
+            showMessage("Use a password with at least 8 characters.", "error");
+            return;
+        }
+
+        if (newPassword !== confirmNewPassword) {
+            showMessage("The new passwords do not match.", "error");
+            return;
+        }
+
+        try {
+            setIsUpdatingPassword(true);
+            setMessage("");
+
+            const supabase = createSupabaseClient();
+            const { error } = await supabase.auth.updateUser({ password: newPassword });
+
+            if (error) {
+                throw error;
+            }
+
+            setNewPassword("");
+            setConfirmNewPassword("");
+            showMessage("Password updated successfully.", "success");
+        } catch (error) {
+            console.error("Failed to update password:", error);
+            showMessage(
+                error instanceof Error && error.message.trim()
+                    ? error.message
+                    : "Unable to update the account password.",
+                "error"
+            );
+        } finally {
+            setIsUpdatingPassword(false);
+        }
+    }
+
+    async function handleOpenBillingPortal() {
+        try {
+            setIsOpeningBillingPortal(true);
+            setMessage("");
+
+            const response = await fetch("/api/billing/portal", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ returnPath: "/dashboard" }),
+            });
+            const body = (await response.json().catch(() => null)) as
+                | { url?: string; error?: string }
+                | null;
+
+            if (!response.ok || !body?.url) {
+                throw new Error(body?.error || "Unable to open subscription settings.");
+            }
+
+            window.location.href = body.url;
+        } catch (error) {
+            console.error("Failed to open billing portal:", error);
+            showMessage(
+                error instanceof Error && error.message.trim()
+                    ? error.message
+                    : "Unable to open subscription settings.",
+                "error"
+            );
+            setIsOpeningBillingPortal(false);
+        }
+    }
+
     function handleResetChanges() {
         setSettings(mergedSettings);
         showMessage("Unsaved changes reset.", "info");
@@ -946,7 +1348,7 @@ export default function SettingsPage({
                         <div>
                             <h1 className="text-2xl font-bold md:text-3xl">Settings</h1>
                             <p className="mt-2 max-w-2xl text-sm text-white/90">
-                                Manage branding, pricing, defaults, quotes, invoices, email sending, widgets, and data tools.
+                                Manage your account, PDF branding, pricing, defaults, quotes, invoices, email sending, widgets, and data tools.
                             </p>
                         </div>
 
@@ -991,11 +1393,14 @@ export default function SettingsPage({
                 ) : null}
 
                 <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-slate-100 p-2">
+                    <TabButton active={activeTab === "account"} onClick={() => setActiveTab("account")}>
+                        Account
+                    </TabButton>
                     <TabButton active={activeTab === "business"} onClick={() => setActiveTab("business")}>
                         Business
                     </TabButton>
-                    <TabButton active={activeTab === "branding"} onClick={() => setActiveTab("branding")}>
-                        Branding
+                    <TabButton active={activeTab === "documents"} onClick={() => setActiveTab("documents")}>
+                        PDFs
                     </TabButton>
                     <TabButton active={activeTab === "pricing"} onClick={() => setActiveTab("pricing")}>
                         Pricing
@@ -1020,12 +1425,137 @@ export default function SettingsPage({
                     </TabButton>
                 </div>
 
+                {activeTab === "account" && (
+                    <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                        <Card
+                            title="Account email"
+                            description="Change the email address used to sign in to RoundHQ."
+                            icon={UserCircle}
+                        >
+                            <div className="grid grid-cols-1 gap-4">
+                                <Field
+                                    label="Current email"
+                                    hint="Changing this may require confirmation from the new email address before it takes effect."
+                                >
+                                    <div className="relative">
+                                        <Mail className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
+                                        <Input
+                                            className="pl-10"
+                                            type="email"
+                                            value={accountEmailDraft}
+                                            onChange={(event) =>
+                                                setAccountEmailDraft(event.target.value)
+                                            }
+                                            placeholder="you@example.co.uk"
+                                        />
+                                    </div>
+                                </Field>
+
+                                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                                    <div>
+                                        <p className="text-sm font-semibold text-slate-900">
+                                            Sign-in email
+                                        </p>
+                                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                                            This updates the login address for this account, not the
+                                            business email shown on quotes and invoices.
+                                        </p>
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        onClick={handleUpdateAccountEmail}
+                                        disabled={isUpdatingAccountEmail}
+                                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                        <Mail className="h-4 w-4" />
+                                        {isUpdatingAccountEmail ? "Updating..." : "Update email"}
+                                    </button>
+                                </div>
+                            </div>
+                        </Card>
+
+                        <Card
+                            title="Password"
+                            description="Set a new password for your RoundHQ login."
+                            icon={KeyRound}
+                        >
+                            <div className="grid grid-cols-1 gap-4">
+                                <Field label="New password">
+                                    <Input
+                                        type="password"
+                                        autoComplete="new-password"
+                                        value={newPassword}
+                                        onChange={(event) => setNewPassword(event.target.value)}
+                                        placeholder="At least 8 characters"
+                                    />
+                                </Field>
+
+                                <Field label="Confirm new password">
+                                    <Input
+                                        type="password"
+                                        autoComplete="new-password"
+                                        value={confirmNewPassword}
+                                        onChange={(event) =>
+                                            setConfirmNewPassword(event.target.value)
+                                        }
+                                        placeholder="Repeat the new password"
+                                    />
+                                </Field>
+
+                                <button
+                                    type="button"
+                                    onClick={handleUpdatePassword}
+                                    disabled={isUpdatingPassword}
+                                    className="inline-flex w-fit items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                    <KeyRound className="h-4 w-4" />
+                                    {isUpdatingPassword ? "Updating..." : "Change password"}
+                                </button>
+                            </div>
+                        </Card>
+
+                        <div className="xl:col-span-2">
+                            <Card
+                                title="Subscription"
+                                description="Open your secure billing portal to manage or cancel the workspace subscription."
+                                icon={CreditCard}
+                            >
+                                <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 md:flex-row md:items-center md:justify-between">
+                                    <div>
+                                        <p className="text-sm font-semibold text-slate-900">
+                                            Manage subscription
+                                        </p>
+                                        <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600">
+                                            Update billing details, view subscription settings, or
+                                            cancel the plan through the secure Stripe customer portal.
+                                        </p>
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        onClick={handleOpenBillingPortal}
+                                        disabled={isOpeningBillingPortal}
+                                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                        <CreditCard className="h-4 w-4" />
+                                        {isOpeningBillingPortal
+                                            ? "Opening..."
+                                            : "Manage or cancel subscription"}
+                                    </button>
+                                </div>
+                            </Card>
+                        </div>
+                    </div>
+                )}
+
                 {activeTab === "business" && (
                     <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
                         <Card
                             title="Business details"
                             description="Main business identity and contact information."
                             icon={Building2}
+                            dataTour="business-settings-section"
                         >
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                 <Field label="Business name">
@@ -1141,11 +1671,12 @@ export default function SettingsPage({
                     </div>
                 )}
 
-                {activeTab === "branding" && (
-                    <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                {activeTab === "documents" && (
+                    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[0.92fr_1.08fr]">
+                        <div className="space-y-6">
                         <Card
-                            title="Branding"
-                            description="Logo and brand colours for the app."
+                            title="Logo and colours"
+                            description="These brand assets are used across the app and generated PDFs."
                             icon={Palette}
                         >
                             <div className="grid grid-cols-1 gap-4">
@@ -1209,7 +1740,10 @@ export default function SettingsPage({
                                         </div>
                                     </Field>
 
-                                    <Field label="Secondary colour">
+                                    <Field
+                                        label="Header and total colour"
+                                        hint="This colour is used for the PDF header and Total box."
+                                    >
                                         <div className="flex items-center gap-3">
                                             <input
                                                 type="color"
@@ -1238,34 +1772,6 @@ export default function SettingsPage({
                                     </Field>
 
                                     <div className="md:col-span-2">
-                                        <div className="rounded-2xl border border-slate-200 p-4">
-                                            <p className="mb-3 text-sm font-medium text-slate-700">
-                                                Live preview
-                                            </p>
-                                            <div
-                                                className="rounded-2xl p-5 text-white"
-                                                style={{
-                                                    background: `linear-gradient(135deg, ${settings.primaryColor}, ${settings.secondaryColor})`,
-                                                }}
-                                            >
-                                                <div className="flex items-center gap-3">
-                                                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/15">
-                                                        <Settings2 className="h-6 w-6" />
-                                                    </div>
-                                                    <div>
-                                                        <p className="text-lg font-semibold">
-                                                            {settings.businessName || "Business Name"}
-                                                        </p>
-                                                        <p className="text-sm text-white/85">
-                                                            Brand preview
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="md:col-span-2">
                                         <Toggle
                                             checked={settings.compactMode}
                                             onChange={(value) => update("compactMode", value)}
@@ -1275,6 +1781,145 @@ export default function SettingsPage({
                                     </div>
                                 </div>
                             </div>
+                        </Card>
+
+                        <Card
+                            title="PDF customisation"
+                            description="Control the layout used for quotes, invoices, RAMS documents, and emailed PDF attachments."
+                            icon={FileText}
+                        >
+                            <div className="grid grid-cols-1 gap-4">
+                                <Field
+                                    label="Header layout"
+                                    hint="Full banner is best for white or transparent logos. Letterhead keeps the page lighter."
+                                >
+                                    <Select
+                                        value={settings.pdfHeaderStyle}
+                                        onChange={(event) =>
+                                            update(
+                                                "pdfHeaderStyle",
+                                                event.target.value as PdfHeaderStyle
+                                            )
+                                        }
+                                    >
+                                        <option value="banner">Full-width brand banner</option>
+                                        <option value="letterhead">Letterhead with document tile</option>
+                                    </Select>
+                                </Field>
+
+                                <Field
+                                    label="Logo background"
+                                    hint="Use a dark background when your uploaded logo is white."
+                                >
+                                    <Select
+                                        value={settings.pdfLogoBackground}
+                                        onChange={(event) =>
+                                            update(
+                                                "pdfLogoBackground",
+                                                event.target.value as PdfLogoBackground
+                                            )
+                                        }
+                                    >
+                                        <option value="none">No separate logo background</option>
+                                        <option value="dark">Dark logo background</option>
+                                        <option value="light">Light logo background</option>
+                                    </Select>
+                                </Field>
+
+                                <Field
+                                    label={`Logo size (${settings.pdfLogoScale}%)`}
+                                    hint="Adjusts how large the uploaded logo appears on generated PDFs."
+                                >
+                                    <input
+                                        type="range"
+                                        min="60"
+                                        max="160"
+                                        step="5"
+                                        value={settings.pdfLogoScale}
+                                        onChange={(event) =>
+                                            update(
+                                                "pdfLogoScale",
+                                                normalizePdfLogoScale(event.target.value)
+                                            )
+                                        }
+                                        className="w-full accent-emerald-600"
+                                    />
+                                </Field>
+
+                                <Toggle
+                                    checked={settings.pdfShowLogo}
+                                    onChange={(value) => update("pdfShowLogo", value)}
+                                    label="Show uploaded logo on PDFs"
+                                    description="Turn this off to show the business or trading name instead."
+                                />
+
+                                <Toggle
+                                    checked={settings.pdfShowFooter}
+                                    onChange={(value) => update("pdfShowFooter", value)}
+                                    label="Show PDF footer"
+                                    description="Adds a footer line and page numbers to generated documents."
+                                />
+
+                                <Toggle
+                                    checked={settings.pdfShowBusinessDetails}
+                                    onChange={(value) =>
+                                        update("pdfShowBusinessDetails", value)
+                                    }
+                                    label="Include business contact details in footer"
+                                    description="Shows the business name, phone, email, and website in the PDF footer."
+                                />
+
+                                <Field
+                                    label="Footer note"
+                                    hint="Optional. Appears before your business details in the PDF footer."
+                                >
+                                    <Input
+                                        value={settings.pdfFooterText}
+                                        onChange={(event) =>
+                                            update("pdfFooterText", event.target.value)
+                                        }
+                                        placeholder="e.g. Thank you for choosing us"
+                                    />
+                                </Field>
+                            </div>
+                        </Card>
+                        </div>
+
+                        <Card
+                            title="Live document preview"
+                            description="Switch between document types to see how the PDF header, logo, colours, and footer will look."
+                            icon={Settings2}
+                        >
+                            <div className="mb-4 flex flex-wrap gap-2">
+                                {[
+                                    ["quote", "Quote"],
+                                    ["invoice", "Invoice"],
+                                    ["rams", "RAMS"],
+                                ].map(([value, label]) => (
+                                    <button
+                                        key={value}
+                                        type="button"
+                                        onClick={() =>
+                                            setDocumentPreviewType(
+                                                value as PdfPreviewDocumentType
+                                            )
+                                        }
+                                        className={cn(
+                                            "rounded-xl px-4 py-2 text-sm font-semibold transition",
+                                            documentPreviewType === value
+                                                ? "bg-slate-900 text-white"
+                                                : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                        )}
+                                    >
+                                        {label}
+                                    </button>
+                                ))}
+                            </div>
+
+                            <DocumentPdfPreview
+                                settings={settings}
+                                documentType={documentPreviewType}
+                            />
                         </Card>
                     </div>
                 )}
@@ -1361,6 +2006,7 @@ export default function SettingsPage({
                             title="Default job settings"
                             description="Controls how new customers and jobs are created."
                             icon={Scissors}
+                            dataTour="service-defaults-section"
                         >
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                 <Field label="Default payment method">
@@ -2303,6 +2949,75 @@ export default function SettingsPage({
 
                 {activeTab === "data" && (
                     <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                        <Card
+                            title="Edit collaboration"
+                            description="Control inactive edit warnings and what happens to unsaved work."
+                            icon={Settings2}
+                        >
+                            <div className="grid grid-cols-1 gap-4">
+                                <Field
+                                    label={`Inactive warning after ${settings.editInactivityMinutes} minute${settings.editInactivityMinutes === 1 ? "" : "s"}`}
+                                    hint="Editors are warned when they have unsaved changes and no new edits are made for this long."
+                                >
+                                    <input
+                                        type="range"
+                                        min="1"
+                                        max="60"
+                                        step="1"
+                                        value={settings.editInactivityMinutes}
+                                        onChange={(event) =>
+                                            update(
+                                                "editInactivityMinutes",
+                                                normalizeEditInactiveMinutes(event.target.value)
+                                            )
+                                        }
+                                        className="w-full accent-emerald-600"
+                                    />
+                                </Field>
+
+                                <Field
+                                    label="Inactive unsaved changes"
+                                    hint="Choose whether RoundHQ asks first, saves automatically, or discards automatically when the inactive warning is reached."
+                                >
+                                    <Select
+                                        value={settings.editInactiveAction}
+                                        onChange={(event) =>
+                                            update(
+                                                "editInactiveAction",
+                                                normalizeEditInactiveAction(event.target.value)
+                                            )
+                                        }
+                                    >
+                                        <option value="notify">
+                                            Ask the editor what to do
+                                        </option>
+                                        <option value="auto_save">
+                                            Automatically save changes
+                                        </option>
+                                        <option value="auto_discard">
+                                            Automatically discard changes
+                                        </option>
+                                    </Select>
+                                </Field>
+                            </div>
+                        </Card>
+
+                        <Card
+                            title="In-app help"
+                            description="Control automatic onboarding and guided tips."
+                            icon={HelpCircle}
+                        >
+                            <div className="grid grid-cols-1 gap-4">
+                                <Toggle
+                                    dataTour="help-settings-toggle"
+                                    checked={settings.helpEnabled}
+                                    onChange={(value) => update("helpEnabled", value)}
+                                    label="Show help tips"
+                                    description="Show first-time onboarding and automatic guided tips. Manual In App Help stays available from the user menu."
+                                />
+                            </div>
+                        </Card>
+
                         <Card
                             title="Import / export"
                             description="Backup or restore your settings."
