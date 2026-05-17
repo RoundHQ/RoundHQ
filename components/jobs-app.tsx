@@ -130,6 +130,7 @@ import {
   type CustomerLeadRow,
 } from "@/lib/supabase/customer-leads-data";
 import {
+  getDefaultCustomerFeatureAccess,
   normalizeCustomerFeatureAccess,
   type CustomerFeatureAccess,
   type CustomerFeatureKey,
@@ -4496,6 +4497,10 @@ function ScheduledJobProfileSection({
 
 type JobsAppProps = {
   featureAccess?: Partial<CustomerFeatureAccess>;
+  supportAccess?: {
+    organizationId: string;
+    workspaceName: string;
+  } | null;
   subscriptionPlan?: SubscriptionPlanKey;
   subscriptionStaffAddonQuantity?: number;
 };
@@ -4612,9 +4617,12 @@ function getWorkspaceRouteUrl(route: WorkspaceRouteState) {
 
 export default function JobsApp({
   featureAccess,
+  supportAccess,
   subscriptionPlan,
   subscriptionStaffAddonQuantity,
 }: JobsAppProps = {}) {
+  const supportOrganizationId = supportAccess?.organizationId ?? null;
+  const isSupportAccess = Boolean(supportOrganizationId);
   const customerFeatureAccess = useMemo(
       () => normalizeCustomerFeatureAccess(featureAccess),
       [featureAccess]
@@ -4628,11 +4636,14 @@ export default function JobsApp({
       [subscriptionPlan]
   );
   const planFeatureAccess = useMemo(
-      () => getPlanFeatureAccess(subscriptionPlan, staffAddonQuantity),
-      [staffAddonQuantity, subscriptionPlan]
+      () =>
+          isSupportAccess
+              ? getDefaultCustomerFeatureAccess()
+              : getPlanFeatureAccess(subscriptionPlan, staffAddonQuantity),
+      [isSupportAccess, staffAddonQuantity, subscriptionPlan]
   );
-  const hasGrowthPlan = hasGrowthFeatures(subscriptionPlan);
-  const hasTeamPlanAccess = hasStaffManagementAccess(
+  const hasGrowthPlan = isSupportAccess || hasGrowthFeatures(subscriptionPlan);
+  const hasTeamPlanAccess = isSupportAccess || hasStaffManagementAccess(
       subscriptionPlan,
       staffAddonQuantity
   );
@@ -4791,6 +4802,24 @@ export default function JobsApp({
   const lastInactiveActionKeyRef = useRef<string | null>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [headerWeather, setHeaderWeather] = useState<HeaderWeatherState | null>(null);
+
+  const getWritableOrganizationId = useCallback(() => {
+    const organizationId = currentOrganizationId ?? supportOrganizationId;
+
+    if (!organizationId) {
+      throw new Error("Workspace is still loading. Try again in a moment.");
+    }
+
+    return organizationId;
+  }, [currentOrganizationId, supportOrganizationId]);
+
+  const withCurrentOrganizationId = useCallback(
+      <T extends object>(row: T): T & { organization_id: string } => ({
+        ...row,
+        organization_id: getWritableOrganizationId(),
+      }),
+      [getWritableOrganizationId]
+  );
   const [headerWeatherLoading, setHeaderWeatherLoading] = useState(true);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isHelpLauncherOpen, setIsHelpLauncherOpen] = useState(false);
@@ -5144,9 +5173,11 @@ export default function JobsApp({
         }
 
         const supabase = createSupabaseClient();
+        const organizationId = getWritableOrganizationId();
         const { data: existingRows, error: existingRowsError } = await supabase
             .from("items")
-            .select("id");
+            .select("id")
+            .eq("organization_id", organizationId);
 
         if (existingRowsError) {
           throw existingRowsError;
@@ -5155,7 +5186,9 @@ export default function JobsApp({
         if (nextQuoteServices.length > 0) {
           const { error: upsertError } = await supabase
               .from("items")
-              .upsert(nextQuoteServices.map(mapQuoteServiceToCatalogItemRow), {
+              .upsert(nextQuoteServices.map((service) =>
+                withCurrentOrganizationId(mapQuoteServiceToCatalogItemRow(service))
+              ), {
                 onConflict: "id",
               });
 
@@ -5172,6 +5205,7 @@ export default function JobsApp({
           const { error: deleteError } = await supabase
               .from("items")
               .delete()
+              .eq("organization_id", organizationId)
               .in("id", idsToDelete);
 
           if (deleteError) {
@@ -5179,7 +5213,7 @@ export default function JobsApp({
           }
         }
       },
-      [workflowTablesReady.items]
+      [getWritableOrganizationId, withCurrentOrganizationId, workflowTablesReady.items]
   );
 
   const handleSaveSettings = useCallback(async (settings: AppSettings) => {
@@ -5194,19 +5228,17 @@ export default function JobsApp({
 
     try {
       await syncQuoteItemsTable(merged.quoteServices);
-      if (currentOrganizationId) {
-        const supabase = createSupabaseClient();
-        const { error } = await supabase
-            .from("organizations")
-            .update({
-              default_rotation_weeks: merged.defaultRotationWeeks,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", currentOrganizationId);
+      const supabase = createSupabaseClient();
+      const { error } = await supabase
+          .from("organizations")
+          .update({
+            default_rotation_weeks: merged.defaultRotationWeeks,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", getWritableOrganizationId());
 
-        if (error) {
-          throw error;
-        }
+      if (error) {
+        throw error;
       }
 
       const customersNeedingRotationClamp = customers
@@ -5238,8 +5270,8 @@ export default function JobsApp({
       throw error;
     }
   }, [
-    currentOrganizationId,
     customers,
+    getWritableOrganizationId,
     staffTablesReady,
     syncQuoteItemsTable,
     workflowTablesReady,
@@ -5327,6 +5359,7 @@ export default function JobsApp({
     const supabase = createSupabaseClient();
     const { error } = await supabase.from(APP_STATE_TABLE).upsert(
         {
+          organization_id: getWritableOrganizationId(),
           id: APP_STATE_ROW_ID,
           data: nextState,
           updated_at: new Date().toISOString(),
@@ -5343,7 +5376,7 @@ export default function JobsApp({
     setDatabaseError(
         getDatabaseSetupNotice(workflowTablesReady, staffTablesReady)
     );
-  }, [staffTablesReady, workflowTablesReady]);
+  }, [getWritableOrganizationId, staffTablesReady, workflowTablesReady]);
 
   const persistExpenseWorkspaceData = useCallback(
       async ({
@@ -5692,22 +5725,47 @@ export default function JobsApp({
         setCurrentUserEmail(user.email ?? null);
         setLoggedInStaffName(getLoggedInStaffName(user));
 
-        const { data: membership, error: membershipError } = await supabase
-            .from("organization_members")
-            .select("organization_id")
-            .eq("user_id", user.id)
-            .eq("status", "active")
-            .limit(1)
-            .maybeSingle();
+        let organizationId = supportOrganizationId;
 
-        if (membershipError) {
-          throw membershipError;
+        if (!organizationId) {
+          const { data: membership, error: membershipError } = await supabase
+              .from("organization_members")
+              .select("organization_id")
+              .eq("user_id", user.id)
+              .eq("status", "active")
+              .limit(1)
+              .maybeSingle();
+
+          if (membershipError) {
+            throw membershipError;
+          }
+
+          organizationId =
+              typeof membership?.organization_id === "string"
+                  ? membership.organization_id
+                  : null;
         }
 
-        const organizationId =
-            typeof membership?.organization_id === "string"
-                ? membership.organization_id
-                : null;
+        const scopeToOrganization = <T,>(query: T): T =>
+            organizationId
+                ? (query as { eq: (column: string, value: string) => T }).eq(
+                    "organization_id",
+                    organizationId
+                )
+                : query;
+        const withLoadedOrganizationId = <T extends object>(
+            row: T
+        ): T & { organization_id: string } => {
+          if (!organizationId) {
+            throw new Error("Workspace is still loading. Try again in a moment.");
+          }
+
+          return {
+            ...row,
+            organization_id: organizationId,
+          };
+        };
+
         setCurrentOrganizationId(organizationId);
 
         const [
@@ -5726,63 +5784,89 @@ export default function JobsApp({
           rolePermissionsResult,
           organizationResult,
         ] = await Promise.all([
-          supabase
-              .from("customers")
-              .select(CUSTOMER_SELECT_FIELDS)
+          scopeToOrganization(
+            supabase
+                .from("customers")
+                .select(CUSTOMER_SELECT_FIELDS)
+          )
               .order("name", { ascending: true }),
-          supabase
-              .from("visits")
-              .select(VISIT_SELECT_FIELDS)
+          scopeToOrganization(
+            supabase
+                .from("visits")
+                .select(VISIT_SELECT_FIELDS)
+          )
               .order("visit_date", { ascending: false }),
-          supabase
-              .from("customer_leads")
-              .select(CUSTOMER_LEAD_SELECT_FIELDS)
+          scopeToOrganization(
+            supabase
+                .from("customer_leads")
+                .select(CUSTOMER_LEAD_SELECT_FIELDS)
+          )
               .order("submitted_at", { ascending: false }),
-          supabase
-              .from("monthly_payments")
-              .select(MONTHLY_PAYMENT_SELECT_FIELDS)
+          scopeToOrganization(
+            supabase
+                .from("monthly_payments")
+                .select(MONTHLY_PAYMENT_SELECT_FIELDS)
+          )
               .order("payment_month", { ascending: true })
               .order("customer_id", { ascending: true }),
           hasGrowthPlan
-              ? supabase
-                    .from("commercial_rams_documents")
-                    .select(COMMERCIAL_RAMS_SELECT_FIELDS)
+              ? scopeToOrganization(
+                  supabase
+                      .from("commercial_rams_documents")
+                      .select(COMMERCIAL_RAMS_SELECT_FIELDS)
+                )
                     .order("updated_at", { ascending: false })
                     .order("created_at", { ascending: false })
               : Promise.resolve({ data: [], error: null }),
-          supabase
-              .from("items")
-              .select("id,title,category,item_type,price,buy_price,created_at,updated_at")
+          scopeToOrganization(
+            supabase
+                .from("items")
+                .select("id,title,category,item_type,price,buy_price,created_at,updated_at")
+          )
               .order("category", { ascending: true })
               .order("title", { ascending: true }),
-          supabase
-              .from("quotes")
-              .select(QUOTE_SELECT_FIELDS)
+          scopeToOrganization(
+            supabase
+                .from("quotes")
+                .select(QUOTE_SELECT_FIELDS)
+          )
               .order("date", { ascending: false }),
-          supabase
-              .from("invoices")
-              .select(INVOICE_SELECT_FIELDS)
+          scopeToOrganization(
+            supabase
+                .from("invoices")
+                .select(INVOICE_SELECT_FIELDS)
+          )
               .order("date", { ascending: false }),
-          supabase
-              .from("recurring_invoice_templates")
-              .select(RECURRING_INVOICE_TEMPLATE_SELECT_FIELDS),
-          supabase
-              .from("scheduled_jobs")
-              .select(SCHEDULED_JOB_SELECT_FIELDS)
+          scopeToOrganization(
+            supabase
+                .from("recurring_invoice_templates")
+                .select(RECURRING_INVOICE_TEMPLATE_SELECT_FIELDS)
+          ),
+          scopeToOrganization(
+            supabase
+                .from("scheduled_jobs")
+                .select(SCHEDULED_JOB_SELECT_FIELDS)
+          )
               .order("date", { ascending: true }),
-          supabase
-              .from(APP_STATE_TABLE)
-              .select("data")
+          scopeToOrganization(
+            supabase
+                .from(APP_STATE_TABLE)
+                .select("data")
+          )
               .eq("id", APP_STATE_ROW_ID)
               .limit(1)
               .maybeSingle(),
-          supabase
-              .from("staff_members")
-              .select(STAFF_MEMBER_SELECT_FIELDS)
+          scopeToOrganization(
+            supabase
+                .from("staff_members")
+                .select(STAFF_MEMBER_SELECT_FIELDS)
+          )
               .order("full_name", { ascending: true }),
-          supabase
-              .from("role_permissions")
-              .select(ROLE_PERMISSION_SELECT_FIELDS)
+          scopeToOrganization(
+            supabase
+                .from("role_permissions")
+                .select(ROLE_PERMISSION_SELECT_FIELDS)
+          )
               .order("role", { ascending: true })
               .order("page_key", { ascending: true }),
           organizationId
@@ -5805,6 +5889,7 @@ export default function JobsApp({
           const legacyVisitsResult = await supabase
               .from("visits")
               .select(VISIT_LEGACY_SELECT_FIELDS)
+              .eq("organization_id", organizationId ?? "")
               .order("visit_date", { ascending: false });
 
           if (legacyVisitsResult.error) {
@@ -5944,9 +6029,14 @@ export default function JobsApp({
           if (existingItems.length === 0 && fallbackQuoteServices.length > 0) {
             const seededItemsResult = await supabase
                 .from("items")
-                .upsert(fallbackQuoteServices.map(mapQuoteServiceToCatalogItemRow), {
-                  onConflict: "id",
-                })
+                .upsert(
+                    fallbackQuoteServices.map((service) =>
+                        withLoadedOrganizationId(mapQuoteServiceToCatalogItemRow(service))
+                    ),
+                    {
+                      onConflict: "id",
+                    }
+                )
                 .select(
                     "id,title,category,item_type,price,buy_price,created_at,updated_at"
                 );
@@ -5973,7 +6063,11 @@ export default function JobsApp({
           ) {
             const seededQuotesResult = await supabase
                 .from("quotes")
-                .insert(nextState.quotes.map(mapQuoteToRow))
+                .insert(
+                    nextState.quotes.map((quote) =>
+                        withLoadedOrganizationId(mapQuoteToRow(quote))
+                    )
+                )
                 .select(QUOTE_SELECT_FIELDS);
 
             if (seededQuotesResult.error) {
@@ -6003,7 +6097,11 @@ export default function JobsApp({
           } else if (existingInvoices.length === 0 && nextState.invoices.length > 0) {
             const seededInvoicesResult = await supabase
                 .from("invoices")
-                .insert(nextState.invoices.map(mapInvoiceToRow))
+                .insert(
+                    nextState.invoices.map((invoice) =>
+                        withLoadedOrganizationId(mapInvoiceToRow(invoice))
+                    )
+                )
                 .select(INVOICE_SELECT_FIELDS);
 
             if (seededInvoicesResult.error) {
@@ -6059,7 +6157,11 @@ export default function JobsApp({
           if (existingScheduledJobs.length === 0 && nextState.scheduledJobs.length > 0) {
             const seededJobsResult = await supabase
                 .from("scheduled_jobs")
-                .insert(nextState.scheduledJobs.map(mapScheduledJobToRow))
+                .insert(
+                    nextState.scheduledJobs.map((job) =>
+                        withLoadedOrganizationId(mapScheduledJobToRow(job))
+                    )
+                )
                 .select(SCHEDULED_JOB_SELECT_FIELDS);
 
             if (seededJobsResult.error) {
@@ -6083,7 +6185,9 @@ export default function JobsApp({
           const seededRolePermissionsResult = await supabase
               .from("role_permissions")
               .upsert(
-                  createDefaultRolePermissions().map(mapRolePermissionToWriteRow),
+                  createDefaultRolePermissions().map((permission) =>
+                      withLoadedOrganizationId(mapRolePermissionToWriteRow(permission))
+                  ),
                   {
                     onConflict: "organization_id,role,page_key",
                   }
@@ -6112,16 +6216,18 @@ export default function JobsApp({
             const bootstrapAdminResult = await supabase
                 .from("staff_members")
                 .insert(
-                    mapStaffMemberToWriteRow({
-                      authUserId: user.id,
-                      email: user.email ?? "",
-                      fullName: getLoggedInStaffName(user),
-                      role: "Admin",
-                      isActive: true,
-                      phone: "",
-                      notes: "",
-                      isSystemAdmin: true,
-                    })
+                    withLoadedOrganizationId(
+                        mapStaffMemberToWriteRow({
+                          authUserId: user.id,
+                          email: user.email ?? "",
+                          fullName: getLoggedInStaffName(user),
+                          role: "Admin",
+                          isActive: true,
+                          phone: "",
+                          notes: "",
+                          isSystemAdmin: true,
+                        })
+                    )
                 )
                 .select(STAFF_MEMBER_SELECT_FIELDS)
                 .single();
@@ -6139,6 +6245,7 @@ export default function JobsApp({
                 .from("staff_members")
                 .update({ auth_user_id: user.id })
                 .eq("id", matchedStaffMember.id)
+                .eq("organization_id", organizationId ?? "")
                 .select(STAFF_MEMBER_SELECT_FIELDS)
                 .single();
 
@@ -6272,7 +6379,7 @@ export default function JobsApp({
     return () => {
       isCancelled = true;
     };
-  }, [hasGrowthPlan]);
+  }, [hasGrowthPlan, supportOrganizationId]);
 
   useEffect(() => {
     if (!currentUserId) {
@@ -6376,7 +6483,7 @@ export default function JobsApp({
     const supabase = createSupabaseClient();
     const { data, error } = await supabase
         .from("customers")
-        .insert(mapCustomerToRow(customer))
+        .insert(withCurrentOrganizationId(mapCustomerToRow(customer)))
         .select(CUSTOMER_SELECT_FIELDS)
         .single();
 
@@ -6395,8 +6502,9 @@ export default function JobsApp({
     const supabase = createSupabaseClient();
     const { data, error } = await supabase
         .from("customers")
-        .update(mapCustomerToRow(updatedCustomer))
+        .update(withCurrentOrganizationId(mapCustomerToRow(updatedCustomer)))
         .eq("id", updatedCustomer.id)
+        .eq("organization_id", getWritableOrganizationId())
         .select(CUSTOMER_SELECT_FIELDS)
         .single();
 
@@ -6417,7 +6525,11 @@ export default function JobsApp({
 
   async function removeCustomer(customerId: number) {
     const supabase = createSupabaseClient();
-    const { error } = await supabase.from("customers").delete().eq("id", customerId);
+    const { error } = await supabase
+        .from("customers")
+        .delete()
+        .eq("id", customerId)
+        .eq("organization_id", getWritableOrganizationId());
 
     if (error) {
       setDatabaseError(formatDatabaseError(error));
@@ -6440,6 +6552,7 @@ export default function JobsApp({
       const { data, error } = await supabase
           .from("customer_leads")
           .select(CUSTOMER_LEAD_SELECT_FIELDS)
+          .eq("organization_id", getWritableOrganizationId())
           .order("submitted_at", { ascending: false });
 
       if (error) {
@@ -6517,8 +6630,9 @@ export default function JobsApp({
       const supabase = createSupabaseClient();
       const { data, error } = await supabase
           .from("customer_leads")
-          .update(mapCustomerLeadToWriteRow(nextLead))
+          .update(withCurrentOrganizationId(mapCustomerLeadToWriteRow(nextLead)))
           .eq("id", nextLead.id)
+          .eq("organization_id", getWritableOrganizationId())
           .select(CUSTOMER_LEAD_SELECT_FIELDS)
           .single();
 
@@ -6599,6 +6713,7 @@ export default function JobsApp({
           .from("customer_leads")
           .delete()
           .eq("id", leadId)
+          .eq("organization_id", getWritableOrganizationId())
           .eq("status", "archived");
 
       if (error) {
@@ -6853,6 +6968,7 @@ export default function JobsApp({
           .from("monthly_payments")
           .delete()
           .eq("customer_id", customerId)
+          .eq("organization_id", getWritableOrganizationId())
           .eq("payment_month", normalizedMonth);
 
       if (error) {
@@ -6876,11 +6992,13 @@ export default function JobsApp({
     const { data, error } = await supabase
         .from("monthly_payments")
         .upsert(
-            mapMonthlyPaymentToWriteRow({
-              customerId,
-              paymentMonth: normalizedMonth,
-              paymentDate,
-            }),
+            withCurrentOrganizationId(
+                mapMonthlyPaymentToWriteRow({
+                  customerId,
+                  paymentMonth: normalizedMonth,
+                  paymentDate,
+                })
+            ),
             {
               onConflict: "customer_id,payment_month",
             }
@@ -6928,7 +7046,7 @@ export default function JobsApp({
       const supabase = createSupabaseClient();
       const { data, error } = await supabase
           .from("commercial_rams_documents")
-          .insert(mapCommercialRamsToRow(payload))
+          .insert(withCurrentOrganizationId(mapCommercialRamsToRow(payload)))
           .select(COMMERCIAL_RAMS_SELECT_FIELDS)
           .single();
 
@@ -6978,8 +7096,9 @@ export default function JobsApp({
       const supabase = createSupabaseClient();
       const { data, error } = await supabase
           .from("commercial_rams_documents")
-          .update(mapCommercialRamsToRow(payload))
+          .update(withCurrentOrganizationId(mapCommercialRamsToRow(payload)))
           .eq("id", payload.id)
+          .eq("organization_id", getWritableOrganizationId())
           .select(COMMERCIAL_RAMS_SELECT_FIELDS)
           .single();
 
@@ -7034,7 +7153,8 @@ export default function JobsApp({
         const { error } = await supabase
             .from("commercial_rams_documents")
             .delete()
-            .eq("id", documentId);
+            .eq("id", documentId)
+            .eq("organization_id", getWritableOrganizationId());
 
         if (error) {
           throw error;
@@ -7064,9 +7184,10 @@ export default function JobsApp({
         visit.id && !String(visit.id).startsWith("temp-")
             ? supabase
                 .from("visits")
-                .update(payload)
+                .update(withCurrentOrganizationId(payload))
                 .eq("id", visit.id)
-            : supabase.from("visits").insert(payload);
+                .eq("organization_id", getWritableOrganizationId())
+            : supabase.from("visits").insert(withCurrentOrganizationId(payload));
 
     let metadataWarning: string | null = null;
     const saveResult = await saveVisitRow(mapVisitToRow(visit))
@@ -7131,6 +7252,7 @@ export default function JobsApp({
       const { error } = await supabase
           .from("visits")
           .delete()
+          .eq("organization_id", getWritableOrganizationId())
           .not("id", "is", null);
 
       if (error) {
@@ -7161,7 +7283,7 @@ export default function JobsApp({
       const supabase = createSupabaseClient();
       const { data, error } = await supabase
           .from("quotes")
-          .insert(mapQuoteToRow(quote))
+          .insert(withCurrentOrganizationId(mapQuoteToRow(quote)))
           .select(QUOTE_SELECT_FIELDS)
           .single();
 
@@ -7206,8 +7328,9 @@ export default function JobsApp({
       const supabase = createSupabaseClient();
       const { data, error } = await supabase
           .from("quotes")
-          .update(mapQuoteToRow(updatedQuote))
+          .update(withCurrentOrganizationId(mapQuoteToRow(updatedQuote)))
           .eq("id", updatedQuote.id)
+          .eq("organization_id", getWritableOrganizationId())
           .select(QUOTE_SELECT_FIELDS)
           .single();
 
@@ -7251,7 +7374,7 @@ export default function JobsApp({
       const supabase = createSupabaseClient();
       const { data, error } = await supabase
           .from("invoices")
-          .insert(mapInvoiceToRow(invoice))
+          .insert(withCurrentOrganizationId(mapInvoiceToRow(invoice)))
           .select(INVOICE_SELECT_FIELDS)
           .single();
 
@@ -7327,8 +7450,9 @@ export default function JobsApp({
       const supabase = createSupabaseClient();
       const { data, error } = await supabase
           .from("invoices")
-          .update(mapInvoiceToRow(updatedInvoice))
+          .update(withCurrentOrganizationId(mapInvoiceToRow(updatedInvoice)))
           .eq("id", updatedInvoice.id)
+          .eq("organization_id", getWritableOrganizationId())
           .select(INVOICE_SELECT_FIELDS)
           .single();
 
@@ -7608,7 +7732,9 @@ export default function JobsApp({
       const supabase = createSupabaseClient();
       const { data, error } = await supabase
           .from("recurring_invoice_templates")
-          .upsert(mapRecurringInvoiceTemplateToRow(payload), { onConflict: "id" })
+          .upsert(withCurrentOrganizationId(mapRecurringInvoiceTemplateToRow(payload)), {
+            onConflict: "id",
+          })
           .select(RECURRING_INVOICE_TEMPLATE_SELECT_FIELDS)
           .single();
 
@@ -7662,7 +7788,8 @@ export default function JobsApp({
         const { error } = await supabase
             .from("recurring_invoice_templates")
             .delete()
-            .eq("id", templateId);
+            .eq("id", templateId)
+            .eq("organization_id", getWritableOrganizationId());
 
         if (error) {
           throw error;
@@ -7779,6 +7906,7 @@ export default function JobsApp({
             .from("quotes")
             .delete()
             .eq("id", quoteId)
+            .eq("organization_id", getWritableOrganizationId())
             .select("id,quote_number");
 
         if (error) {
@@ -7792,6 +7920,7 @@ export default function JobsApp({
               .from("quotes")
               .select("id,quote_number")
               .eq("quote_number", existingQuote.quoteNumber)
+              .eq("organization_id", getWritableOrganizationId())
               .maybeSingle();
 
           if (matchingQuoteError) {
@@ -7804,6 +7933,7 @@ export default function JobsApp({
                     .from("quotes")
                     .delete()
                     .eq("id", matchingQuote.id)
+                    .eq("organization_id", getWritableOrganizationId())
                     .select("id,quote_number");
 
             if (fallbackDeleteError) {
@@ -7910,7 +8040,8 @@ export default function JobsApp({
         const { error } = await supabase
             .from("invoices")
             .delete()
-            .eq("id", invoiceId);
+            .eq("id", invoiceId)
+            .eq("organization_id", getWritableOrganizationId());
 
         if (error) {
           throw error;
@@ -7949,7 +8080,7 @@ export default function JobsApp({
       const supabase = createSupabaseClient();
       const { data, error } = await supabase
           .from("scheduled_jobs")
-          .insert(mapScheduledJobToRow(job))
+          .insert(withCurrentOrganizationId(mapScheduledJobToRow(job)))
           .select(SCHEDULED_JOB_SELECT_FIELDS)
           .single();
 
@@ -7988,8 +8119,9 @@ export default function JobsApp({
       const supabase = createSupabaseClient();
       const { data, error } = await supabase
           .from("scheduled_jobs")
-          .update(mapScheduledJobToRow(updatedJob))
+          .update(withCurrentOrganizationId(mapScheduledJobToRow(updatedJob)))
           .eq("id", updatedJob.id)
+          .eq("organization_id", getWritableOrganizationId())
           .select(SCHEDULED_JOB_SELECT_FIELDS)
           .single();
 
@@ -8244,7 +8376,8 @@ export default function JobsApp({
         const { error } = await supabase
             .from("scheduled_jobs")
             .delete()
-            .eq("id", jobId);
+            .eq("id", jobId)
+            .eq("organization_id", getWritableOrganizationId());
 
         if (error) {
           throw error;
@@ -8305,11 +8438,13 @@ export default function JobsApp({
     const { data, error } = await supabase
         .from("staff_members")
         .insert(
-            mapStaffMemberToWriteRow({
-              ...values,
-              authUserId: null,
-              isSystemAdmin: false,
-            })
+            withCurrentOrganizationId(
+                mapStaffMemberToWriteRow({
+                  ...values,
+                  authUserId: null,
+                  isSystemAdmin: false,
+                })
+            )
         )
         .select(STAFF_MEMBER_SELECT_FIELDS)
         .single();
@@ -8366,18 +8501,21 @@ export default function JobsApp({
     const { data, error } = await supabase
         .from("staff_members")
         .update(
-            mapStaffMemberToWriteRow({
-              authUserId: existingStaffMember.authUserId ?? null,
-              email: nextEmail,
-              fullName: values.fullName,
-              role: nextRole,
-              isActive: nextIsActive,
-              phone: values.phone,
-              notes: values.notes,
-              isSystemAdmin: existingStaffMember.isSystemAdmin,
-            })
+            withCurrentOrganizationId(
+                mapStaffMemberToWriteRow({
+                  authUserId: existingStaffMember.authUserId ?? null,
+                  email: nextEmail,
+                  fullName: values.fullName,
+                  role: nextRole,
+                  isActive: nextIsActive,
+                  phone: values.phone,
+                  notes: values.notes,
+                  isSystemAdmin: existingStaffMember.isSystemAdmin,
+                })
+            )
         )
         .eq("id", staffMemberId)
+        .eq("organization_id", getWritableOrganizationId())
         .select(STAFF_MEMBER_SELECT_FIELDS)
         .single();
 
@@ -8433,7 +8571,8 @@ export default function JobsApp({
     const { error } = await supabase
         .from("staff_members")
         .delete()
-        .eq("id", staffMemberId);
+        .eq("id", staffMemberId)
+        .eq("organization_id", getWritableOrganizationId());
 
     if (error) {
       setDatabaseError(formatDatabaseError(error));
@@ -8463,11 +8602,13 @@ export default function JobsApp({
     const { data, error } = await supabase
         .from("role_permissions")
         .upsert(
-            mapRolePermissionToWriteRow({
-              role,
-              pageKey,
-              allowed,
-            }),
+            withCurrentOrganizationId(
+                mapRolePermissionToWriteRow({
+                  role,
+                  pageKey,
+                  allowed,
+                })
+            ),
             {
               onConflict: "organization_id,role,page_key",
             }
@@ -9855,7 +9996,11 @@ export default function JobsApp({
     }
 
     const supabase = createSupabaseClient();
-    const { error } = await supabase.from("visits").delete().eq("id", visitId);
+    const { error } = await supabase
+        .from("visits")
+        .delete()
+        .eq("id", visitId)
+        .eq("organization_id", getWritableOrganizationId());
 
     if (error) {
       setDatabaseError(formatDatabaseError(error));
@@ -11129,6 +11274,25 @@ export default function JobsApp({
                   </div>
                 </div>
               </header>
+
+              {isSupportAccess ? (
+                  <section className="mb-5 rounded-3xl border border-emerald-200 bg-[#003c35] px-4 py-3 text-sm text-white shadow-sm">
+                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="font-black">Support access</p>
+                        <p className="mt-1 text-white/78">
+                          You are viewing and editing {supportAccess?.workspaceName ?? "this customer workspace"}.
+                        </p>
+                      </div>
+                      <a
+                          href="/admin"
+                          className="inline-flex w-fit items-center justify-center rounded-xl bg-[#20c766] px-4 py-2 text-xs font-black text-[#003c35] transition hover:bg-[#2ee074]"
+                      >
+                        Back to admin
+                      </a>
+                    </div>
+                  </section>
+              ) : null}
 
               {databaseError && (
                   <section className="mb-5 rounded-3xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm">

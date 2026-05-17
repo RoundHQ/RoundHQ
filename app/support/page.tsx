@@ -35,6 +35,7 @@ type SupportSearchParams = {
   created?: string;
   sent?: string;
   error?: string;
+  opened?: string;
 };
 
 function formatStatus(value: SupportTicketStatus) {
@@ -279,7 +280,6 @@ export default async function SupportPage({
 
               <form
                 action={createCustomerTicketAction}
-                encType="multipart/form-data"
                 className="mt-5 space-y-4"
               >
                 <label className="block">
@@ -411,7 +411,10 @@ export default async function SupportPage({
             </section>
           </aside>
 
-          <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
+          <section
+            id="ticket-conversation"
+            className="scroll-mt-6 rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8"
+          >
             {params.created === "1" ? (
               <div className="mb-6 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-800">
                 Ticket created. We have been notified.
@@ -495,7 +498,6 @@ export default async function SupportPage({
 
                 <form
                   action={addCustomerTicketReplyAction}
-                  encType="multipart/form-data"
                   className="mt-8 rounded-lg border border-slate-200 bg-white p-5"
                 >
                   <input

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { ensureWorkspace } from "@/lib/workspace";
@@ -14,6 +15,8 @@ import {
   type SupportCategory,
   type SupportPriority,
 } from "@/lib/support/helpdesk";
+
+const SUPPORT_SUBMIT_SIDE_EFFECT_TIMEOUT_MS = 8000;
 
 function getText(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -49,6 +52,71 @@ function getPriority(value: string): SupportPriority {
       .replace(/_+/g, "_")
       .replace(/^_|_$/g, "") || "normal"
   );
+}
+
+function getOpenTicketRedirectUrl(
+  ticketId: string,
+  statusParam: "created" | "sent"
+) {
+  const params = new URLSearchParams({
+    ticket: ticketId,
+    [statusParam]: "1",
+    opened: Date.now().toString(),
+  });
+
+  return `/support?${params.toString()}#ticket-conversation`;
+}
+
+function getAdminTicketUrl(ticketId: string) {
+  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "");
+  const ticketPath = `/admin/helpdesk/${ticketId}`;
+
+  return baseUrl ? `${baseUrl}${ticketPath}` : ticketPath;
+}
+
+function getActionErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function runSupportTaskInBackground(
+  label: string,
+  task: Promise<unknown> | (() => Promise<unknown>)
+) {
+  after(async () => {
+    try {
+      await (typeof task === "function" ? task() : task);
+    } catch (error) {
+      console.error(`${label} failed:`, getActionErrorMessage(error));
+    }
+  });
+}
+
+async function waitForSupportTaskOrContinue(
+  label: string,
+  promise: Promise<unknown>,
+  timeoutMs = SUPPORT_SUBMIT_SIDE_EFFECT_TIMEOUT_MS
+) {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const result = await Promise.race([
+    promise
+      .then(() => "completed" as const)
+      .catch((error) => {
+        console.error(`${label} failed:`, getActionErrorMessage(error));
+        return "failed" as const;
+      }),
+    new Promise<"timed-out">((resolve) => {
+      timeoutId = setTimeout(() => resolve("timed-out"), timeoutMs);
+    }),
+  ]);
+
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+  }
+
+  if (result === "timed-out") {
+    console.warn(`${label} timed out; continuing support ticket redirect.`);
+    runSupportTaskInBackground(label, promise);
+  }
 }
 
 async function getCurrentCustomerContext() {
@@ -140,53 +208,67 @@ export async function createCustomerTicketAction(formData: FormData) {
     throw new Error(messageError?.message || "Unable to add support message.");
   }
 
-  await uploadSupportAttachments({
-    organizationId: context.organizationId,
-    ticketId,
-    messageId: String(messageRows[0].id),
-    files: getFiles(formData),
-  });
+  const files = getFiles(formData);
 
-  await notifySupportAdmins({
-    subject: `New RoundHQ support ticket: ${subject}`,
-    message: [
-      `Workspace: ${context.workspaceName}`,
-      `Customer: ${context.userEmail || "Unknown"}`,
-      `Priority: ${priority}`,
-      `Category: ${category.replace(/_/g, " ")}`,
-      "",
-      body,
-      "",
-      `Open in admin: /admin/helpdesk/${ticketId}`,
-    ].join("\n"),
-  });
-
-  if (supportSettings.autoAcknowledgeEnabled) {
-    await notifySupportCustomer({
-      to: context.userEmail,
-      subject: renderSupportTemplate(
-        supportSettings.autoAcknowledgeSubject,
-        {
-          customerName: context.userName || context.workspaceName,
-          workspaceName: context.workspaceName,
-          ticketSubject: subject,
-          ticketId,
-        }
-      ),
-      message: renderSupportTemplate(
-        supportSettings.autoAcknowledgeMessage,
-        {
-          customerName: context.userName || context.workspaceName,
-          workspaceName: context.workspaceName,
-          ticketSubject: subject,
-          ticketId,
-        }
-      ),
-    });
+  if (files.length > 0) {
+    await waitForSupportTaskOrContinue(
+      "Support attachment upload",
+      uploadSupportAttachments({
+        organizationId: context.organizationId,
+        ticketId,
+        messageId: String(messageRows[0].id),
+        files,
+      })
+    );
   }
 
+  runSupportTaskInBackground(
+    "Support ticket notifications",
+    () =>
+      Promise.allSettled([
+        notifySupportAdmins({
+          subject: `New RoundHQ support ticket: ${subject}`,
+          message: [
+            `Workspace: ${context.workspaceName}`,
+            `Customer: ${context.userEmail || "Unknown"}`,
+            `Priority: ${priority}`,
+            `Category: ${category.replace(/_/g, " ")}`,
+            "",
+            body,
+            "",
+            `Open in admin: ${getAdminTicketUrl(ticketId)}`,
+          ].join("\n"),
+        }),
+        supportSettings.autoAcknowledgeEnabled
+          ? notifySupportCustomer({
+              to: context.userEmail,
+              subject: renderSupportTemplate(
+                supportSettings.autoAcknowledgeSubject,
+                {
+                  customerName: context.userName || context.workspaceName,
+                  workspaceName: context.workspaceName,
+                  ticketSubject: subject,
+                  ticketId,
+                }
+              ),
+              message: renderSupportTemplate(
+                supportSettings.autoAcknowledgeMessage,
+                {
+                  customerName: context.userName || context.workspaceName,
+                  workspaceName: context.workspaceName,
+                  ticketSubject: subject,
+                  ticketId,
+                }
+              ),
+            })
+          : Promise.resolve(),
+      ])
+  );
+
   revalidatePath("/support");
-  redirect(`/support?ticket=${ticketId}&created=1`);
+  revalidatePath("/admin");
+  revalidatePath("/admin/helpdesk");
+  redirect(getOpenTicketRedirectUrl(ticketId, "created"));
 }
 
 export async function addCustomerTicketReplyAction(formData: FormData) {
@@ -238,25 +320,39 @@ export async function addCustomerTicketReplyAction(formData: FormData) {
     })
     .eq("id", ticketId);
 
-  await uploadSupportAttachments({
-    organizationId: context.organizationId,
-    ticketId,
-    messageId: String(messageRows[0].id),
-    files: getFiles(formData),
-  });
+  const files = getFiles(formData);
 
-  await notifySupportAdmins({
-    subject: `Customer replied: ${String(ticket.subject ?? "Support ticket")}`,
-    message: [
-      `Workspace: ${context.workspaceName}`,
-      `Customer: ${context.userEmail || "Unknown"}`,
-      "",
-      body,
-      "",
-      `Open in admin: /admin/helpdesk/${ticketId}`,
-    ].join("\n"),
-  });
+  if (files.length > 0) {
+    await waitForSupportTaskOrContinue(
+      "Support reply attachment upload",
+      uploadSupportAttachments({
+        organizationId: context.organizationId,
+        ticketId,
+        messageId: String(messageRows[0].id),
+        files,
+      })
+    );
+  }
+
+  runSupportTaskInBackground(
+    "Support reply notification",
+    () =>
+      notifySupportAdmins({
+        subject: `Customer replied: ${String(ticket.subject ?? "Support ticket")}`,
+        message: [
+          `Workspace: ${context.workspaceName}`,
+          `Customer: ${context.userEmail || "Unknown"}`,
+          "",
+          body,
+          "",
+          `Open in admin: ${getAdminTicketUrl(ticketId)}`,
+        ].join("\n"),
+      })
+  );
 
   revalidatePath("/support");
-  redirect(`/support?ticket=${ticketId}&sent=1`);
+  revalidatePath("/admin");
+  revalidatePath("/admin/helpdesk");
+  revalidatePath(`/admin/helpdesk/${ticketId}`);
+  redirect(getOpenTicketRedirectUrl(ticketId, "sent"));
 }

@@ -9,6 +9,7 @@ import {
   MessageSquare,
   Paperclip,
   Send,
+  Trash2,
   User,
 } from "lucide-react";
 import {
@@ -27,6 +28,7 @@ import {
 } from "@/lib/support/helpdesk";
 import {
   addAdminTicketReplyAction,
+  deleteAdminTicketsAction,
   updateAdminTicketAction,
 } from "../actions";
 
@@ -285,7 +287,6 @@ export default async function AdminHelpdeskTicketPage({
               </h2>
               <form
                 action={addAdminTicketReplyAction}
-                encType="multipart/form-data"
                 className="mt-6 space-y-5"
               >
                 <input type="hidden" name="ticket_id" value={detail.ticket.id} />
@@ -421,6 +422,23 @@ export default async function AdminHelpdeskTicketPage({
 
                 <button className="w-full rounded-md bg-slate-950 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-800">
                   Save ticket
+                </button>
+              </form>
+            </section>
+
+            <section className="rounded-lg border border-rose-200 bg-rose-50 p-5 shadow-[0_18px_46px_rgba(15,23,42,0.08)]">
+              <h2 className="text-lg font-extrabold tracking-normal text-rose-950">
+                Delete ticket
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-rose-800">
+                Remove this ticket, its conversation, and any stored attachment
+                files.
+              </p>
+              <form action={deleteAdminTicketsAction} className="mt-4">
+                <input type="hidden" name="ticket_id" value={detail.ticket.id} />
+                <button className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-rose-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-rose-700">
+                  <Trash2 aria-hidden="true" className="size-4" />
+                  Delete this ticket
                 </button>
               </form>
             </section>

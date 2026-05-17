@@ -24,6 +24,22 @@ function getFiles(formData: FormData) {
     .filter((entry): entry is File => entry instanceof File && entry.size > 0);
 }
 
+function getTicketIds(formData: FormData) {
+  return Array.from(
+    new Set(
+      formData
+        .getAll("ticket_id")
+        .filter((entry): entry is string => typeof entry === "string")
+        .map((entry) => entry.trim())
+        .filter((entry) =>
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+            entry
+          )
+        )
+    )
+  );
+}
+
 function getStatus(value: string): SupportTicketStatus {
   if (
     value === "waiting_on_us" ||
@@ -258,4 +274,65 @@ export async function toggleCannedReplyAction(formData: FormData) {
 
   revalidatePath("/admin/helpdesk");
   redirect("/admin/helpdesk?reply=1");
+}
+
+export async function deleteAdminTicketsAction(formData: FormData) {
+  await requireAdminAccess("/admin/helpdesk");
+
+  const ticketIds = getTicketIds(formData);
+
+  if (ticketIds.length === 0) {
+    redirect("/admin/helpdesk?error=missing_delete");
+  }
+
+  const supabase = createServiceRoleClient();
+  const { data: attachmentRows, error: attachmentError } = await supabase
+    .from("support_attachments")
+    .select("storage_bucket, storage_path")
+    .in("ticket_id", ticketIds);
+
+  if (attachmentError) {
+    throw new Error(attachmentError.message);
+  }
+
+  const attachmentsByBucket = new Map<string, string[]>();
+
+  (attachmentRows ?? []).forEach((row) => {
+    const bucket =
+      typeof row.storage_bucket === "string" && row.storage_bucket.trim()
+        ? row.storage_bucket.trim()
+        : "support-attachments";
+    const storagePath =
+      typeof row.storage_path === "string" ? row.storage_path.trim() : "";
+
+    if (!storagePath) {
+      return;
+    }
+
+    attachmentsByBucket.set(bucket, [
+      ...(attachmentsByBucket.get(bucket) ?? []),
+      storagePath,
+    ]);
+  });
+
+  await Promise.allSettled(
+    Array.from(attachmentsByBucket.entries()).map(([bucket, paths]) =>
+      supabase.storage.from(bucket).remove(paths)
+    )
+  );
+
+  const { error: deleteError } = await supabase
+    .from("support_tickets")
+    .delete()
+    .in("id", ticketIds);
+
+  if (deleteError) {
+    throw new Error(deleteError.message);
+  }
+
+  revalidatePath("/admin");
+  revalidatePath("/admin/helpdesk");
+  ticketIds.forEach((ticketId) => revalidatePath(`/admin/helpdesk/${ticketId}`));
+
+  redirect(`/admin/helpdesk?deleted=${ticketIds.length}`);
 }

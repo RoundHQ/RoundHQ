@@ -161,6 +161,13 @@ export type AdminHelpdeskData = {
   schemaError: string;
 };
 
+export type AdminHelpdeskNotificationSummary = {
+  attentionCount: number;
+  newTicketCount: number;
+  latestTickets: SupportTicket[];
+  schemaError: string;
+};
+
 export type AdminTicketDetail = {
   ticket: SupportTicket;
   messages: SupportMessage[];
@@ -770,11 +777,28 @@ export async function getCustomerSupportData(options: {
     };
   }
 
-  const tickets = ((ticketsResult.data ?? []) as SupportTicketRow[]).map(mapTicket);
-  const selectedTicket =
-    tickets.find((ticket) => ticket.id === options.selectedTicketId) ??
-    tickets[0] ??
-    null;
+  let tickets = ((ticketsResult.data ?? []) as SupportTicketRow[]).map(mapTicket);
+  let selectedTicket =
+    tickets.find((ticket) => ticket.id === options.selectedTicketId) ?? null;
+
+  if (!selectedTicket && options.selectedTicketId) {
+    const selectedTicketResult = await supabase
+      .from("support_tickets")
+      .select(SUPPORT_TICKET_SELECT)
+      .eq("organization_id", options.organizationId)
+      .eq("id", options.selectedTicketId)
+      .maybeSingle();
+
+    if (selectedTicketResult.data && !selectedTicketResult.error) {
+      selectedTicket = mapTicket(selectedTicketResult.data as SupportTicketRow);
+      tickets = [
+        selectedTicket,
+        ...tickets.filter((ticket) => ticket.id !== selectedTicket?.id),
+      ];
+    }
+  }
+
+  selectedTicket = selectedTicket ?? tickets[0] ?? null;
 
   if (!selectedTicket) {
     return {
@@ -938,6 +962,51 @@ export async function getAdminHelpdeskData(filters: {
       urgent: allTickets.filter((ticket) => ticket.priority === "urgent").length,
       resolved: allTickets.filter((ticket) => ticket.status === "resolved").length,
     },
+    schemaError: "",
+  };
+}
+
+export async function getAdminHelpdeskNotificationSummary(): Promise<AdminHelpdeskNotificationSummary> {
+  const { supabase, error } = getServiceRoleClientOrError();
+
+  if (!supabase || error) {
+    return {
+      attentionCount: 0,
+      newTicketCount: 0,
+      latestTickets: [],
+      schemaError: error,
+    };
+  }
+
+  const [latestResult, newTicketCountResult] = await Promise.all([
+    supabase
+      .from("support_tickets")
+      .select(SUPPORT_TICKET_SELECT, { count: "exact" })
+      .in("status", ["open", "waiting_on_us"])
+      .order("updated_at", { ascending: false })
+      .limit(5),
+    supabase
+      .from("support_tickets")
+      .select("id", { count: "exact", head: true })
+      .in("status", ["open", "waiting_on_us"])
+      .is("last_admin_reply_at", null),
+  ]);
+
+  if (latestResult.error) {
+    return {
+      attentionCount: 0,
+      newTicketCount: 0,
+      latestTickets: [],
+      schemaError: latestResult.error.message,
+    };
+  }
+
+  return {
+    attentionCount: latestResult.count ?? latestResult.data?.length ?? 0,
+    newTicketCount: newTicketCountResult.error
+      ? 0
+      : (newTicketCountResult.count ?? 0),
+    latestTickets: ((latestResult.data ?? []) as SupportTicketRow[]).map(mapTicket),
     schemaError: "",
   };
 }
