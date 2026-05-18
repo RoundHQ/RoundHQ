@@ -164,6 +164,11 @@ export const INVOICE_STATUS_OPTIONS = [
 ] as const;
 
 export type InvoiceStatus = (typeof INVOICE_STATUS_OPTIONS)[number];
+export type StripeInvoicePaymentStatus =
+  | "not_created"
+  | "open"
+  | "paid"
+  | "expired";
 
 export const RECURRING_INVOICE_FREQUENCY_OPTIONS = [
   "Monthly",
@@ -221,6 +226,11 @@ export type Invoice = {
   vatAmount?: number;
   total: number;
   linkedQuoteId?: string;
+  stripeCheckoutSessionId?: string;
+  stripePaymentLinkUrl?: string;
+  stripePaymentStatus?: StripeInvoicePaymentStatus;
+  stripePaymentIntentId?: string;
+  stripePaymentCompletedAt?: string;
 };
 
 export type QuoteFollowUpState = {

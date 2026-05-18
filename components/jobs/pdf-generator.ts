@@ -1,5 +1,9 @@
 import jsPDF from "jspdf";
-import type { InvoiceStatus, QuoteStatus } from "./types";
+import type {
+    InvoiceStatus,
+    QuoteStatus,
+    StripeInvoicePaymentStatus,
+} from "./types";
 
 type CustomerType = "Residential" | "Commercial";
 
@@ -48,6 +52,11 @@ type Invoice = DocumentCustomerFields & {
     vatAmount?: number;
     total: number;
     linkedQuoteId?: string;
+    stripeCheckoutSessionId?: string;
+    stripePaymentLinkUrl?: string;
+    stripePaymentStatus?: StripeInvoicePaymentStatus;
+    stripePaymentIntentId?: string;
+    stripePaymentCompletedAt?: string;
 };
 
 export type DocumentBrandDetails = {
@@ -1868,9 +1877,23 @@ async function buildInvoicePdfDocument(
 
     y = drawItemsTable(doc, invoice.items, y, palette, "");
 
-    const bottomStartY = ensurePageSpace(doc, y, 86);
+    const paymentLinkUrl = invoice.stripePaymentLinkUrl?.trim();
+    const bottomStartY = ensurePageSpace(doc, y, paymentLinkUrl ? 116 : 86);
     const leftColumnWidth = 114;
     let nextLeftY = bottomStartY;
+
+    if (paymentLinkUrl) {
+        const paymentLinkHeight = drawParagraphCard(doc, {
+            x: MARGIN,
+            y: nextLeftY,
+            width: leftColumnWidth,
+            title: "Pay Online",
+            body: `Pay securely online: ${paymentLinkUrl}`,
+            palette,
+            accentColor: palette.primary,
+        });
+        nextLeftY += paymentLinkHeight + 6;
+    }
 
     const bankHeight = drawBankTransferCard(doc, {
         x: MARGIN,

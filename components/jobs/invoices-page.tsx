@@ -3,9 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
+  CreditCard,
   Download,
+  ExternalLink,
   FileText,
   History as HistoryIcon,
+  Link2,
   Mail,
   Pencil,
   Repeat,
@@ -27,6 +30,7 @@ import type {
   QuoteStatus,
   RecurringInvoiceFrequency,
   RecurringInvoiceTemplate,
+  StripeInvoicePaymentStatus,
 } from "./types";
 
 type LineItem = {
@@ -59,6 +63,11 @@ type Invoice = {
   vatAmount?: number;
   total: number;
   linkedQuoteId?: string;
+  stripeCheckoutSessionId?: string;
+  stripePaymentLinkUrl?: string;
+  stripePaymentStatus?: StripeInvoicePaymentStatus;
+  stripePaymentIntentId?: string;
+  stripePaymentCompletedAt?: string;
 };
 
 type Quote = {
@@ -133,6 +142,8 @@ type Props = {
     invoiceId: string,
     metadata?: DocumentSendMetadata
   ) => Promise<void> | void;
+  stripeInvoicePaymentsEnabled?: boolean;
+  onCreatePaymentLink?: (invoiceId: string) => Promise<Invoice | null>;
   onSaveRecurringTemplate: (
     template: RecurringInvoiceTemplate
   ) => Promise<RecurringInvoiceTemplate | null>;
@@ -265,6 +276,9 @@ function getInvoiceEmailMessage(
     invoice.dueDate
       ? `Due by: ${new Date(invoice.dueDate).toLocaleDateString()}`
       : undefined,
+    invoice.stripePaymentLinkUrl
+      ? `Pay securely online: ${invoice.stripePaymentLinkUrl}`
+      : undefined,
     "",
     invoice.notes?.trim() || "Please use the invoice number as your payment reference.",
     "",
@@ -274,6 +288,44 @@ function getInvoiceEmailMessage(
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function appendPaymentLinkToMessage(message: string, invoice: Invoice) {
+  const paymentLinkUrl = invoice.stripePaymentLinkUrl?.trim();
+
+  if (!paymentLinkUrl || message.includes(paymentLinkUrl)) {
+    return message;
+  }
+
+  return `${message.trim()}\n\nPay securely online: ${paymentLinkUrl}`;
+}
+
+function getPaymentLinkLabel(invoice: Invoice) {
+  if (invoice.stripePaymentStatus === "paid" || invoice.status === "Paid") {
+    return "Paid online";
+  }
+
+  if (invoice.stripePaymentStatus === "expired") {
+    return "Link expired";
+  }
+
+  if (invoice.stripePaymentLinkUrl) {
+    return "Payment link";
+  }
+
+  return "No payment link";
+}
+
+function getPaymentLinkClasses(invoice: Invoice) {
+  if (invoice.stripePaymentStatus === "paid" || invoice.status === "Paid") {
+    return "bg-emerald-100 text-emerald-700";
+  }
+
+  if (invoice.stripePaymentStatus === "expired") {
+    return "bg-amber-100 text-amber-700";
+  }
+
+  return "bg-sky-100 text-sky-700";
 }
 
 
@@ -327,12 +379,21 @@ export default function InvoicesPage({
   onEdit,
   onDelete,
   onMarkSent,
+  stripeInvoicePaymentsEnabled = false,
+  onCreatePaymentLink,
   onSaveRecurringTemplate,
   onDeleteRecurringTemplate,
 }: Props) {
   const [sendTarget, setSendTarget] = useState<SendTarget>(null);
   const [activeFilter, setActiveFilter] = useState<InvoiceFilter>("All");
   const [sendNotice, setSendNotice] = useState<string | null>(null);
+  const [paymentLinkNotice, setPaymentLinkNotice] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+  const [paymentLinkInvoiceId, setPaymentLinkInvoiceId] = useState<string | null>(
+    null
+  );
   const [recurringEditor, setRecurringEditor] = useState<RecurringEditorState>(null);
   const [recurringFrequency, setRecurringFrequency] =
     useState<RecurringInvoiceFrequency>("Monthly");
@@ -358,6 +419,20 @@ export default function InvoicesPage({
       window.clearTimeout(timeoutId);
     };
   }, [sendNotice]);
+
+  useEffect(() => {
+    if (!paymentLinkNotice) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setPaymentLinkNotice(null);
+    }, 5500);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [paymentLinkNotice]);
 
   const activeInvoice = useMemo(
     () =>
@@ -485,6 +560,93 @@ export default function InvoicesPage({
     setIsSavingRecurring(false);
   }
 
+  async function ensureInvoicePaymentLink(invoice: Invoice) {
+    if (
+      !stripeInvoicePaymentsEnabled ||
+      invoice.status === "Paid" ||
+      !onCreatePaymentLink
+    ) {
+      return invoice;
+    }
+
+    if (
+      invoice.stripePaymentLinkUrl &&
+      invoice.stripePaymentStatus !== "expired"
+    ) {
+      return invoice;
+    }
+
+    setPaymentLinkInvoiceId(invoice.id);
+
+    try {
+      return (await onCreatePaymentLink(invoice.id)) ?? invoice;
+    } finally {
+      setPaymentLinkInvoiceId(null);
+    }
+  }
+
+  async function handleDownloadInvoicePdf(invoice: Invoice) {
+    try {
+      const invoiceForPdf = await ensureInvoicePaymentLink(invoice);
+      await generateInvoicePDF(invoiceForPdf, businessDetails);
+    } catch (error) {
+      setPaymentLinkNotice({
+        type: "error",
+        text:
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : "Unable to prepare the invoice PDF.",
+      });
+    }
+  }
+
+  async function handlePaymentLinkAction(invoice: Invoice) {
+    if (
+      invoice.stripePaymentLinkUrl &&
+      invoice.stripePaymentStatus !== "expired"
+    ) {
+      window.open(invoice.stripePaymentLinkUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    if (!onCreatePaymentLink) {
+      setPaymentLinkNotice({
+        type: "error",
+        text: "Stripe invoice payments are not available in this workspace.",
+      });
+      return;
+    }
+
+    try {
+      setPaymentLinkInvoiceId(invoice.id);
+      const updatedInvoice = await onCreatePaymentLink(invoice.id);
+
+      if (!updatedInvoice?.stripePaymentLinkUrl) {
+        throw new Error("Stripe did not return a payment link.");
+      }
+
+      setPaymentLinkNotice({
+        type: "success",
+        text: `Payment link ready for ${updatedInvoice.invoiceNumber}.`,
+      });
+      window.open(
+        updatedInvoice.stripePaymentLinkUrl,
+        "_blank",
+        "noopener,noreferrer"
+      );
+    } catch (error) {
+      setPaymentLinkNotice({
+        type: "error",
+        text:
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : "Unable to create the payment link.",
+      });
+    } finally {
+      setPaymentLinkInvoiceId(null);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <section className="rounded-[24px] bg-gradient-to-r from-[#153c3f] to-[#244d51] px-6 py-5 text-white shadow-sm">
@@ -519,6 +681,20 @@ export default function InvoicesPage({
             <p className="font-semibold">Email sent</p>
             <p className="mt-0.5 text-emerald-700">{sendNotice}</p>
           </div>
+        </div>
+      ) : null}
+
+      {paymentLinkNotice ? (
+        <div
+          role="status"
+          className={`flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm shadow-sm ${
+            paymentLinkNotice.type === "success"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+              : "border-rose-200 bg-rose-50 text-rose-800"
+          }`}
+        >
+          <CreditCard size={18} className="mt-0.5 shrink-0" />
+          <p className="font-semibold">{paymentLinkNotice.text}</p>
         </div>
       ) : null}
 
@@ -708,6 +884,17 @@ export default function InvoicesPage({
                               Recurring
                             </span>
                           ) : null}
+                          {invoice.stripePaymentLinkUrl ||
+                          invoice.stripePaymentStatus === "paid" ? (
+                            <span
+                              className={`inline-flex w-fit items-center gap-2 rounded-full px-2.5 py-1 text-[11px] font-semibold ${getPaymentLinkClasses(
+                                invoice
+                              )}`}
+                            >
+                              <Link2 size={12} />
+                              {getPaymentLinkLabel(invoice)}
+                            </span>
+                          ) : null}
                         </div>
                       </td>
 
@@ -779,12 +966,37 @@ export default function InvoicesPage({
                           </button>
 
                           <button
-                            onClick={() => generateInvoicePDF(invoice, businessDetails)}
+                            onClick={() => void handleDownloadInvoicePdf(invoice)}
+                            disabled={paymentLinkInvoiceId === invoice.id}
                             className="inline-flex items-center gap-2 rounded-lg bg-[#0f2343] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#1a325b]"
                           >
                             <Download size={14} />
                             PDF
                           </button>
+
+                          {stripeInvoicePaymentsEnabled ? (
+                            <button
+                              onClick={() => void handlePaymentLinkAction(invoice)}
+                              disabled={
+                                paymentLinkInvoiceId === invoice.id ||
+                                invoice.status === "Paid"
+                              }
+                              className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {invoice.stripePaymentLinkUrl &&
+                              invoice.stripePaymentStatus !== "expired" ? (
+                                <ExternalLink size={14} />
+                              ) : (
+                                <CreditCard size={14} />
+                              )}
+                              {paymentLinkInvoiceId === invoice.id
+                                ? "Working..."
+                                : invoice.stripePaymentLinkUrl &&
+                                    invoice.stripePaymentStatus !== "expired"
+                                  ? "Open link"
+                                  : "Payment link"}
+                            </button>
+                          ) : null}
 
                           <button
                             onClick={() =>
@@ -887,26 +1099,34 @@ export default function InvoicesPage({
           initialMessage={getInvoiceEmailMessage(activeInvoice, businessDetails)}
           onClose={() => setSendTarget(null)}
           onSend={async ({ recipient, subject, message }) => {
+            const invoiceForSending = await ensureInvoicePaymentLink(activeInvoice);
+            const fallbackMessage = getInvoiceEmailMessage(
+              invoiceForSending,
+              businessDetails
+            );
+            const resolvedMessage = appendPaymentLinkToMessage(
+              message.trim() || fallbackMessage,
+              invoiceForSending
+            );
+
             await sendInvoiceDocument({
-              invoice: activeInvoice,
+              invoice: invoiceForSending,
               businessDetails,
               method: sendTarget.method,
               recipient,
               subject:
                 subject.trim() ||
-                getInvoiceEmailSubject(activeInvoice, businessDetails),
-              message:
-                message.trim() ||
-                getInvoiceEmailMessage(activeInvoice, businessDetails),
+                getInvoiceEmailSubject(invoiceForSending, businessDetails),
+              message: resolvedMessage,
             });
 
-            await onMarkSent(activeInvoice.id, {
+            await onMarkSent(invoiceForSending.id, {
               method: sendTarget.method,
               recipient,
             });
 
             setSendNotice(
-              `Email sent to ${recipient} for ${activeInvoice.invoiceNumber}.`
+              `Email sent to ${recipient} for ${invoiceForSending.invoiceNumber}.`
             );
           }}
         />

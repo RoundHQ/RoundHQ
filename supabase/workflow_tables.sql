@@ -43,6 +43,13 @@ create table if not exists public.invoices (
   vat_amount numeric(12, 2) null,
   total numeric(12, 2) not null default 0,
   linked_quote_id text null references public.quotes(id) on delete set null,
+  stripe_checkout_session_id text null,
+  stripe_payment_link_url text null,
+  stripe_payment_status text null check (
+    stripe_payment_status is null or stripe_payment_status in ('not_created', 'open', 'paid', 'expired')
+  ),
+  stripe_payment_intent_id text null,
+  stripe_payment_completed_at timestamptz null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -61,6 +68,30 @@ alter table if exists public.invoices
 
 alter table if exists public.invoices
   add column if not exists vat_amount numeric(12, 2) null;
+
+alter table if exists public.invoices
+  add column if not exists stripe_checkout_session_id text null;
+
+alter table if exists public.invoices
+  add column if not exists stripe_payment_link_url text null;
+
+alter table if exists public.invoices
+  add column if not exists stripe_payment_status text null;
+
+alter table if exists public.invoices
+  add column if not exists stripe_payment_intent_id text null;
+
+alter table if exists public.invoices
+  add column if not exists stripe_payment_completed_at timestamptz null;
+
+alter table if exists public.invoices
+  drop constraint if exists invoices_stripe_payment_status_check;
+
+alter table if exists public.invoices
+  add constraint invoices_stripe_payment_status_check
+  check (
+    stripe_payment_status is null or stripe_payment_status in ('not_created', 'open', 'paid', 'expired')
+  );
 
 alter table if exists public.quotes
   add column if not exists customer_type text null;
@@ -325,6 +356,9 @@ create index if not exists quotes_customer_id_idx on public.quotes(customer_id);
 create index if not exists quotes_date_idx on public.quotes(date desc);
 create index if not exists invoices_customer_id_idx on public.invoices(customer_id);
 create index if not exists invoices_date_idx on public.invoices(date desc);
+create index if not exists invoices_stripe_checkout_session_idx
+on public.invoices(stripe_checkout_session_id)
+where stripe_checkout_session_id is not null;
 create index if not exists recurring_invoice_templates_customer_id_idx on public.recurring_invoice_templates(customer_id);
 create index if not exists recurring_invoice_templates_next_send_date_idx on public.recurring_invoice_templates(next_send_date asc);
 create index if not exists scheduled_jobs_customer_id_idx on public.scheduled_jobs(customer_id);

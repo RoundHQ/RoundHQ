@@ -63,7 +63,9 @@ import ExpensesPage, {
 } from "@/components/jobs/expenses-page";
 import WorkflowMessageDialog from "@/components/jobs/workflow-message-dialog";
 import PaymentsPage from "@/components/jobs/payments-page";
-import SettingsPage from "@/components/jobs/settings-page";
+import SettingsPage, {
+  type RoundHqFullDataExport,
+} from "@/components/jobs/settings-page";
 import HelpProvider from "@/components/help/HelpProvider";
 import type { HelpTourActions, HelpTourPage } from "@/components/help/helpTours";
 import {
@@ -176,6 +178,7 @@ import {
   type QuoteFollowUpState,
   type RecurringInvoiceFrequency,
   type RecurringInvoiceTemplate,
+  type StripeInvoicePaymentStatus,
   type VisitLog,
   type NotCutReason,
   type QuoteStatus,
@@ -270,6 +273,12 @@ type AppSettings = {
   bankSortCode: string;
   bankAccountNumber: string;
   bankPaymentReference: string;
+  stripeConnectedAccountId: string;
+  stripeConnectStatus: "not_connected" | "onboarding" | "enabled" | "restricted";
+  stripeConnectChargesEnabled: boolean;
+  stripeConnectPayoutsEnabled: boolean;
+  stripeConnectDetailsSubmitted: boolean;
+  stripePaymentLinksEnabled: boolean;
   emailFromName: string;
   emailFromAddress: string;
   emailReplyTo: string;
@@ -432,6 +441,11 @@ type Invoice = {
   vatAmount?: number;
   total: number;
   linkedQuoteId?: string;
+  stripeCheckoutSessionId?: string;
+  stripePaymentLinkUrl?: string;
+  stripePaymentStatus?: StripeInvoicePaymentStatus;
+  stripePaymentIntentId?: string;
+  stripePaymentCompletedAt?: string;
 };
 
 type RecurringInvoiceTemplateRecord = RecurringInvoiceTemplate;
@@ -680,6 +694,11 @@ type InvoiceRow = {
   vat_amount: number | null;
   total: number | null;
   linked_quote_id: string | null;
+  stripe_checkout_session_id: string | null;
+  stripe_payment_link_url: string | null;
+  stripe_payment_status: string | null;
+  stripe_payment_intent_id: string | null;
+  stripe_payment_completed_at: string | null;
   created_at: string | null;
 };
 
@@ -706,6 +725,11 @@ type InvoiceWriteRow = {
   vat_amount: number | null;
   total: number;
   linked_quote_id: string | null;
+  stripe_checkout_session_id?: string | null;
+  stripe_payment_link_url?: string | null;
+  stripe_payment_status?: StripeInvoicePaymentStatus | null;
+  stripe_payment_intent_id?: string | null;
+  stripe_payment_completed_at?: string | null;
 };
 
 type RecurringInvoiceTemplateRow = {
@@ -817,7 +841,7 @@ const CUSTOMER_SELECT_FIELDS = "*";
 const QUOTE_SELECT_FIELDS =
     "id,quote_number,customer_id,customer_name,customer_type,customer_address,customer_town,customer_postcode,site_name,site_address,site_town,site_postcode,date,status,items,notes,total,created_at";
 const INVOICE_SELECT_FIELDS =
-    "id,invoice_number,customer_id,customer_name,customer_type,customer_address,customer_town,customer_postcode,site_name,site_address,site_town,site_postcode,date,due_date,status,items,notes,terms,vat_rate,vat_amount,total,linked_quote_id,created_at";
+    "id,invoice_number,customer_id,customer_name,customer_type,customer_address,customer_town,customer_postcode,site_name,site_address,site_town,site_postcode,date,due_date,status,items,notes,terms,vat_rate,vat_amount,total,linked_quote_id,stripe_checkout_session_id,stripe_payment_link_url,stripe_payment_status,stripe_payment_intent_id,stripe_payment_completed_at,created_at";
 const RECURRING_INVOICE_TEMPLATE_SELECT_FIELDS = "*";
 const SCHEDULED_JOB_SELECT_FIELDS = "*";
 const MONTHLY_PAYMENT_SELECT_FIELDS =
@@ -901,6 +925,12 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   bankSortCode: "",
   bankAccountNumber: "",
   bankPaymentReference: "",
+  stripeConnectedAccountId: "",
+  stripeConnectStatus: "not_connected",
+  stripeConnectChargesEnabled: false,
+  stripeConnectPayoutsEnabled: false,
+  stripeConnectDetailsSubmitted: false,
+  stripePaymentLinksEnabled: false,
   emailFromName: "",
   emailFromAddress: "",
   emailReplyTo: "",
@@ -1092,6 +1122,25 @@ function normalizePdfLogoScale(value: unknown) {
   return Math.min(160, Math.max(60, Math.round(numericValue)));
 }
 
+function normalizeStripeConnectStatus(
+    value: unknown
+): AppSettings["stripeConnectStatus"] {
+  return value === "onboarding" || value === "enabled" || value === "restricted"
+      ? value
+      : "not_connected";
+}
+
+function normalizeStripeInvoicePaymentStatus(
+    value: unknown
+): StripeInvoicePaymentStatus | undefined {
+  return value === "not_created" ||
+      value === "open" ||
+      value === "paid" ||
+      value === "expired"
+      ? value
+      : undefined;
+}
+
 function mergeAppSettings(value?: Partial<AppSettings> | null): AppSettings {
   const quoteFollowUpMethod = "email";
   const invoiceReminderMethod = "email";
@@ -1114,6 +1163,15 @@ function mergeAppSettings(value?: Partial<AppSettings> | null): AppSettings {
     ),
     editInactiveAction: normalizeEditInactiveAction(value?.editInactiveAction),
     helpEnabled: value?.helpEnabled !== false,
+    stripeConnectedAccountId:
+        typeof value?.stripeConnectedAccountId === "string"
+            ? value.stripeConnectedAccountId
+            : "",
+    stripeConnectStatus: normalizeStripeConnectStatus(value?.stripeConnectStatus),
+    stripeConnectChargesEnabled: value?.stripeConnectChargesEnabled === true,
+    stripeConnectPayoutsEnabled: value?.stripeConnectPayoutsEnabled === true,
+    stripeConnectDetailsSubmitted: value?.stripeConnectDetailsSubmitted === true,
+    stripePaymentLinksEnabled: value?.stripePaymentLinksEnabled === true,
     quoteFollowUpMethod,
     invoiceReminderMethod,
     quoteServices: normalizeQuoteServices(value?.quoteServices),
@@ -2566,10 +2624,15 @@ function formatDatabaseError(error: { code?: string; message: string }) {
           message.includes("vat_rate") ||
           message.includes("vat_amount") ||
           message.includes("linked_quote_id") ||
+          message.includes("stripe_checkout_session_id") ||
+          message.includes("stripe_payment_link_url") ||
+          message.includes("stripe_payment_status") ||
+          message.includes("stripe_payment_intent_id") ||
+          message.includes("stripe_payment_completed_at") ||
           message.includes("invoice_number") ||
           (message.includes("column") && message.includes("invoices"))
       ) {
-        return "Supabase is connected, but the invoices table needs the latest columns. Run the workflow SQL setup script again and refresh.";
+        return "Supabase is connected, but the invoices table needs the latest columns. Run supabase/stripe_invoice_payments.sql and the workflow SQL setup script, then refresh.";
       }
 
       if (
@@ -3026,6 +3089,13 @@ function mapInvoiceRowToInvoice(row: InvoiceRow): Invoice {
     vatAmount: row.vat_amount != null ? Number(row.vat_amount) : undefined,
     total: Number(row.total ?? 0),
     linkedQuoteId: row.linked_quote_id ?? undefined,
+    stripeCheckoutSessionId: row.stripe_checkout_session_id ?? undefined,
+    stripePaymentLinkUrl: row.stripe_payment_link_url ?? undefined,
+    stripePaymentStatus: normalizeStripeInvoicePaymentStatus(
+        row.stripe_payment_status
+    ),
+    stripePaymentIntentId: row.stripe_payment_intent_id ?? undefined,
+    stripePaymentCompletedAt: row.stripe_payment_completed_at ?? undefined,
   };
 }
 
@@ -3061,6 +3131,11 @@ function mapInvoiceToRow(invoice: Invoice): InvoiceWriteRow {
             : null,
     total: Number(invoice.total ?? 0),
     linked_quote_id: invoice.linkedQuoteId ?? null,
+    stripe_checkout_session_id: invoice.stripeCheckoutSessionId ?? null,
+    stripe_payment_link_url: invoice.stripePaymentLinkUrl ?? null,
+    stripe_payment_status: invoice.stripePaymentStatus ?? null,
+    stripe_payment_intent_id: invoice.stripePaymentIntentId ?? null,
+    stripe_payment_completed_at: invoice.stripePaymentCompletedAt ?? null,
   };
 }
 
@@ -6468,6 +6543,626 @@ export default function JobsApp({
     persistAppStateSnapshot,
   ]);
 
+  const handleImportAllData = useCallback(
+      async (payload: RoundHqFullDataExport) => {
+        const importedData = payload.data;
+        const importedSettings = mergeAppSettings(payload.settings);
+
+        if (importedData.customers.length > activeSubscriptionPlan.customerLimit) {
+          throw new Error(
+              `${activeSubscriptionPlan.name} allows up to ${activeSubscriptionPlan.customerLimit.toLocaleString()} customers. This backup contains ${importedData.customers.length.toLocaleString()} customers.`
+          );
+        }
+
+        if (
+            !hasGrowthPlan &&
+            importedData.customers.some((customer) => customer.customerType === "Commercial")
+        ) {
+          throw new Error(
+              "This backup contains commercial customers. Upgrade to Growth before importing commercial data."
+          );
+        }
+
+        const supabase = createSupabaseClient();
+        const organizationId = getWritableOrganizationId();
+        const deleteOrganizationRows = async (
+            tableName: string,
+            enabled = true
+        ) => {
+          if (!enabled) {
+            return;
+          }
+
+          const { error } = await supabase
+              .from(tableName)
+              .delete()
+              .eq("organization_id", organizationId);
+
+          if (error) {
+            throw error;
+          }
+        };
+        const now = new Date().toISOString();
+
+        await deleteOrganizationRows(
+            "monthly_payments",
+            workflowTablesReady.monthlyPayments
+        );
+        await deleteOrganizationRows("visits");
+        await deleteOrganizationRows(
+            "commercial_rams_documents",
+            workflowTablesReady.commercialRams
+        );
+        await deleteOrganizationRows(
+            "recurring_invoice_templates",
+            workflowTablesReady.recurringInvoiceTemplates
+        );
+        await deleteOrganizationRows(
+            "scheduled_jobs",
+            workflowTablesReady.scheduledJobs
+        );
+        await deleteOrganizationRows("invoices", workflowTablesReady.invoices);
+        await deleteOrganizationRows("quotes", workflowTablesReady.quotes);
+        await deleteOrganizationRows(
+            "customer_leads",
+            workflowTablesReady.customerLeads
+        );
+        await deleteOrganizationRows("customers");
+
+        const importedCustomerRows = importedData.customers.map((customer) =>
+            withCurrentOrganizationId(mapCustomerToRow(customer))
+        );
+        const insertedCustomerResult =
+            importedCustomerRows.length > 0
+                ? await supabase
+                    .from("customers")
+                    .insert(importedCustomerRows)
+                    .select(CUSTOMER_SELECT_FIELDS)
+                : { data: [], error: null };
+
+        if (insertedCustomerResult.error) {
+          throw insertedCustomerResult.error;
+        }
+
+        const nextCustomers = ((insertedCustomerResult.data ?? []) as CustomerRow[]).map(
+            mapCustomerRowToCustomer
+        );
+        const customerIdMap = new Map<number, number>();
+
+        importedData.customers.forEach((customer, index) => {
+          const importedId = Number(customer.id);
+          const insertedCustomer = nextCustomers[index];
+
+          if (Number.isFinite(importedId) && insertedCustomer) {
+            customerIdMap.set(importedId, insertedCustomer.id);
+          }
+        });
+
+        const getRemappedCustomerId = (customerId: number | null | undefined) => {
+          if (customerId == null) {
+            return null;
+          }
+
+          const mappedId = customerIdMap.get(Number(customerId));
+          return mappedId ?? null;
+        };
+        const remapRequiredCustomerId = (
+            customerId: number | null | undefined
+        ) => {
+          const mappedId = getRemappedCustomerId(customerId);
+          return mappedId && Number.isFinite(mappedId) ? mappedId : null;
+        };
+
+        const nextVisits = importedData.visits
+            .map((visit) => {
+              const customerId = remapRequiredCustomerId(visit.customerId);
+
+              return customerId ? { ...visit, customerId } : null;
+            })
+            .filter((visit): visit is VisitLog => Boolean(visit));
+        const nextMonthlyPayments = importedData.payments
+            .map((payment) => {
+              const customerId = remapRequiredCustomerId(payment.customerId);
+
+              return customerId ? { ...payment, customerId } : null;
+            })
+            .filter((payment): payment is MonthlyPayment => Boolean(payment));
+        const nextCommercialRamsDocuments = sortCommercialRamsDocuments(
+            importedData.commercialRamsDocuments.map((document) => ({
+              ...document,
+              customerId: getRemappedCustomerId(document.customerId),
+            }))
+        );
+        const nextCustomerLeads = sortCustomerLeads(
+            importedData.customerLeads.map((lead) => ({
+              ...lead,
+              convertedCustomerId: getRemappedCustomerId(
+                  lead.convertedCustomerId ?? null
+              ),
+            }))
+        );
+        const nextQuotes: Quote[] = importedData.quotes.map((quote, index) => {
+          const importedQuoteNumber = (quote as { quoteNumber?: unknown }).quoteNumber;
+
+          return {
+            ...quote,
+            quoteNumber:
+                typeof importedQuoteNumber === "string" && importedQuoteNumber.trim()
+                    ? importedQuoteNumber.trim()
+                    : `${importedSettings.quotePrefix || "Q"}-${String(index + 1).padStart(3, "0")}`,
+            customerId: getRemappedCustomerId(quote.customerId),
+          };
+        });
+        const nextInvoices = sortInvoices(
+            importedData.invoices.map((invoice) => ({
+              ...invoice,
+              customerId: getRemappedCustomerId(invoice.customerId),
+            }))
+        );
+        const nextRecurringInvoiceTemplates = sortRecurringInvoiceTemplates(
+            importedData.recurringInvoiceTemplates.map((template) => ({
+              ...template,
+              customerId: getRemappedCustomerId(template.customerId),
+            }))
+        );
+        const nextScheduledJobs = importedData.scheduledJobs.map((job) => ({
+          ...job,
+          customerId: getRemappedCustomerId(job.customerId ?? null),
+        }));
+        const nextRouteChangeHistory = importedData.routeChangeHistory.map(
+            (record) => ({
+              ...record,
+              undoCustomers: record.undoCustomers.map((customer) => ({
+                ...customer,
+                customerId:
+                    getRemappedCustomerId(customer.customerId) ?? customer.customerId,
+              })),
+            })
+        );
+
+        if (workflowTablesReady.monthlyPayments && nextMonthlyPayments.length > 0) {
+          const { data, error } = await supabase
+              .from("monthly_payments")
+              .insert(
+                  nextMonthlyPayments.map((payment) =>
+                      withCurrentOrganizationId(mapMonthlyPaymentToWriteRow(payment))
+                  )
+              )
+              .select(MONTHLY_PAYMENT_SELECT_FIELDS);
+
+          if (error) {
+            throw error;
+          }
+
+          setMonthlyPayments(
+              sortMonthlyPayments(
+                  ((data ?? []) as MonthlyPaymentRow[]).map(
+                      mapMonthlyPaymentRowToMonthlyPayment
+                  )
+              )
+          );
+        } else {
+          setMonthlyPayments(sortMonthlyPayments(nextMonthlyPayments));
+        }
+
+        if (nextVisits.length > 0) {
+          const { data, error } = await supabase
+              .from("visits")
+              .insert(
+                  nextVisits.map((visit) =>
+                      withCurrentOrganizationId(mapVisitToRow(visit))
+                  )
+              )
+              .select(VISIT_SELECT_FIELDS);
+
+          if (error) {
+            throw error;
+          }
+
+          setVisitLogs(((data ?? []) as VisitRow[]).map(mapVisitRowToVisit));
+        } else {
+          setVisitLogs([]);
+        }
+
+        if (
+            workflowTablesReady.commercialRams &&
+            nextCommercialRamsDocuments.length > 0
+        ) {
+          const { data, error } = await supabase
+              .from("commercial_rams_documents")
+              .insert(
+                  nextCommercialRamsDocuments.map((document) =>
+                      withCurrentOrganizationId(mapCommercialRamsToRow(document))
+                  )
+              )
+              .select(COMMERCIAL_RAMS_SELECT_FIELDS);
+
+          if (error) {
+            throw error;
+          }
+
+          setCommercialRamsDocuments(
+              sortCommercialRamsDocuments(
+                  (((data ?? []) as unknown) as CommercialRamsRow[]).map(
+                      mapCommercialRamsRowToDocument
+                  )
+              )
+          );
+        } else {
+          setCommercialRamsDocuments(nextCommercialRamsDocuments);
+        }
+
+        if (workflowTablesReady.customerLeads && nextCustomerLeads.length > 0) {
+          const { data, error } = await supabase
+              .from("customer_leads")
+              .insert(
+                  nextCustomerLeads.map((lead) =>
+                      withCurrentOrganizationId(mapCustomerLeadToWriteRow(lead))
+                  )
+              )
+              .select(CUSTOMER_LEAD_SELECT_FIELDS);
+
+          if (error) {
+            throw error;
+          }
+
+          setCustomerLeads(
+              sortCustomerLeads(
+                  (((data ?? []) as unknown) as CustomerLeadRow[]).map(
+                      mapCustomerLeadRowToLead
+                  )
+              )
+          );
+        } else {
+          setCustomerLeads(nextCustomerLeads);
+        }
+
+        await syncQuoteItemsTable(importedSettings.quoteServices);
+
+        if (workflowTablesReady.quotes && nextQuotes.length > 0) {
+          const { data, error } = await supabase
+              .from("quotes")
+              .insert(nextQuotes.map((quote) => withCurrentOrganizationId(mapQuoteToRow(quote))))
+              .select(QUOTE_SELECT_FIELDS);
+
+          if (error) {
+            throw error;
+          }
+
+          setQuotes(((data ?? []) as QuoteRow[]).map(mapQuoteRowToQuote));
+        } else {
+          setQuotes(nextQuotes);
+        }
+
+        let nextInvoicesWriteFallbackActive =
+            importedData.invoicesWriteFallbackActive;
+
+        if (workflowTablesReady.invoices && nextInvoices.length > 0) {
+          const { data, error } = await supabase
+              .from("invoices")
+              .insert(
+                  nextInvoices.map((invoice) =>
+                      withCurrentOrganizationId(mapInvoiceToRow(invoice))
+                  )
+              )
+              .select(INVOICE_SELECT_FIELDS);
+
+          if (error) {
+            if (!isInvoiceWriteFallbackError(error)) {
+              throw error;
+            }
+
+            nextInvoicesWriteFallbackActive = true;
+          } else {
+            setInvoices(((data ?? []) as InvoiceRow[]).map(mapInvoiceRowToInvoice));
+          }
+        }
+
+        if (!workflowTablesReady.invoices || nextInvoicesWriteFallbackActive) {
+          setInvoices(nextInvoices);
+        } else if (nextInvoices.length === 0) {
+          setInvoices([]);
+        }
+
+        let nextRecurringInvoiceTemplatesFallbackActive =
+            importedData.recurringInvoiceTemplatesFallbackActive;
+
+        if (
+            workflowTablesReady.recurringInvoiceTemplates &&
+            nextRecurringInvoiceTemplates.length > 0
+        ) {
+          const { data, error } = await supabase
+              .from("recurring_invoice_templates")
+              .insert(
+                  nextRecurringInvoiceTemplates.map((template) =>
+                      withCurrentOrganizationId(
+                          mapRecurringInvoiceTemplateToRow(template)
+                      )
+                  )
+              )
+              .select(RECURRING_INVOICE_TEMPLATE_SELECT_FIELDS);
+
+          if (error) {
+            if (!isRecurringInvoiceTemplateFallbackError(error)) {
+              throw error;
+            }
+
+            nextRecurringInvoiceTemplatesFallbackActive = true;
+          } else {
+            setRecurringInvoiceTemplates(
+                sortRecurringInvoiceTemplates(
+                    ((data ?? []) as RecurringInvoiceTemplateRow[]).map(
+                        mapRecurringInvoiceTemplateRowToTemplate
+                    )
+                )
+            );
+          }
+        }
+
+        if (
+            !workflowTablesReady.recurringInvoiceTemplates ||
+            nextRecurringInvoiceTemplatesFallbackActive
+        ) {
+          setRecurringInvoiceTemplates(nextRecurringInvoiceTemplates);
+        } else if (nextRecurringInvoiceTemplates.length === 0) {
+          setRecurringInvoiceTemplates([]);
+        }
+
+        if (workflowTablesReady.scheduledJobs && nextScheduledJobs.length > 0) {
+          const { data, error } = await supabase
+              .from("scheduled_jobs")
+              .insert(
+                  nextScheduledJobs.map((job) =>
+                      withCurrentOrganizationId(mapScheduledJobToRow(job))
+                  )
+              )
+              .select(SCHEDULED_JOB_SELECT_FIELDS);
+
+          if (error) {
+            throw error;
+          }
+
+          setScheduledJobs(
+              ((data ?? []) as ScheduledJobRow[]).map(mapScheduledJobRowToScheduledJob)
+          );
+        } else {
+          setScheduledJobs(nextScheduledJobs);
+        }
+
+        let staffForImport = [...importedData.staffMembers];
+        const importedCurrentStaff = findMatchingStaffMember(
+            staffForImport,
+            currentUserId,
+            currentUserEmail
+        );
+
+        if (importedCurrentStaff) {
+          staffForImport = staffForImport.map((staffMember) =>
+              staffMember.id === importedCurrentStaff.id
+                  ? {
+                    ...staffMember,
+                    authUserId: currentUserId,
+                    email: currentUserEmail ?? staffMember.email,
+                    role: "Admin",
+                    isActive: true,
+                    isSystemAdmin: true,
+                    updatedAt: now,
+                  }
+                  : staffMember
+          );
+        } else if (currentUserEmail) {
+          const nextStaffId =
+              Math.max(0, ...staffForImport.map((staffMember) => staffMember.id)) + 1;
+
+          staffForImport = [
+            {
+              id: nextStaffId,
+              authUserId: currentUserId,
+              email: currentUserEmail,
+              fullName: loggedInStaffName || formatUserNameFromEmail(currentUserEmail),
+              role: "Admin",
+              isActive: true,
+              phone: "",
+              notes: "",
+              isSystemAdmin: true,
+              createdAt: now,
+              updatedAt: now,
+            },
+            ...staffForImport,
+          ];
+        }
+
+        const rolePermissionsForImport =
+            importedData.rolePermissions.length > 0
+                ? importedData.rolePermissions
+                : createDefaultRolePermissions();
+
+        if (staffTablesReady.rolePermissions) {
+          await deleteOrganizationRows("role_permissions");
+        }
+
+        if (staffTablesReady.staffMembers) {
+          await deleteOrganizationRows("staff_members");
+
+          if (staffForImport.length > 0) {
+            const { data, error } = await supabase
+                .from("staff_members")
+                .insert(
+                    staffForImport.map((staffMember) =>
+                        withCurrentOrganizationId(mapStaffMemberToWriteRow(staffMember))
+                    )
+                )
+                .select(STAFF_MEMBER_SELECT_FIELDS);
+
+            if (error) {
+              throw error;
+            }
+
+            const insertedStaffMembers = sortStaffMembers(
+                ((data ?? []) as StaffMemberRow[]).map(mapStaffMemberRowToStaffMember)
+            );
+
+            setStaffMembers(insertedStaffMembers);
+            const matchedStaffMember = findMatchingStaffMember(
+                insertedStaffMembers,
+                currentUserId,
+                currentUserEmail
+            );
+
+            if (matchedStaffMember?.fullName) {
+              setLoggedInStaffName(matchedStaffMember.fullName);
+            }
+          } else {
+            setStaffMembers([]);
+          }
+        } else {
+          setStaffMembers(sortStaffMembers(staffForImport));
+        }
+
+        if (staffTablesReady.rolePermissions) {
+          if (rolePermissionsForImport.length > 0) {
+            const { data, error } = await supabase
+                .from("role_permissions")
+                .insert(
+                    rolePermissionsForImport.map((permission) =>
+                        withCurrentOrganizationId(
+                            mapRolePermissionToWriteRow(permission)
+                        )
+                    )
+                )
+                .select(ROLE_PERMISSION_SELECT_FIELDS);
+
+            if (error) {
+              throw error;
+            }
+
+            setRolePermissions(
+                ((data ?? []) as RolePermissionRow[]).map(
+                    mapRolePermissionRowToRolePermission
+                )
+            );
+          } else {
+            setRolePermissions([]);
+          }
+        } else {
+          setRolePermissions(rolePermissionsForImport);
+        }
+
+        const normalizedImportedState = normalizePersistedAppState({
+          scheduledJobs: nextScheduledJobs,
+          scheduledJobChecklists: importedData.scheduledJobChecklists,
+          quoteFollowUps: importedData.quoteFollowUps,
+          invoiceReminders: importedData.invoiceReminders,
+          quoteHistory: importedData.quoteHistory,
+          invoiceHistory: importedData.invoiceHistory,
+          ignoredMoveSuggestionIds: importedData.ignoredMoveSuggestionIds,
+          routeChangeHistory: nextRouteChangeHistory,
+          routeNotes: importedData.routeNotes,
+          quotes: nextQuotes,
+          invoices: nextInvoices,
+          expenseSuppliers: importedData.expenseSuppliers,
+          expenseProducts: importedData.expenseProducts,
+          expenses: importedData.expenses,
+          recurringInvoiceTemplates: nextRecurringInvoiceTemplates,
+          lockedRounds: importedData.lockedRounds,
+          activeRoundCycles: importedData.activeRoundCycles,
+          pendingCashPaymentDates: importedData.pendingCashPaymentDates,
+          selectedWeek: importedData.selectedWeek,
+          selectedDay: importedData.selectedDay,
+          appSettings: importedSettings,
+          quotesTableInitialized:
+              importedData.quotesTableInitialized || nextQuotes.length > 0,
+          invoicesWriteFallbackActive: nextInvoicesWriteFallbackActive,
+          recurringInvoiceTemplatesFallbackActive:
+              nextRecurringInvoiceTemplatesFallbackActive,
+        });
+
+        setCustomers(nextCustomers);
+        setExpenseSuppliers(normalizedImportedState.expenseSuppliers);
+        setExpenseProducts(normalizedImportedState.expenseProducts);
+        setExpenses(normalizedImportedState.expenses);
+        setInvoicesWriteFallbackActive(nextInvoicesWriteFallbackActive);
+        setRecurringInvoiceTemplatesFallbackActive(
+            nextRecurringInvoiceTemplatesFallbackActive
+        );
+        setScheduledJobChecklists(normalizedImportedState.scheduledJobChecklists);
+        setQuoteFollowUps(normalizedImportedState.quoteFollowUps);
+        setInvoiceReminders(normalizedImportedState.invoiceReminders);
+        setQuoteHistory(normalizedImportedState.quoteHistory);
+        setInvoiceHistory(normalizedImportedState.invoiceHistory);
+        setIgnoredMoveSuggestionIds(normalizedImportedState.ignoredMoveSuggestionIds);
+        setRouteChangeHistory(normalizedImportedState.routeChangeHistory);
+        setRouteNotes(normalizedImportedState.routeNotes);
+        setLockedRounds(normalizedImportedState.lockedRounds);
+        setActiveRoundCycles(normalizedImportedState.activeRoundCycles);
+        setPendingCashPaymentDates(normalizedImportedState.pendingCashPaymentDates);
+        setSelectedWeek(normalizedImportedState.selectedWeek);
+        setSelectedDay(normalizedImportedState.selectedDay);
+        setQuotesTableInitialized(normalizedImportedState.quotesTableInitialized);
+        setAppSettings(importedSettings);
+        setSelectedCustomerId(null);
+        setSelectedQuoteId(null);
+        setSelectedInvoiceId(null);
+        setSelectedScheduledJobId(null);
+
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem(
+              SETTINGS_STORAGE_KEY,
+              JSON.stringify(importedSettings)
+          );
+          writeStoredBooleanPreference(
+              HELP_ENABLED_STORAGE_KEY,
+              importedSettings.helpEnabled
+          );
+        }
+
+        const { error: organizationError } = await supabase
+            .from("organizations")
+            .update({
+              default_rotation_weeks: importedSettings.defaultRotationWeeks,
+              updated_at: now,
+            })
+            .eq("id", organizationId);
+
+        if (organizationError) {
+          throw organizationError;
+        }
+
+        await persistAppStateSnapshot(
+            buildPersistedAppState({
+              ...normalizedImportedState,
+              appSettings: importedSettings,
+              quotes: nextQuotes,
+              invoices: nextInvoices,
+              recurringInvoiceTemplates: nextRecurringInvoiceTemplates,
+              scheduledJobs: nextScheduledJobs,
+              invoicesWriteFallbackActive: nextInvoicesWriteFallbackActive,
+              recurringInvoiceTemplatesFallbackActive:
+                  nextRecurringInvoiceTemplatesFallbackActive,
+            })
+        );
+
+        setDatabaseError(
+            getDatabaseSetupNotice(workflowTablesReady, staffTablesReady)
+        );
+      },
+      [
+        activeSubscriptionPlan.customerLimit,
+        activeSubscriptionPlan.name,
+        buildPersistedAppState,
+        currentUserEmail,
+        currentUserId,
+        getWritableOrganizationId,
+        hasGrowthPlan,
+        loggedInStaffName,
+        persistAppStateSnapshot,
+        staffTablesReady,
+        syncQuoteItemsTable,
+        withCurrentOrganizationId,
+        workflowTablesReady,
+      ]
+  );
+
   async function createCustomer(customer: Customer) {
     if (customers.length >= activeSubscriptionPlan.customerLimit) {
       const limitHelp =
@@ -7516,6 +8211,77 @@ export default function JobsApp({
       setDatabaseError("Unable to update the invoice in Supabase.");
       return false;
     }
+  }
+
+  async function createInvoicePaymentLink(invoiceId: string) {
+    const response = await fetch("/api/invoices/payment-link", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ invoiceId }),
+    });
+    const body = (await response.json().catch(() => null)) as
+        | {
+            invoice?: {
+              id?: string;
+              stripeCheckoutSessionId?: string | null;
+              stripePaymentLinkUrl?: string | null;
+              stripePaymentStatus?: StripeInvoicePaymentStatus | null;
+              stripePaymentIntentId?: string | null;
+              stripePaymentCompletedAt?: string | null;
+              status?: InvoiceStatus;
+            };
+            error?: string;
+          }
+        | null;
+
+    if (!response.ok || !body?.invoice) {
+      throw new Error(body?.error || "Unable to create the invoice payment link.");
+    }
+
+    const existingInvoice =
+        invoices.find((invoice) => invoice.id === invoiceId) ?? null;
+    const updatedInvoice: Invoice | null = existingInvoice
+        ? {
+            ...existingInvoice,
+            status: body.invoice.status ?? existingInvoice.status,
+            stripeCheckoutSessionId:
+                body.invoice.stripeCheckoutSessionId ?? undefined,
+            stripePaymentLinkUrl: body.invoice.stripePaymentLinkUrl ?? undefined,
+            stripePaymentStatus:
+                body.invoice.stripePaymentStatus ??
+                existingInvoice.stripePaymentStatus,
+            stripePaymentIntentId:
+                body.invoice.stripePaymentIntentId ??
+                existingInvoice.stripePaymentIntentId,
+            stripePaymentCompletedAt:
+                body.invoice.stripePaymentCompletedAt ??
+                existingInvoice.stripePaymentCompletedAt,
+          }
+        : null;
+
+    setInvoices((prev) =>
+        sortInvoices(
+            prev.map((invoice) =>
+                invoice.id === invoiceId && updatedInvoice ? updatedInvoice : invoice
+            )
+        )
+    );
+
+    if (updatedInvoice) {
+      appendInvoiceHistory(
+          invoiceId,
+          createDocumentHistoryEntry(
+              "updated",
+              `Created Stripe payment link for invoice ${
+                  updatedInvoice.invoiceNumber
+              }.`
+          )
+      );
+    }
+
+    return updatedInvoice;
   }
 
   function createDocumentHistoryEntry(
@@ -12000,10 +12766,16 @@ export default function JobsApp({
                         smtpUsername: appSettings.smtpUsername,
                         smtpPassword: appSettings.smtpPassword,
                       }}
+                      stripeInvoicePaymentsEnabled={
+                        appSettings.stripePaymentLinksEnabled &&
+                        appSettings.stripeConnectChargesEnabled &&
+                        appSettings.stripeConnectStatus === "enabled"
+                      }
                       onCreate={() => openNewInvoiceForm()}
                       onEdit={openEditInvoiceForm}
                       onDelete={deleteInvoiceRecord}
                       onMarkSent={markInvoiceSent}
+                      onCreatePaymentLink={createInvoicePaymentLink}
                       onSaveRecurringTemplate={saveRecurringInvoiceTemplate}
                       onDeleteRecurringTemplate={deleteRecurringInvoiceTemplate}
                   />
@@ -12095,6 +12867,39 @@ export default function JobsApp({
                       initialSettings={appSettings}
                       accountEmail={currentUserEmail}
                       showGrowthSettings={hasGrowthPlan}
+                      exportData={{
+                        customers,
+                        quotes,
+                        invoices,
+                        payments: monthlyPayments,
+                        visits: visitLogs,
+                        scheduledJobs,
+                        scheduledJobChecklists,
+                        recurringInvoiceTemplates,
+                        commercialRamsDocuments,
+                        customerLeads,
+                        staffMembers,
+                        rolePermissions,
+                        expenseSuppliers,
+                        expenseProducts,
+                        expenses,
+                        quoteFollowUps,
+                        invoiceReminders,
+                        quoteHistory,
+                        invoiceHistory,
+                        routeChangeHistory,
+                        routeNotes,
+                        lockedRounds,
+                        activeRoundCycles,
+                        pendingCashPaymentDates,
+                        ignoredMoveSuggestionIds,
+                        selectedWeek,
+                        selectedDay,
+                        quotesTableInitialized,
+                        invoicesWriteFallbackActive,
+                        recurringInvoiceTemplatesFallbackActive,
+                      }}
+                      onImportData={handleImportAllData}
                       onSave={handleSaveSettings}
                   />
               )}

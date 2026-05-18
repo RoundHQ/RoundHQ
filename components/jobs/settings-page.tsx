@@ -53,7 +53,25 @@ import {
     normalizeEditInactiveMinutes,
     type EditInactiveAction,
 } from "./edit-collaboration";
-import type { RotationWeeks } from "./types";
+import type { ExpenseProduct, ExpenseRecord, ExpenseSupplier } from "./expenses-page";
+import type { RouteChangeRecord } from "./route-efficiency";
+import type {
+    CommercialRamsDocument,
+    Customer,
+    CustomerLead,
+    DocumentHistoryEntry,
+    Invoice,
+    InvoiceReminderState,
+    MonthlyPayment,
+    Quote,
+    QuoteFollowUpState,
+    RecurringInvoiceTemplate,
+    RolePermission,
+    RotationWeeks,
+    ScheduledJob,
+    StaffMember,
+    VisitLog,
+} from "./types";
 
 type PaymentMethod = "cash" | "bank_transfer" | "direct_debit" | "invoice";
 type CutType = "front_only" | "front_back" | "full_garden";
@@ -149,6 +167,12 @@ export type SettingsData = {
     bankSortCode: string;
     bankAccountNumber: string;
     bankPaymentReference: string;
+    stripeConnectedAccountId: string;
+    stripeConnectStatus: "not_connected" | "onboarding" | "enabled" | "restricted";
+    stripeConnectChargesEnabled: boolean;
+    stripeConnectPayoutsEnabled: boolean;
+    stripeConnectDetailsSubmitted: boolean;
+    stripePaymentLinksEnabled: boolean;
     emailFromName: string;
     emailFromAddress: string;
     emailReplyTo: string;
@@ -182,11 +206,100 @@ type Props = {
     initialSettings?: Partial<SettingsData>;
     accountEmail?: string | null;
     showGrowthSettings?: boolean;
+    exportData?: RoundHqDataExportRecords;
+    onImportData?: (payload: RoundHqFullDataExport) => Promise<void> | void;
     onSave?: (settings: SettingsData) => Promise<void> | void;
+};
+
+export type RoundHqDataExportRecords = {
+    customers: Customer[];
+    quotes: Quote[];
+    invoices: Invoice[];
+    payments: MonthlyPayment[];
+    visits: VisitLog[];
+    scheduledJobs: ScheduledJob[];
+    scheduledJobChecklists: Record<string, unknown>;
+    recurringInvoiceTemplates: RecurringInvoiceTemplate[];
+    commercialRamsDocuments: CommercialRamsDocument[];
+    customerLeads: CustomerLead[];
+    staffMembers: StaffMember[];
+    rolePermissions: RolePermission[];
+    expenseSuppliers: ExpenseSupplier[];
+    expenseProducts: ExpenseProduct[];
+    expenses: ExpenseRecord[];
+    quoteFollowUps: Record<string, QuoteFollowUpState>;
+    invoiceReminders: Record<string, InvoiceReminderState>;
+    quoteHistory: Record<string, DocumentHistoryEntry[]>;
+    invoiceHistory: Record<string, DocumentHistoryEntry[]>;
+    routeChangeHistory: RouteChangeRecord[];
+    routeNotes: Record<string, string>;
+    lockedRounds: Record<string, boolean>;
+    activeRoundCycles: Record<string, number>;
+    pendingCashPaymentDates: Record<string, string>;
+    ignoredMoveSuggestionIds: string[];
+    selectedWeek: string;
+    selectedDay: string;
+    quotesTableInitialized: boolean;
+    invoicesWriteFallbackActive: boolean;
+    recurringInvoiceTemplatesFallbackActive: boolean;
+};
+
+export type RoundHqFullDataExport = {
+    app: "RoundHQ";
+    exportType: "full-data";
+    version: 1;
+    exportedAt: string;
+    accountEmail: string | null;
+    counts: {
+        customers: number;
+        quotes: number;
+        invoices: number;
+        payments: number;
+        visits: number;
+        jobs: number;
+        staff: number;
+        expenses: number;
+        totalRecords: number;
+    };
+    settings: SettingsData;
+    data: RoundHqDataExportRecords;
 };
 
 const STORAGE_KEY = "roundhq_settings";
 const HELP_ENABLED_STORAGE_KEY = "roundhq_help_enabled";
+
+const emptyExportRecords: RoundHqDataExportRecords = {
+    customers: [],
+    quotes: [],
+    invoices: [],
+    payments: [],
+    visits: [],
+    scheduledJobs: [],
+    scheduledJobChecklists: {},
+    recurringInvoiceTemplates: [],
+    commercialRamsDocuments: [],
+    customerLeads: [],
+    staffMembers: [],
+    rolePermissions: [],
+    expenseSuppliers: [],
+    expenseProducts: [],
+    expenses: [],
+    quoteFollowUps: {},
+    invoiceReminders: {},
+    quoteHistory: {},
+    invoiceHistory: {},
+    routeChangeHistory: [],
+    routeNotes: {},
+    lockedRounds: {},
+    activeRoundCycles: {},
+    pendingCashPaymentDates: {},
+    ignoredMoveSuggestionIds: [],
+    selectedWeek: "Week 1",
+    selectedDay: "Monday",
+    quotesTableInitialized: false,
+    invoicesWriteFallbackActive: false,
+    recurringInvoiceTemplatesFallbackActive: false,
+};
 
 const visitDays = [
     "Monday",
@@ -267,6 +380,12 @@ const defaultSettings: SettingsData = {
     bankSortCode: "",
     bankAccountNumber: "",
     bankPaymentReference: "",
+    stripeConnectedAccountId: "",
+    stripeConnectStatus: "not_connected",
+    stripeConnectChargesEnabled: false,
+    stripeConnectPayoutsEnabled: false,
+    stripeConnectDetailsSubmitted: false,
+    stripePaymentLinksEnabled: false,
     emailFromName: "",
     emailFromAddress: "",
     emailReplyTo: "",
@@ -468,6 +587,61 @@ function normalizePdfLogoScale(value: unknown) {
     return Math.min(160, Math.max(60, Math.round(numericValue)));
 }
 
+function normalizeStripeConnectStatus(
+    value: unknown
+): SettingsData["stripeConnectStatus"] {
+    return value === "onboarding" || value === "enabled" || value === "restricted"
+        ? value
+        : "not_connected";
+}
+
+function getStripeConnectStatusLabel(settings: SettingsData) {
+    if (!settings.stripeConnectedAccountId) {
+        return "Not connected";
+    }
+
+    if (settings.stripeConnectStatus === "enabled") {
+        return "Ready for payments";
+    }
+
+    if (settings.stripeConnectStatus === "restricted") {
+        return "Needs attention";
+    }
+
+    return "Setup in progress";
+}
+
+function getStripeConnectStatusClasses(settings: SettingsData) {
+    if (settings.stripeConnectStatus === "enabled") {
+        return "bg-emerald-100 text-emerald-700";
+    }
+
+    if (settings.stripeConnectStatus === "restricted") {
+        return "bg-amber-100 text-amber-700";
+    }
+
+    return "bg-slate-100 text-slate-700";
+}
+
+function getServerStripeSettings(settings: SettingsData): Pick<
+    SettingsData,
+    | "stripeConnectedAccountId"
+    | "stripeConnectStatus"
+    | "stripeConnectChargesEnabled"
+    | "stripeConnectPayoutsEnabled"
+    | "stripeConnectDetailsSubmitted"
+    | "stripePaymentLinksEnabled"
+> {
+    return {
+        stripeConnectedAccountId: settings.stripeConnectedAccountId,
+        stripeConnectStatus: settings.stripeConnectStatus,
+        stripeConnectChargesEnabled: settings.stripeConnectChargesEnabled,
+        stripeConnectPayoutsEnabled: settings.stripeConnectPayoutsEnabled,
+        stripeConnectDetailsSubmitted: settings.stripeConnectDetailsSubmitted,
+        stripePaymentLinksEnabled: settings.stripePaymentLinksEnabled,
+    };
+}
+
 function Card({
                   title,
                   description,
@@ -575,12 +749,14 @@ function Toggle({
                     label,
                     description,
                     dataTour,
+                    disabled = false,
                 }: {
     checked: boolean;
     onChange: (value: boolean) => void;
     label: string;
     description?: string;
     dataTour?: string;
+    disabled?: boolean;
 }) {
     return (
         <div
@@ -597,8 +773,9 @@ function Toggle({
             <button
                 type="button"
                 onClick={() => onChange(!checked)}
+                disabled={disabled}
                 className={cn(
-                    "relative mt-0.5 h-6 w-11 shrink-0 rounded-full transition",
+                    "relative mt-0.5 h-6 w-11 shrink-0 rounded-full transition disabled:cursor-not-allowed disabled:opacity-50",
                     checked ? "bg-emerald-600" : "bg-slate-300"
                 )}
                 aria-pressed={checked}
@@ -876,20 +1053,207 @@ function safeMergeSettings(source?: Partial<SettingsData> | null): SettingsData 
         ),
         editInactiveAction: normalizeEditInactiveAction(source?.editInactiveAction),
         helpEnabled: source?.helpEnabled !== false,
+        stripeConnectedAccountId:
+            typeof source?.stripeConnectedAccountId === "string"
+                ? source.stripeConnectedAccountId
+                : "",
+        stripeConnectStatus: normalizeStripeConnectStatus(source?.stripeConnectStatus),
+        stripeConnectChargesEnabled: source?.stripeConnectChargesEnabled === true,
+        stripeConnectPayoutsEnabled: source?.stripeConnectPayoutsEnabled === true,
+        stripeConnectDetailsSubmitted: source?.stripeConnectDetailsSubmitted === true,
+        stripePaymentLinksEnabled: source?.stripePaymentLinksEnabled === true,
         quoteFollowUpMethod,
         invoiceReminderMethod,
         quoteServices: normalizeQuoteServices(source?.quoteServices),
     };
 }
 
+function getResolvedExportRecords(
+    exportData?: RoundHqDataExportRecords
+): RoundHqDataExportRecords {
+    return exportData ?? emptyExportRecords;
+}
+
+function readImportArray<T>(value: unknown): T[] {
+    return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function readImportRecord<T>(value: unknown): Record<string, T> {
+    return isRecord(value) ? (value as Record<string, T>) : {};
+}
+
+function readImportStringArray(value: unknown) {
+    return Array.isArray(value)
+        ? value.filter((entry): entry is string => typeof entry === "string")
+        : [];
+}
+
+function normalizeImportedFullDataRecords(value: unknown): RoundHqDataExportRecords {
+    const data = isRecord(value) ? value : {};
+
+    return {
+        customers: readImportArray<Customer>(data.customers),
+        quotes: readImportArray<Quote>(data.quotes),
+        invoices: readImportArray<Invoice>(data.invoices),
+        payments: readImportArray<MonthlyPayment>(data.payments),
+        visits: readImportArray<VisitLog>(data.visits),
+        scheduledJobs: readImportArray<ScheduledJob>(data.scheduledJobs),
+        scheduledJobChecklists: readImportRecord<unknown>(
+            data.scheduledJobChecklists
+        ),
+        recurringInvoiceTemplates: readImportArray<RecurringInvoiceTemplate>(
+            data.recurringInvoiceTemplates
+        ),
+        commercialRamsDocuments: readImportArray<CommercialRamsDocument>(
+            data.commercialRamsDocuments
+        ),
+        customerLeads: readImportArray<CustomerLead>(data.customerLeads),
+        staffMembers: readImportArray<StaffMember>(data.staffMembers),
+        rolePermissions: readImportArray<RolePermission>(data.rolePermissions),
+        expenseSuppliers: readImportArray<ExpenseSupplier>(data.expenseSuppliers),
+        expenseProducts: readImportArray<ExpenseProduct>(data.expenseProducts),
+        expenses: readImportArray<ExpenseRecord>(data.expenses),
+        quoteFollowUps: readImportRecord<QuoteFollowUpState>(data.quoteFollowUps),
+        invoiceReminders: readImportRecord<InvoiceReminderState>(
+            data.invoiceReminders
+        ),
+        quoteHistory: readImportRecord<DocumentHistoryEntry[]>(data.quoteHistory),
+        invoiceHistory: readImportRecord<DocumentHistoryEntry[]>(
+            data.invoiceHistory
+        ),
+        routeChangeHistory: readImportArray<RouteChangeRecord>(
+            data.routeChangeHistory
+        ),
+        routeNotes: readImportRecord<string>(data.routeNotes),
+        lockedRounds: readImportRecord<boolean>(data.lockedRounds),
+        activeRoundCycles: readImportRecord<number>(data.activeRoundCycles),
+        pendingCashPaymentDates: readImportRecord<string>(
+            data.pendingCashPaymentDates
+        ),
+        ignoredMoveSuggestionIds: readImportStringArray(
+            data.ignoredMoveSuggestionIds
+        ),
+        selectedWeek:
+            typeof data.selectedWeek === "string" ? data.selectedWeek : "Week 1",
+        selectedDay: typeof data.selectedDay === "string" ? data.selectedDay : "Monday",
+        quotesTableInitialized: Boolean(data.quotesTableInitialized),
+        invoicesWriteFallbackActive: Boolean(data.invoicesWriteFallbackActive),
+        recurringInvoiceTemplatesFallbackActive: Boolean(
+            data.recurringInvoiceTemplatesFallbackActive
+        ),
+    };
+}
+
+function parseFullDataImportPayload(value: unknown): RoundHqFullDataExport {
+    if (!isRecord(value) || value.exportType !== "full-data" || !isRecord(value.data)) {
+        throw new Error("Choose a RoundHQ full data export JSON file.");
+    }
+
+    const data = normalizeImportedFullDataRecords(value.data);
+    const settings = safeMergeSettings(
+        isRecord(value.settings)
+            ? (value.settings as Partial<SettingsData>)
+            : undefined
+    );
+
+    return {
+        app: "RoundHQ",
+        exportType: "full-data",
+        version: 1,
+        exportedAt:
+            typeof value.exportedAt === "string" && value.exportedAt.trim()
+                ? value.exportedAt
+                : new Date().toISOString(),
+        accountEmail:
+            typeof value.accountEmail === "string" && value.accountEmail.trim()
+                ? value.accountEmail
+                : null,
+        counts: getFullDataExportCounts(data),
+        settings,
+        data,
+    };
+}
+
+function countRecordEntries<T>(records: Record<string, T[]>) {
+    return Object.values(records).reduce(
+        (total, entries) => total + (Array.isArray(entries) ? entries.length : 0),
+        0
+    );
+}
+
+function getFullDataExportCounts(records: RoundHqDataExportRecords) {
+    const staff = records.staffMembers.length + records.rolePermissions.length;
+    const expenses =
+        records.expenses.length +
+        records.expenseProducts.length +
+        records.expenseSuppliers.length;
+    const routeData =
+        records.routeChangeHistory.length +
+        Object.keys(records.routeNotes).length +
+        Object.keys(records.lockedRounds).length +
+        Object.keys(records.activeRoundCycles).length;
+    const workflowData =
+        records.recurringInvoiceTemplates.length +
+        records.commercialRamsDocuments.length +
+        records.customerLeads.length +
+        Object.keys(records.quoteFollowUps).length +
+        Object.keys(records.invoiceReminders).length +
+        countRecordEntries(records.quoteHistory) +
+        countRecordEntries(records.invoiceHistory) +
+        Object.keys(records.pendingCashPaymentDates).length;
+    const totalRecords =
+        records.customers.length +
+        records.quotes.length +
+        records.invoices.length +
+        records.payments.length +
+        records.visits.length +
+        records.scheduledJobs.length +
+        staff +
+        expenses +
+        routeData +
+        workflowData;
+
+    return {
+        customers: records.customers.length,
+        quotes: records.quotes.length,
+        invoices: records.invoices.length,
+        payments: records.payments.length,
+        visits: records.visits.length,
+        jobs: records.scheduledJobs.length,
+        staff,
+        expenses,
+        totalRecords,
+    };
+}
+
+function downloadJson(filename: string, data: unknown) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+        type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+}
+
+function getExportDateStamp() {
+    return new Date().toISOString().slice(0, 10);
+}
+
 export default function SettingsPage({
                                          initialSettings,
                                          accountEmail,
                                          showGrowthSettings = true,
+                                         exportData,
+                                         onImportData,
                                          onSave,
                                      }: Props) {
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const importInputRef = useRef<HTMLInputElement | null>(null);
+    const fullDataImportInputRef = useRef<HTMLInputElement | null>(null);
 
     const mergedSettings = useMemo(
         () => safeMergeSettings(initialSettings),
@@ -919,6 +1283,10 @@ export default function SettingsPage({
     const [confirmNewPassword, setConfirmNewPassword] = useState("");
     const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
     const [isOpeningBillingPortal, setIsOpeningBillingPortal] = useState(false);
+    const [isConnectingStripe, setIsConnectingStripe] = useState(false);
+    const [isRefreshingStripe, setIsRefreshingStripe] = useState(false);
+    const [isOpeningStripeDashboard, setIsOpeningStripeDashboard] = useState(false);
+    const [isImportingAllData, setIsImportingAllData] = useState(false);
     const quoteServiceCategories = useMemo(
         () =>
             Array.from(
@@ -929,6 +1297,14 @@ export default function SettingsPage({
                 )
             ).sort((left, right) => left.localeCompare(right)),
         [settings.quoteServices]
+    );
+    const resolvedExportData = useMemo(
+        () => getResolvedExportRecords(exportData),
+        [exportData]
+    );
+    const fullDataExportCounts = useMemo(
+        () => getFullDataExportCounts(resolvedExportData),
+        [resolvedExportData]
     );
 
     useEffect(() => {
@@ -977,16 +1353,17 @@ export default function SettingsPage({
             const parsed = JSON.parse(raw) as Partial<SettingsData>;
             const merged = safeMergeSettings(parsed);
             const storedHelpEnabled = localStorage.getItem(HELP_ENABLED_STORAGE_KEY);
-
-            setSettings(
+            const serverStripeSettings = getServerStripeSettings(mergedSettings);
+            const nextSettings =
                 storedHelpEnabled === "true" || storedHelpEnabled === "false"
                     ? { ...merged, helpEnabled: storedHelpEnabled === "true" }
-                    : merged
-            );
+                    : merged;
+
+            setSettings({ ...nextSettings, ...serverStripeSettings });
         } catch (error) {
             console.error("Failed to load local settings:", error);
         }
-    }, []);
+    }, [mergedSettings]);
 
     function showMessage(text: string, type: "success" | "error" | "info" = "info") {
         setMessage(text);
@@ -1271,6 +1648,149 @@ export default function SettingsPage({
         }
     }
 
+    function applyStripeConnectStatus(body: {
+        connectedAccountId?: string | null;
+        status?: string | null;
+        chargesEnabled?: boolean | null;
+        payoutsEnabled?: boolean | null;
+        detailsSubmitted?: boolean | null;
+        paymentLinksEnabled?: boolean | null;
+    }) {
+        setSettings((prev) => {
+            const nextSettings: SettingsData = {
+                ...prev,
+                stripeConnectedAccountId: body.connectedAccountId ?? "",
+                stripeConnectStatus: normalizeStripeConnectStatus(body.status),
+                stripeConnectChargesEnabled: body.chargesEnabled === true,
+                stripeConnectPayoutsEnabled: body.payoutsEnabled === true,
+                stripeConnectDetailsSubmitted: body.detailsSubmitted === true,
+                stripePaymentLinksEnabled: body.paymentLinksEnabled === true,
+            };
+
+            saveLocally(nextSettings);
+            return nextSettings;
+        });
+    }
+
+    async function handleStripeOnboarding() {
+        try {
+            setIsConnectingStripe(true);
+            setMessage("");
+
+            const response = await fetch("/api/stripe/connect/onboarding", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+            });
+            const body = (await response.json().catch(() => null)) as
+                | {
+                      url?: string;
+                      connectedAccountId?: string | null;
+                      status?: string | null;
+                      chargesEnabled?: boolean | null;
+                      payoutsEnabled?: boolean | null;
+                      detailsSubmitted?: boolean | null;
+                      paymentLinksEnabled?: boolean | null;
+                      connectSetupRequired?: boolean;
+                      setupUrl?: string;
+                      error?: string;
+                  }
+                | null;
+
+            if (!response.ok || !body?.url) {
+                showMessage(
+                    body?.error || "Unable to start Stripe setup.",
+                    "error"
+                );
+                setIsConnectingStripe(false);
+                return;
+            }
+
+            applyStripeConnectStatus(body);
+            window.location.href = body.url;
+        } catch (error) {
+            showMessage(
+                error instanceof Error && error.message.trim()
+                    ? error.message
+                    : "Unable to start Stripe setup.",
+                "error"
+            );
+            setIsConnectingStripe(false);
+        }
+    }
+
+    async function handleRefreshStripeStatus() {
+        try {
+            setIsRefreshingStripe(true);
+            setMessage("");
+
+            const response = await fetch("/api/stripe/connect/status", {
+                method: "GET",
+            });
+            const body = (await response.json().catch(() => null)) as
+                | {
+                      connectedAccountId?: string | null;
+                      status?: string | null;
+                      chargesEnabled?: boolean | null;
+                      payoutsEnabled?: boolean | null;
+                      detailsSubmitted?: boolean | null;
+                      paymentLinksEnabled?: boolean | null;
+                      error?: string;
+                  }
+                | null;
+
+            if (!response.ok || !body) {
+                throw new Error(body?.error || "Unable to refresh Stripe status.");
+            }
+
+            applyStripeConnectStatus(body);
+            showMessage("Stripe status refreshed.", "success");
+        } catch (error) {
+            console.error("Failed to refresh Stripe status:", error);
+            showMessage(
+                error instanceof Error && error.message.trim()
+                    ? error.message
+                    : "Unable to refresh Stripe status.",
+                "error"
+            );
+        } finally {
+            setIsRefreshingStripe(false);
+        }
+    }
+
+    async function handleOpenStripeDashboard() {
+        try {
+            setIsOpeningStripeDashboard(true);
+            setMessage("");
+
+            const response = await fetch("/api/stripe/connect/login", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+            });
+            const body = (await response.json().catch(() => null)) as
+                | { url?: string; error?: string }
+                | null;
+
+            if (!response.ok || !body?.url) {
+                throw new Error(body?.error || "Unable to open Stripe dashboard.");
+            }
+
+            window.location.href = body.url;
+        } catch (error) {
+            console.error("Failed to open Stripe dashboard:", error);
+            showMessage(
+                error instanceof Error && error.message.trim()
+                    ? error.message
+                    : "Unable to open Stripe dashboard.",
+                "error"
+            );
+            setIsOpeningStripeDashboard(false);
+        }
+    }
+
     function handleResetChanges() {
         setSettings(mergedSettings);
         showMessage("Unsaved changes reset.", "info");
@@ -1288,17 +1808,81 @@ export default function SettingsPage({
     }
 
     function handleExport() {
-        const blob = new Blob([JSON.stringify(settings, null, 2)], {
-            type: "application/json",
-        });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "roundhq-settings.json";
-        a.click();
-        URL.revokeObjectURL(url);
+        downloadJson("roundhq-settings.json", settings);
 
         showMessage("Settings exported.", "success");
+    }
+
+    function handleExportAllData() {
+        const payload: RoundHqFullDataExport = {
+            app: "RoundHQ",
+            exportType: "full-data",
+            version: 1,
+            exportedAt: new Date().toISOString(),
+            accountEmail: accountEmailDraft.trim() || accountEmail || null,
+            counts: fullDataExportCounts,
+            settings,
+            data: resolvedExportData,
+        };
+
+        downloadJson(`roundhq-all-data-${getExportDateStamp()}.json`, payload);
+        showMessage(
+            `All data exported (${fullDataExportCounts.totalRecords.toLocaleString()} records).`,
+            "success"
+        );
+    }
+
+    function handleImportAllData(event: React.ChangeEvent<HTMLInputElement>) {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+
+        if (!file) {
+            return;
+        }
+
+        if (!onImportData) {
+            showMessage("Full data import is not available in this workspace.", "error");
+            return;
+        }
+
+        const reader = new FileReader();
+
+        reader.onload = async () => {
+            try {
+                const raw = typeof reader.result === "string" ? reader.result : "{}";
+                const parsed = parseFullDataImportPayload(JSON.parse(raw));
+                const confirmed = window.confirm(
+                    `Import ${parsed.counts.totalRecords.toLocaleString()} records from this backup? This will replace the current workspace data.`
+                );
+
+                if (!confirmed) {
+                    showMessage("Full data import cancelled.", "info");
+                    return;
+                }
+
+                setIsImportingAllData(true);
+                setMessage("");
+                await onImportData(parsed);
+                setSettings(parsed.settings);
+                saveLocally(parsed.settings);
+                showMessage(
+                    `All data imported (${parsed.counts.totalRecords.toLocaleString()} records).`,
+                    "success"
+                );
+            } catch (error) {
+                console.error("Full data import failed:", error);
+                showMessage(
+                    error instanceof Error && error.message.trim()
+                        ? error.message
+                        : "Import failed. The JSON file was invalid.",
+                    "error"
+                );
+            } finally {
+                setIsImportingAllData(false);
+            }
+        };
+
+        reader.readAsText(file);
     }
 
     function handleLogoUpload(event: React.ChangeEvent<HTMLInputElement>) {
@@ -1334,6 +1918,14 @@ export default function SettingsPage({
         };
         reader.readAsText(file);
     }
+
+    const stripeConnectReady =
+        settings.stripeConnectStatus === "enabled" &&
+        settings.stripeConnectChargesEnabled;
+    const stripeStatusLabel = getStripeConnectStatusLabel(settings);
+    const stripeActionLabel = settings.stripeConnectedAccountId
+        ? "Continue Stripe setup"
+        : "Connect Stripe";
 
     return (
         <div className="min-h-full bg-slate-50 p-4 md:p-6">
@@ -2590,6 +3182,91 @@ export default function SettingsPage({
                                         </div>
                                     </div>
                                 </Card>
+
+                                <Card
+                                    title="Stripe invoice payments"
+                                    description="Connect your Stripe account to add secure payment links to invoices."
+                                    icon={ShieldCheck}
+                                >
+                                    <div className="space-y-5">
+                                        <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                                            <div>
+                                                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                                    Stripe Connect
+                                                </p>
+                                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                    <span
+                                                        className={cn(
+                                                            "rounded-full px-3 py-1 text-xs font-semibold",
+                                                            getStripeConnectStatusClasses(settings)
+                                                        )}
+                                                    >
+                                                        {stripeStatusLabel}
+                                                    </span>
+                                                    {settings.stripeConnectedAccountId ? (
+                                                        <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-500">
+                                                            {settings.stripeConnectedAccountId}
+                                                        </span>
+                                                    ) : null}
+                                                </div>
+                                                <p className="mt-3 text-sm text-slate-500">
+                                                    RoundHQ application fee: 0.00. Stripe processing fees still apply.
+                                                </p>
+                                            </div>
+
+                                            <div className="flex flex-wrap gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={handleStripeOnboarding}
+                                                    disabled={isConnectingStripe}
+                                                    className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                                >
+                                                    {isConnectingStripe ? "Opening..." : stripeActionLabel}
+                                                </button>
+                                                {settings.stripeConnectedAccountId ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleOpenStripeDashboard}
+                                                        disabled={isOpeningStripeDashboard}
+                                                        className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                    >
+                                                        {isOpeningStripeDashboard
+                                                            ? "Opening..."
+                                                            : "Stripe dashboard"}
+                                                    </button>
+                                                ) : null}
+                                                <button
+                                                    type="button"
+                                                    onClick={handleRefreshStripeStatus}
+                                                    disabled={isRefreshingStripe}
+                                                    className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                                >
+                                                    {isRefreshingStripe ? "Refreshing..." : "Refresh status"}
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        <Toggle
+                                            checked={
+                                                settings.stripePaymentLinksEnabled &&
+                                                stripeConnectReady
+                                            }
+                                            onChange={(value) =>
+                                                update(
+                                                    "stripePaymentLinksEnabled",
+                                                    value && stripeConnectReady
+                                                )
+                                            }
+                                            disabled={!stripeConnectReady}
+                                            label="Add payment links to invoices"
+                                            description={
+                                                stripeConnectReady
+                                                    ? "Invoice PDFs and emails can include a Stripe Checkout link."
+                                                    : "Complete Stripe onboarding before turning payment links on."
+                                            }
+                                        />
+                                    </div>
+                                </Card>
                             </div>
                         </div>
 
@@ -3024,6 +3701,76 @@ export default function SettingsPage({
                             icon={Database}
                         >
                             <div className="grid grid-cols-1 gap-4">
+                                <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+                                    <div className="flex flex-wrap items-start justify-between gap-4">
+                                        <div>
+                                            <p className="text-sm font-medium text-emerald-950">Export all data</p>
+                                            <p className="mt-1 text-xs leading-5 text-emerald-800">
+                                                Download a full JSON backup including customers, quotes, invoices,
+                                                payments, visits, jobs, staff, expenses, document history, and settings.
+                                            </p>
+
+                                            <div className="mt-3 flex flex-wrap gap-2">
+                                                {[
+                                                    ["Customers", fullDataExportCounts.customers],
+                                                    ["Quotes", fullDataExportCounts.quotes],
+                                                    ["Invoices", fullDataExportCounts.invoices],
+                                                    ["Payments", fullDataExportCounts.payments],
+                                                    ["Visits", fullDataExportCounts.visits],
+                                                    ["Jobs", fullDataExportCounts.jobs],
+                                                ].map(([label, count]) => (
+                                                    <span
+                                                        key={label}
+                                                        className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-emerald-900 shadow-sm"
+                                                    >
+                                                        {label}: {Number(count).toLocaleString()}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <button
+                                            type="button"
+                                            onClick={handleExportAllData}
+                                            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
+                                        >
+                                            <Download className="h-4 w-4" />
+                                            Export all data
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+                                    <div className="flex flex-wrap items-start justify-between gap-4">
+                                        <div>
+                                            <p className="text-sm font-medium text-amber-950">Import all data</p>
+                                            <p className="mt-1 text-xs leading-5 text-amber-800">
+                                                Restore a full RoundHQ data export. This replaces the current workspace
+                                                customers, quotes, invoices, payments, jobs, staff, expenses, histories,
+                                                and settings after confirmation.
+                                            </p>
+                                        </div>
+
+                                        <input
+                                            ref={fullDataImportInputRef}
+                                            type="file"
+                                            accept="application/json"
+                                            onChange={handleImportAllData}
+                                            className="hidden"
+                                        />
+
+                                        <button
+                                            type="button"
+                                            onClick={() => fullDataImportInputRef.current?.click()}
+                                            disabled={isImportingAllData}
+                                            className="inline-flex items-center gap-2 rounded-xl border border-amber-300 bg-white px-4 py-2 text-sm font-medium text-amber-800 shadow-sm hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            <Upload className="h-4 w-4" />
+                                            {isImportingAllData ? "Importing..." : "Import all data"}
+                                        </button>
+                                    </div>
+                                </div>
+
                                 <div className="rounded-xl border border-slate-200 p-4">
                                     <div className="flex flex-wrap items-start justify-between gap-4">
                                         <div>

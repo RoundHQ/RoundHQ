@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { syncStripeCheckoutSession, syncStripeSubscription } from "@/lib/billing/stripe-sync";
+import {
+  isRoundHqInvoiceCheckoutSession,
+  syncStripeInvoiceCheckoutSession,
+} from "@/lib/stripe/invoice-payments";
 import { getStripe, getStripeWebhookSecret } from "@/lib/stripe/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 
@@ -40,12 +44,59 @@ export async function POST(request: Request) {
 
     switch (event.type) {
       case "checkout.session.completed":
-      case "checkout.session.async_payment_succeeded":
+        if (
+          isRoundHqInvoiceCheckoutSession(
+            event.data.object as Stripe.Checkout.Session
+          )
+        ) {
+          await syncStripeInvoiceCheckoutSession(
+            supabase,
+            event.data.object as Stripe.Checkout.Session,
+            (event.data.object as Stripe.Checkout.Session).payment_status === "paid"
+              ? "paid"
+              : "open"
+          );
+          break;
+        }
+
         await syncStripeCheckoutSession(
           supabase,
           stripe,
           event.data.object as Stripe.Checkout.Session
         );
+        break;
+      case "checkout.session.async_payment_succeeded":
+        if (
+          isRoundHqInvoiceCheckoutSession(
+            event.data.object as Stripe.Checkout.Session
+          )
+        ) {
+          await syncStripeInvoiceCheckoutSession(
+            supabase,
+            event.data.object as Stripe.Checkout.Session,
+            "paid"
+          );
+          break;
+        }
+
+        await syncStripeCheckoutSession(
+          supabase,
+          stripe,
+          event.data.object as Stripe.Checkout.Session
+        );
+        break;
+      case "checkout.session.expired":
+        if (
+          isRoundHqInvoiceCheckoutSession(
+            event.data.object as Stripe.Checkout.Session
+          )
+        ) {
+          await syncStripeInvoiceCheckoutSession(
+            supabase,
+            event.data.object as Stripe.Checkout.Session,
+            "expired"
+          );
+        }
         break;
       case "customer.subscription.created":
       case "customer.subscription.updated":

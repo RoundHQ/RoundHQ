@@ -376,32 +376,34 @@ export default function CustomerProfilePage({
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="flex w-full flex-col gap-3 lg:w-auto lg:max-w-[720px] lg:items-end">
               <button
                   onClick={() => setIsEditing(true)}
-                  className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-white/90"
+                  className="inline-flex min-h-10 items-center justify-center gap-2 self-start rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-white/90 lg:self-end"
               >
                 <PencilLine size={16} />
                 Edit Profile
               </button>
 
-            <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white">
-              {customer.customerType}
-            </span>
+              <div className="flex max-w-full flex-wrap gap-x-2.5 gap-y-2 lg:justify-end">
+                <span className="inline-flex min-h-9 items-center whitespace-nowrap rounded-full bg-white/10 px-3.5 py-2 text-xs font-semibold leading-none text-white">
+                  {customer.customerType}
+                </span>
 
-              {customer.isGrassCuttingCustomer && (
-                  <>
-                <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white">
-                  {effectiveRotationLabel}
-                </span>
-                    <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white">
-                  {customerRoundLabel}
-                </span>
-                    <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white">
-                  {customer.paymentMethod ?? "Monthly"}
-                </span>
-                  </>
-              )}
+                {customer.isGrassCuttingCustomer && (
+                    <>
+                      <span className="inline-flex min-h-9 items-center whitespace-nowrap rounded-full bg-white/10 px-3.5 py-2 text-xs font-semibold leading-none text-white">
+                        {effectiveRotationLabel}
+                      </span>
+                      <span className="inline-flex min-h-9 items-center whitespace-nowrap rounded-full bg-white/10 px-3.5 py-2 text-xs font-semibold leading-none text-white">
+                        {customerRoundLabel}
+                      </span>
+                      <span className="inline-flex min-h-9 items-center whitespace-nowrap rounded-full bg-white/10 px-3.5 py-2 text-xs font-semibold leading-none text-white">
+                        {customer.paymentMethod ?? "Monthly"}
+                      </span>
+                    </>
+                )}
+              </div>
             </div>
           </div>
         </section>

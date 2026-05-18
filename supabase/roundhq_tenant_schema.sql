@@ -893,6 +893,13 @@ create table if not exists public.invoices (
   vat_amount numeric(12, 2) null,
   total numeric(12, 2) not null default 0,
   linked_quote_id text null references public.quotes(id) on delete set null,
+  stripe_checkout_session_id text null,
+  stripe_payment_link_url text null,
+  stripe_payment_status text null check (
+    stripe_payment_status is null or stripe_payment_status in ('not_created', 'open', 'paid', 'expired')
+  ),
+  stripe_payment_intent_id text null,
+  stripe_payment_completed_at timestamptz null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   check (jsonb_typeof(items) = 'array')
@@ -903,6 +910,26 @@ on public.invoices (organization_id, invoice_number);
 
 create index if not exists invoices_org_date_idx
 on public.invoices (organization_id, date desc);
+
+alter table if exists public.invoices
+  add column if not exists stripe_checkout_session_id text null,
+  add column if not exists stripe_payment_link_url text null,
+  add column if not exists stripe_payment_status text null,
+  add column if not exists stripe_payment_intent_id text null,
+  add column if not exists stripe_payment_completed_at timestamptz null;
+
+alter table if exists public.invoices
+  drop constraint if exists invoices_stripe_payment_status_check;
+
+alter table if exists public.invoices
+  add constraint invoices_stripe_payment_status_check
+  check (
+    stripe_payment_status is null or stripe_payment_status in ('not_created', 'open', 'paid', 'expired')
+  );
+
+create index if not exists invoices_org_stripe_checkout_session_idx
+on public.invoices (organization_id, stripe_checkout_session_id)
+where stripe_checkout_session_id is not null;
 
 create table if not exists public.recurring_invoice_templates (
   id text primary key,

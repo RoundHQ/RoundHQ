@@ -5,7 +5,11 @@ import {
   getQuotePdfBlob,
   type DocumentBrandDetails,
 } from "./pdf-generator";
-import type { InvoiceStatus, QuoteStatus } from "./types";
+import type {
+  InvoiceStatus,
+  QuoteStatus,
+  StripeInvoicePaymentStatus,
+} from "./types";
 import {
   hasConfiguredDocumentEmailSettings,
   normalizeDocumentEmailSettings,
@@ -65,6 +69,11 @@ type InvoiceDocument = {
   vatAmount?: number;
   total: number;
   linkedQuoteId?: string;
+  stripeCheckoutSessionId?: string;
+  stripePaymentLinkUrl?: string;
+  stripePaymentStatus?: StripeInvoicePaymentStatus;
+  stripePaymentIntentId?: string;
+  stripePaymentCompletedAt?: string;
 };
 
 type DeliveryBusinessDetails = DocumentBrandDetails & DocumentEmailSettings;
