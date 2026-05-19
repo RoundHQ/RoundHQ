@@ -924,11 +924,12 @@ function drawPaymentBadgeCard(
         x: number;
         y: number;
         width: number;
+        paymentLinkUrl: string;
         paymentBadgeAsset: LogoAsset | null;
         palette: BrandPalette;
     }
 ) {
-    const { x, y, width, paymentBadgeAsset, palette } = options;
+    const { x, y, width, paymentLinkUrl, paymentBadgeAsset, palette } = options;
     const copy = "Secure card payments available through Stripe.";
     const wrappedCopy = doc.splitTextToSize(copy, width - 10);
     const badgeMaxWidth = width - 10;
@@ -953,15 +954,23 @@ function drawPaymentBadgeCard(
     let currentY = y + 16.5;
 
     if (paymentBadgeAsset && badgeDimensions) {
+        const imageX = x + 5;
+        const imageY = currentY;
+
         doc.addImage(
             paymentBadgeAsset.dataUrl,
             paymentBadgeAsset.format,
-            x + 5,
-            currentY,
+            imageX,
+            imageY,
             badgeDimensions.width,
             badgeDimensions.height
         );
+        doc.link(imageX, imageY, badgeDimensions.width, badgeDimensions.height, {
+            url: paymentLinkUrl,
+        });
         currentY += badgeDimensions.height + 5;
+    } else {
+        doc.link(x, y, width, height, { url: paymentLinkUrl });
     }
 
     setTextColor(doc, palette.ink);
@@ -1956,6 +1965,7 @@ async function buildInvoicePdfDocument(
             x: MARGIN,
             y: nextLeftY,
             width: leftColumnWidth,
+            paymentLinkUrl,
             paymentBadgeAsset,
             palette,
         });
