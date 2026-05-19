@@ -217,7 +217,11 @@ export default async function AdminCustomerProfilePage({
   const staffSaved = resolvedSearchParams.saved === "staff";
   const createdSaved = resolvedSearchParams.saved === "created";
   const ownerEmailSent = createdSaved && resolvedSearchParams.email === "sent";
-  const ownerEmailFailed = createdSaved && resolvedSearchParams.email === "failed";
+  const ownerEmailNotConfigured =
+    createdSaved && resolvedSearchParams.email === "not_configured";
+  const ownerEmailFailed =
+    createdSaved &&
+    (resolvedSearchParams.email === "failed" || ownerEmailNotConfigured);
   const updateAction = updateCustomerAccountAction.bind(null, organizationId);
   const staffAllowanceAction = updateCustomerStaffAllowanceAction.bind(
     null,
@@ -318,9 +322,11 @@ export default async function AdminCustomerProfilePage({
 
           {ownerEmailFailed && (
             <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
-              The workspace was created, but RoundHQ could not send the owner
-              email. Check the admin SMTP settings and send the details again
-              manually if needed.
+              {ownerEmailNotConfigured
+                ? "The workspace was created, but the owner email was not sent because SMTP settings are not configured."
+                : "The workspace was created, but RoundHQ could not send the owner email."}{" "}
+              Check the admin SMTP settings and send the details manually if
+              needed.
             </div>
           )}
 

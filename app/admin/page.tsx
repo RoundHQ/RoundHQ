@@ -52,6 +52,7 @@ type AdminPageSearchParams = {
   q?: string;
   status?: string;
   deleted?: string;
+  customer_error?: string;
 };
 
 function formatDate(value: string | null) {
@@ -255,6 +256,7 @@ export default async function AdminPage({
 
   const params = (await searchParams) ?? {};
   const query = params.q?.trim() ?? "";
+  const customerError = params.customer_error?.trim() ?? "";
   const requestedStatus = params.status ?? "all";
   const selectedStatus = STATUS_OPTIONS.some((status) => status === requestedStatus)
     ? requestedStatus
@@ -518,6 +520,12 @@ export default async function AdminPage({
           {params.deleted === "1" ? (
             <div className="mb-6 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
               Customer workspace deleted.
+            </div>
+          ) : null}
+
+          {customerError ? (
+            <div className="mb-6 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800">
+              {customerError}
             </div>
           ) : null}
 
