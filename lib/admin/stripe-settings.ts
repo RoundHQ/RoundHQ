@@ -7,6 +7,7 @@ import { type SubscriptionPlanKey } from "@/lib/billing/plans";
 export type PlatformStripeSettings = {
   secretKey: string;
   webhookSecret: string;
+  connectWebhookSecret: string;
   starterPriceId: string;
   growthPriceId: string;
   updatedAt: string | null;
@@ -16,13 +17,14 @@ export type PlatformStripeSettings = {
 type PlatformStripeSettingsRow = {
   stripe_secret_key: string | null;
   stripe_webhook_secret: string | null;
+  stripe_connect_webhook_secret: string | null;
   starter_price_id: string | null;
   growth_price_id: string | null;
   updated_at: string | null;
 };
 
 const PLATFORM_STRIPE_SETTINGS_SELECT =
-  "stripe_secret_key, stripe_webhook_secret, starter_price_id, growth_price_id, updated_at";
+  "stripe_secret_key, stripe_webhook_secret, stripe_connect_webhook_secret, starter_price_id, growth_price_id, updated_at";
 
 function getEnvStripeSettings(
   overrides: Partial<PlatformStripeSettings> = {}
@@ -30,6 +32,8 @@ function getEnvStripeSettings(
   return {
     secretKey: process.env.STRIPE_SECRET_KEY?.trim() || "",
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET?.trim() || "",
+    connectWebhookSecret:
+      process.env.STRIPE_CONNECT_WEBHOOK_SECRET?.trim() || "",
     starterPriceId:
       process.env.STRIPE_STARTER_PRICE_ID?.trim() ||
       process.env.NEXT_PUBLIC_STRIPE_STARTER_PRICE_ID?.trim() ||
@@ -58,6 +62,9 @@ function mapPlatformStripeSettingsRow(
   return {
     secretKey: row.stripe_secret_key?.trim() || fallback.secretKey,
     webhookSecret: row.stripe_webhook_secret?.trim() || fallback.webhookSecret,
+    connectWebhookSecret:
+      row.stripe_connect_webhook_secret?.trim() ||
+      fallback.connectWebhookSecret,
     starterPriceId: row.starter_price_id?.trim() || fallback.starterPriceId,
     growthPriceId: row.growth_price_id?.trim() || fallback.growthPriceId,
     updatedAt: row.updated_at,

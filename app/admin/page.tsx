@@ -628,6 +628,23 @@ export default async function AdminPage({
                 </select>
               </label>
 
+              <label className="flex items-start gap-3 rounded-md border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm font-bold text-slate-700 lg:col-span-2">
+                <input
+                  type="checkbox"
+                  name="send_owner_email"
+                  className="mt-1 size-4 accent-[#19c653]"
+                />
+                <span>
+                  Email the owner their workspace details after creating the
+                  customer.
+                  <span className="mt-1 block text-xs font-semibold leading-5 text-slate-500">
+                    The email includes the business name, login email,
+                    temporary password, plan, and subscription status entered
+                    above.
+                  </span>
+                </span>
+              </label>
+
               <div className="flex items-end lg:col-span-2">
                 <button
                   type="submit"

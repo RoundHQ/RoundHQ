@@ -44,6 +44,7 @@ type CustomerPageParams = {
 
 type CustomerPageSearchParams = {
   saved?: string;
+  email?: string;
 };
 
 function formatDate(value: string | null) {
@@ -215,6 +216,8 @@ export default async function AdminCustomerProfilePage({
   const saved = resolvedSearchParams.saved === "1";
   const staffSaved = resolvedSearchParams.saved === "staff";
   const createdSaved = resolvedSearchParams.saved === "created";
+  const ownerEmailSent = createdSaved && resolvedSearchParams.email === "sent";
+  const ownerEmailFailed = createdSaved && resolvedSearchParams.email === "failed";
   const updateAction = updateCustomerAccountAction.bind(null, organizationId);
   const staffAllowanceAction = updateCustomerStaffAllowanceAction.bind(
     null,
@@ -306,8 +309,18 @@ export default async function AdminCustomerProfilePage({
 
           {createdSaved && (
             <div className="mb-6 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
-              Customer workspace created. Share the owner email and temporary
-              password with the customer.
+              Customer workspace created.
+              {ownerEmailSent
+                ? " The owner email was sent with the workspace details."
+                : " Share the owner email and temporary password with the customer."}
+            </div>
+          )}
+
+          {ownerEmailFailed && (
+            <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+              The workspace was created, but RoundHQ could not send the owner
+              email. Check the admin SMTP settings and send the details again
+              manually if needed.
             </div>
           )}
 

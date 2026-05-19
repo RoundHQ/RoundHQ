@@ -23,6 +23,7 @@ export type ManualHelpTourId =
   | "customerProfit"
   | "addStaff"
   | "businessSettings"
+  | "allSettings"
   | "userMenu"
   | "supportDesk"
   | "billing";
@@ -160,6 +161,30 @@ export const HELP_TOPIC_OPTIONS: HelpTopicOption[] = [
       "branding",
       "help tips",
       "preferences",
+    ],
+  },
+  {
+    id: "allSettings",
+    label: "All settings guide",
+    description: "Walk through every settings tab and what each section controls.",
+    featured: true,
+    keywords: [
+      "settings",
+      "all settings",
+      "system settings",
+      "account settings",
+      "business settings",
+      "pdf settings",
+      "pricing settings",
+      "job settings",
+      "quote settings",
+      "invoice settings",
+      "email settings",
+      "dashboard settings",
+      "data settings",
+      "import export",
+      "stripe",
+      "payment links",
     ],
   },
   {
@@ -482,6 +507,26 @@ function openUserMenuBefore(actions: HelpTourActions, targetName: string) {
   return async () => {
     actions.openUserMenu();
     await wait(160);
+    await waitForTarget(target(targetName), 2500).catch(() => undefined);
+  };
+}
+
+function openSettingsTabBefore(
+  actions: HelpTourActions,
+  tabId: string,
+  targetName: string
+) {
+  return async () => {
+    actions.navigateToPage("settings");
+    await wait(220);
+
+    const tabButton = document.querySelector(target(`settings-tab-${tabId}`));
+
+    if (tabButton instanceof HTMLElement) {
+      tabButton.click();
+    }
+
+    await wait(180);
     await waitForTarget(target(targetName), 2500).catch(() => undefined);
   };
 }
@@ -992,13 +1037,236 @@ export function createHelpTourSteps(
           "service-defaults-section",
           "Service Defaults",
           "Job defaults control the usual payment method, visit day, rotation, and customer notes for new records.",
-          { placement: "bottom" }
+          {
+            placement: "bottom",
+            before: openSettingsTabBefore(actions, "jobs", "service-defaults-section"),
+          }
         ),
         step(
           "help-settings-toggle",
           "In-app Help",
           "Turn automatic help tips on or off. Manual In App Help remains available from the header help button.",
+          {
+            placement: "bottom",
+            before: openSettingsTabBefore(actions, "data", "help-settings-toggle"),
+          }
+        ),
+      ];
+
+    case "allSettings":
+      return [
+        step(
+          "sidebar-system",
+          "Open Settings",
+          "Settings is where admins manage the account, business details, documents, prices, jobs, quotes, invoices, email, dashboard widgets, and data tools.",
+          { placement: "right", before: navigateBefore(actions, "settings") }
+        ),
+        step(
+          "settings-overview",
+          "Settings Overview",
+          "The tabs keep each group of controls separate. Use the save buttons in the header after changing settings.",
+          {
+            placement: "bottom",
+            before: navigateBefore(actions, "settings", "settings-overview"),
+          }
+        ),
+        step(
+          "settings-save-button",
+          "Save or Reset",
+          "Save settings applies your changes. Reset changes rolls the screen back to the last saved settings before you commit them.",
+          { placement: "left" }
+        ),
+        step(
+          "settings-account-email",
+          "Account Email",
+          "Use Account to update the login email for this RoundHQ user without changing the business contact email on documents.",
+          {
+            placement: "bottom",
+            before: openSettingsTabBefore(actions, "account", "settings-account-email"),
+          }
+        ),
+        step(
+          "settings-account-password",
+          "Password",
+          "Change the password for this login here. Keep it separate from staff permissions and business email settings.",
           { placement: "bottom" }
+        ),
+        step(
+          "settings-account-subscription",
+          "Subscription",
+          "Open the secure billing portal from here when you need to manage or cancel the workspace subscription.",
+          { placement: "top" }
+        ),
+        step(
+          "business-settings-section",
+          "Business Details",
+          "Business details feed into quotes, invoices, emails, and internal records, so keep names and contact details current.",
+          {
+            placement: "bottom",
+            before: openSettingsTabBefore(actions, "business", "business-settings-section"),
+          }
+        ),
+        step(
+          "settings-business-address-section",
+          "Business Address",
+          "The business address and terms URL appear on documents and customer-facing paperwork where needed.",
+          { placement: "bottom" }
+        ),
+        step(
+          "settings-branding-section",
+          "Logo and Colours",
+          "PDFs uses your uploaded logo, brand colours, theme choice, and compact mode preference across the app and generated documents.",
+          {
+            placement: "bottom",
+            before: openSettingsTabBefore(actions, "documents", "settings-branding-section"),
+          }
+        ),
+        step(
+          "settings-pdf-customisation-section",
+          "PDF Customisation",
+          "Control PDF header style, logo treatment, footer visibility, and footer text for quotes, invoices, and RAMS documents.",
+          { placement: "bottom" }
+        ),
+        step(
+          "settings-pdf-preview-section",
+          "Live Preview",
+          "Switch between quote, invoice, and RAMS previews to check the document layout before saving.",
+          { placement: "left" }
+        ),
+        step(
+          "settings-pricing-defaults-section",
+          "Pricing Defaults",
+          "Pricing sets the currency and common default prices used when creating jobs and quote line items.",
+          {
+            placement: "bottom",
+            before: openSettingsTabBefore(actions, "pricing", "settings-pricing-defaults-section"),
+          }
+        ),
+        step(
+          "service-defaults-section",
+          "Job Defaults",
+          "Jobs controls default payment method, service type, visit day, season dates, and completion requirements.",
+          {
+            placement: "bottom",
+            before: openSettingsTabBefore(actions, "jobs", "service-defaults-section"),
+          }
+        ),
+        step(
+          "settings-round-settings-section",
+          "Round Settings",
+          "Set the default service rotation for new customers. Individual customer records can still override this.",
+          { placement: "bottom" }
+        ),
+        step(
+          "settings-default-notes-section",
+          "Default Notes",
+          "Save standard customer notes here so new customer records can start with useful default wording.",
+          { placement: "bottom" }
+        ),
+        step(
+          "settings-quote-numbering-section",
+          "Quote Numbering",
+          "Quotes lets you control the quote prefix and next number so new quotes follow your preferred sequence.",
+          {
+            placement: "bottom",
+            before: openSettingsTabBefore(actions, "quotes", "settings-quote-numbering-section"),
+          }
+        ),
+        step(
+          "settings-quote-defaults-section",
+          "Quote Defaults",
+          "Save default quote notes, terms, and calculator rates so new quotes start with your standard wording.",
+          { placement: "bottom" }
+        ),
+        step(
+          "settings-quote-items-section",
+          "Reusable Quote Items",
+          "Build a library of services and products that can be added quickly when preparing quotes.",
+          { placement: "top" }
+        ),
+        step(
+          "settings-invoice-settings-section",
+          "Invoice Settings",
+          "Invoices controls numbering, payment terms, VAT status, and invoice defaults.",
+          {
+            placement: "bottom",
+            before: openSettingsTabBefore(actions, "invoices", "settings-invoice-settings-section"),
+          }
+        ),
+        step(
+          "settings-invoice-text-section",
+          "Invoice Document Text",
+          "Save the notes and terms that should appear automatically when new invoices are created.",
+          { placement: "left" }
+        ),
+        step(
+          "settings-bank-transfer-section",
+          "Bank Transfer Details",
+          "Add bank details and the default payment reference shown on invoice PDFs.",
+          { placement: "left" }
+        ),
+        step(
+          "settings-stripe-payments-section",
+          "Stripe Payment Links",
+          "Connect the workspace owner's Stripe account and turn on invoice payment links when Stripe is ready.",
+          { placement: "left" }
+        ),
+        step(
+          "settings-email-account-section",
+          "Sending Email Account",
+          "Email settings control the sender name, sender address, reply-to address, and customer-facing email identity.",
+          {
+            placement: "bottom",
+            before: openSettingsTabBefore(actions, "email", "settings-email-account-section"),
+          }
+        ),
+        step(
+          "settings-smtp-section",
+          "SMTP Server",
+          "Add SMTP host, port, username, password, and security settings so RoundHQ can send quotes and invoices directly.",
+          { placement: "bottom" }
+        ),
+        step(
+          "settings-workflow-messages-section",
+          "Workflow Messages",
+          "Growth workspaces can edit follow-up and overdue invoice reminder templates used from the dashboard.",
+          { placement: "top" }
+        ),
+        step(
+          "settings-dashboard-widgets-section",
+          "Dashboard Widgets",
+          "Dashboard settings choose which summary cards and activity widgets appear on the overview screen.",
+          {
+            placement: "bottom",
+            before: openSettingsTabBefore(actions, "dashboard", "settings-dashboard-widgets-section"),
+          }
+        ),
+        step(
+          "settings-edit-collaboration-section",
+          "Edit Collaboration",
+          "Data settings include inactive edit warnings and what should happen to unsaved work after inactivity.",
+          {
+            placement: "bottom",
+            before: openSettingsTabBefore(actions, "data", "settings-edit-collaboration-section"),
+          }
+        ),
+        step(
+          "settings-help-section",
+          "In-app Help",
+          "Use this toggle to show or hide automatic help tips. Manual help from the header remains available.",
+          { placement: "bottom" }
+        ),
+        step(
+          "settings-import-export-section",
+          "Import and Export",
+          "Backup or restore settings and full workspace data, including customers, quotes, invoices, payments, visits, jobs, staff, and histories.",
+          { placement: "bottom" }
+        ),
+        step(
+          "settings-danger-zone-section",
+          "Danger Zone",
+          "Use reset only when you want a clean settings slate and have a backup if you need one.",
+          { placement: "top" }
         ),
       ];
 

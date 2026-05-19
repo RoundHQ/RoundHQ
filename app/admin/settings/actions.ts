@@ -9,7 +9,10 @@ import {
   DEFAULT_VERIFICATION_MESSAGE_TEMPLATE,
   DEFAULT_VERIFICATION_SUBJECT_TEMPLATE,
   getPlatformEmailSettings,
+  isPlatformEmailConfigured,
+  sendPlatformEmail,
 } from "@/lib/admin/email-settings";
+import { getFriendlySmtpErrorMessage } from "@/lib/email/smtp-delivery";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import {
   DEFAULT_SUPPORT_AUTO_ACKNOWLEDGE_MESSAGE,
@@ -110,6 +113,53 @@ export async function updateAdminEmailSettingsAction(formData: FormData) {
   redirect("/admin/settings?tab=email&saved=1");
 }
 
+export async function sendAdminDirectEmailAction(formData: FormData) {
+  await requireAdminAccess("/admin/settings?tab=send-email");
+
+  const recipient = getText(formData, "recipient_email");
+  const subject = getText(formData, "email_subject");
+  const message = getText(formData, "email_message");
+
+  if (!recipient || !recipient.includes("@")) {
+    throw new Error("Enter a valid recipient email address.");
+  }
+
+  if (!subject) {
+    throw new Error("Enter an email subject.");
+  }
+
+  if (!message) {
+    throw new Error("Enter an email message.");
+  }
+
+  const settings = await getPlatformEmailSettings();
+
+  if (!isPlatformEmailConfigured(settings)) {
+    throw new Error(
+      "Email sending is not configured yet. Add SMTP details in the Email tab first."
+    );
+  }
+
+  try {
+    await sendPlatformEmail({
+      settings,
+      to: recipient,
+      subject,
+      message,
+    });
+  } catch (error) {
+    throw new Error(
+      getFriendlySmtpErrorMessage(
+        error,
+        settings.smtpPort ?? 587,
+        Boolean(settings.smtpSecure)
+      )
+    );
+  }
+
+  redirect("/admin/settings?tab=send-email&sent=1");
+}
+
 export async function updateAdminInvoiceSettingsAction(formData: FormData) {
   await requireAdminAccess("/admin/settings?tab=invoices");
 
@@ -197,6 +247,9 @@ export async function updateAdminStripeSettingsAction(formData: FormData) {
       stripe_webhook_secret:
         getText(formData, "stripe_webhook_secret") ||
         existingSettings.webhookSecret,
+      stripe_connect_webhook_secret:
+        getText(formData, "stripe_connect_webhook_secret") ||
+        existingSettings.connectWebhookSecret,
       starter_price_id: getText(formData, "starter_price_id"),
       growth_price_id: getText(formData, "growth_price_id"),
       updated_at: new Date().toISOString(),

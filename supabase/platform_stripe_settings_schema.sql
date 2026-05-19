@@ -7,6 +7,7 @@ create table if not exists public.platform_stripe_settings (
   id text primary key default 'primary',
   stripe_secret_key text not null default '',
   stripe_webhook_secret text not null default '',
+  stripe_connect_webhook_secret text not null default '',
   starter_price_id text not null default '',
   growth_price_id text not null default '',
   created_at timestamptz not null default now(),
@@ -16,6 +17,7 @@ create table if not exists public.platform_stripe_settings (
 alter table public.platform_stripe_settings
   add column if not exists stripe_secret_key text not null default '',
   add column if not exists stripe_webhook_secret text not null default '',
+  add column if not exists stripe_connect_webhook_secret text not null default '',
   add column if not exists starter_price_id text not null default '',
   add column if not exists growth_price_id text not null default '',
   add column if not exists created_at timestamptz not null default now(),

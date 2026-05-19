@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
   getPlanFeatureAccess,
+  getSubscriptionPlan,
   normalizePlanKey,
 } from "@/lib/billing/plans";
 import {
@@ -13,6 +14,12 @@ import {
   isMissingSubscriptionPlanColumn,
 } from "@/lib/billing/subscriptions";
 import { requireAdminAccess } from "@/lib/admin/guard";
+import {
+  getPlatformEmailSettings,
+  isPlatformEmailConfigured,
+  sendPlatformEmail,
+} from "@/lib/admin/email-settings";
+import { getFriendlySmtpErrorMessage } from "@/lib/email/smtp-delivery";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { DEFAULT_ROLE_PERMISSIONS } from "@/lib/workspace";
 
@@ -36,6 +43,57 @@ function normalizeManualSubscriptionStatus(
 
 function isMissingOptionalCustomerSettingsSchema(error: { code?: string } | null) {
   return error?.code === "42P01" || error?.code === "42703";
+}
+
+function getRoundHqLoginUrl() {
+  return `${
+    process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "") ||
+    "https://roundhq.co.uk"
+  }/login`;
+}
+
+function buildManualCustomerWelcomeEmail({
+  workspaceName,
+  ownerName,
+  ownerEmail,
+  temporaryPassword,
+  plan,
+  status,
+}: {
+  workspaceName: string;
+  ownerName: string;
+  ownerEmail: string;
+  temporaryPassword: string;
+  plan: string;
+  status: ManualSubscriptionStatus;
+}) {
+  const subscriptionPlan = getSubscriptionPlan(plan);
+  const loginUrl = getRoundHqLoginUrl();
+
+  return {
+    subject: `Your RoundHQ workspace is ready: ${workspaceName}`,
+    message: [
+      `Hi ${ownerName},`,
+      "",
+      `Your RoundHQ workspace for ${workspaceName} has been created.`,
+      "",
+      "Login details:",
+      `Login page: ${loginUrl}`,
+      `Email: ${ownerEmail}`,
+      `Temporary password: ${temporaryPassword}`,
+      "",
+      "Workspace details:",
+      `Plan: ${subscriptionPlan.name}`,
+      `Subscription status: ${
+        status === "active" ? "Active manual access" : "Needs payment"
+      }`,
+      "",
+      "Please sign in and change your password from your account settings.",
+      "",
+      "Kind regards,",
+      "RoundHQ",
+    ].join("\n"),
+  };
 }
 
 async function findAuthUserByEmail(
@@ -247,6 +305,7 @@ export async function createManualCustomerAction(formData: FormData) {
   const status = normalizeManualSubscriptionStatus(
     getText(formData, "subscription_status")
   );
+  const shouldEmailOwner = formData.get("send_owner_email") === "on";
 
   if (!workspaceName) {
     throw new Error("Enter a workspace name.");
@@ -262,6 +321,16 @@ export async function createManualCustomerAction(formData: FormData) {
 
   if (temporaryPassword.length < 8) {
     throw new Error("Temporary password must be at least 8 characters.");
+  }
+
+  const emailSettings = shouldEmailOwner
+    ? await getPlatformEmailSettings()
+    : null;
+
+  if (shouldEmailOwner && emailSettings && !isPlatformEmailConfigured(emailSettings)) {
+    throw new Error(
+      "Email sending is not configured yet. Add SMTP details in Admin Settings before emailing the customer."
+    );
   }
 
   const supabase = createServiceRoleClient();
@@ -323,7 +392,40 @@ export async function createManualCustomerAction(formData: FormData) {
     throw error;
   }
 
+  let emailStatus = "not_requested";
+
+  if (shouldEmailOwner && emailSettings) {
+    const email = buildManualCustomerWelcomeEmail({
+      workspaceName,
+      ownerName,
+      ownerEmail,
+      temporaryPassword,
+      plan,
+      status,
+    });
+
+    try {
+      await sendPlatformEmail({
+        settings: emailSettings,
+        to: ownerEmail,
+        subject: email.subject,
+        message: email.message,
+      });
+      emailStatus = "sent";
+    } catch (error) {
+      emailStatus = "failed";
+      console.error(
+        "Manual customer workspace created but owner email failed:",
+        getFriendlySmtpErrorMessage(
+          error,
+          emailSettings.smtpPort ?? 587,
+          Boolean(emailSettings.smtpSecure)
+        )
+      );
+    }
+  }
+
   revalidatePath("/admin");
   revalidatePath("/admin/customers");
-  redirect(`/admin/customers/${organizationId}?saved=created`);
+  redirect(`/admin/customers/${organizationId}?saved=created&email=${emailStatus}`);
 }

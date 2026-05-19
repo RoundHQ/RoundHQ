@@ -1009,16 +1009,19 @@ function DocumentPdfPreview({
 function TabButton({
                        active,
                        onClick,
+                       dataTour,
                        children,
                    }: {
     active: boolean;
     onClick: () => void;
+    dataTour?: string;
     children: React.ReactNode;
 }) {
     return (
         <button
             type="button"
             onClick={onClick}
+            data-tour={dataTour}
             className={cn(
                 "rounded-xl px-4 py-2.5 text-sm font-medium transition",
                 active
@@ -1931,6 +1934,7 @@ export default function SettingsPage({
         <div className="min-h-full bg-slate-50 p-4 md:p-6">
             <div className="mx-auto max-w-7xl space-y-6">
                 <div
+                    data-tour="settings-overview"
                     className="overflow-hidden rounded-3xl shadow-sm"
                     style={{
                         background: `linear-gradient(135deg, ${settings.primaryColor}, ${settings.secondaryColor})`,
@@ -1948,6 +1952,7 @@ export default function SettingsPage({
                             <button
                                 type="button"
                                 onClick={handleResetChanges}
+                                data-tour="settings-reset-button"
                                 className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-white/20"
                             >
                                 <RotateCcw className="h-4 w-4" />
@@ -1958,6 +1963,7 @@ export default function SettingsPage({
                                 type="button"
                                 onClick={handleSave}
                                 disabled={isSaving}
+                                data-tour="settings-save-button"
                                 className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                                 style={{ color: settings.primaryColor }}
                             >
@@ -1985,34 +1991,34 @@ export default function SettingsPage({
                 ) : null}
 
                 <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-slate-100 p-2">
-                    <TabButton active={activeTab === "account"} onClick={() => setActiveTab("account")}>
+                    <TabButton active={activeTab === "account"} onClick={() => setActiveTab("account")} dataTour="settings-tab-account">
                         Account
                     </TabButton>
-                    <TabButton active={activeTab === "business"} onClick={() => setActiveTab("business")}>
+                    <TabButton active={activeTab === "business"} onClick={() => setActiveTab("business")} dataTour="settings-tab-business">
                         Business
                     </TabButton>
-                    <TabButton active={activeTab === "documents"} onClick={() => setActiveTab("documents")}>
+                    <TabButton active={activeTab === "documents"} onClick={() => setActiveTab("documents")} dataTour="settings-tab-documents">
                         PDFs
                     </TabButton>
-                    <TabButton active={activeTab === "pricing"} onClick={() => setActiveTab("pricing")}>
+                    <TabButton active={activeTab === "pricing"} onClick={() => setActiveTab("pricing")} dataTour="settings-tab-pricing">
                         Pricing
                     </TabButton>
-                    <TabButton active={activeTab === "jobs"} onClick={() => setActiveTab("jobs")}>
+                    <TabButton active={activeTab === "jobs"} onClick={() => setActiveTab("jobs")} dataTour="settings-tab-jobs">
                         Jobs
                     </TabButton>
-                    <TabButton active={activeTab === "quotes"} onClick={() => setActiveTab("quotes")}>
+                    <TabButton active={activeTab === "quotes"} onClick={() => setActiveTab("quotes")} dataTour="settings-tab-quotes">
                         Quotes
                     </TabButton>
-                    <TabButton active={activeTab === "invoices"} onClick={() => setActiveTab("invoices")}>
+                    <TabButton active={activeTab === "invoices"} onClick={() => setActiveTab("invoices")} dataTour="settings-tab-invoices">
                         Invoices
                     </TabButton>
-                    <TabButton active={activeTab === "email"} onClick={() => setActiveTab("email")}>
+                    <TabButton active={activeTab === "email"} onClick={() => setActiveTab("email")} dataTour="settings-tab-email">
                         Email
                     </TabButton>
-                    <TabButton active={activeTab === "dashboard"} onClick={() => setActiveTab("dashboard")}>
+                    <TabButton active={activeTab === "dashboard"} onClick={() => setActiveTab("dashboard")} dataTour="settings-tab-dashboard">
                         Dashboard
                     </TabButton>
-                    <TabButton active={activeTab === "data"} onClick={() => setActiveTab("data")}>
+                    <TabButton active={activeTab === "data"} onClick={() => setActiveTab("data")} dataTour="settings-tab-data">
                         Data
                     </TabButton>
                 </div>
@@ -2023,6 +2029,7 @@ export default function SettingsPage({
                             title="Account email"
                             description="Change the email address used to sign in to RoundHQ."
                             icon={UserCircle}
+                            dataTour="settings-account-email"
                         >
                             <div className="grid grid-cols-1 gap-4">
                                 <Field
@@ -2071,6 +2078,7 @@ export default function SettingsPage({
                             title="Password"
                             description="Set a new password for your RoundHQ login."
                             icon={KeyRound}
+                            dataTour="settings-account-password"
                         >
                             <div className="grid grid-cols-1 gap-4">
                                 <Field label="New password">
@@ -2112,6 +2120,7 @@ export default function SettingsPage({
                                 title="Subscription"
                                 description="Open your secure billing portal to manage or cancel the workspace subscription."
                                 icon={CreditCard}
+                                dataTour="settings-account-subscription"
                             >
                                 <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 md:flex-row md:items-center md:justify-between">
                                     <div>
@@ -2213,6 +2222,7 @@ export default function SettingsPage({
                             title="Business address"
                             description="Shown on documents and business records."
                             icon={MapPin}
+                            dataTour="settings-business-address-section"
                         >
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                 <Field label="Address line 1">
@@ -2270,6 +2280,7 @@ export default function SettingsPage({
                             title="Logo and colours"
                             description="These brand assets are used across the app and generated PDFs."
                             icon={Palette}
+                            dataTour="settings-branding-section"
                         >
                             <div className="grid grid-cols-1 gap-4">
                                 <Field label="Logo">
@@ -2379,6 +2390,7 @@ export default function SettingsPage({
                             title="PDF customisation"
                             description="Control the layout used for quotes, invoices, RAMS documents, and emailed PDF attachments."
                             icon={FileText}
+                            dataTour="settings-pdf-customisation-section"
                         >
                             <div className="grid grid-cols-1 gap-4">
                                 <Field
@@ -2481,6 +2493,7 @@ export default function SettingsPage({
                             title="Live document preview"
                             description="Switch between document types to see how the PDF header, logo, colours, and footer will look."
                             icon={Settings2}
+                            dataTour="settings-pdf-preview-section"
                         >
                             <div className="mb-4 flex flex-wrap gap-2">
                                 {[
@@ -2522,6 +2535,7 @@ export default function SettingsPage({
                             title="Pricing defaults"
                             description="Used when creating jobs and quotes."
                             icon={CreditCard}
+                            dataTour="settings-pricing-defaults-section"
                         >
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                 <Field
@@ -2730,6 +2744,7 @@ export default function SettingsPage({
                             title="Round settings"
                             description="Choose how your normal service rotation behaves."
                             icon={RotateCcw}
+                            dataTour="settings-round-settings-section"
                         >
                             <div className="grid grid-cols-1 gap-4">
                                 <Field
@@ -2759,6 +2774,7 @@ export default function SettingsPage({
                             title="Default notes"
                             description="Pre-fill standard text for new customers."
                             icon={FileText}
+                            dataTour="settings-default-notes-section"
                         >
                             <div className="grid grid-cols-1 gap-4">
                                 <Field label="Default customer notes">
@@ -2779,6 +2795,7 @@ export default function SettingsPage({
                                 title="Quote numbering"
                                 description="Control the prefix and starting point for new quotes."
                                 icon={FileText}
+                                dataTour="settings-quote-numbering-section"
                             >
                                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                     <Field label="Quote prefix">
@@ -2804,6 +2821,7 @@ export default function SettingsPage({
                                 title="Quote defaults"
                                 description="Standard text and calculator defaults used when creating new quotes."
                                 icon={FileText}
+                                dataTour="settings-quote-defaults-section"
                             >
                                 <div className="grid grid-cols-1 gap-4">
                                     <Field
@@ -2839,6 +2857,7 @@ export default function SettingsPage({
                             title="Reusable quote items"
                             description="Save common services and products so you can add them quickly in the quote form."
                             icon={Settings2}
+                            dataTour="settings-quote-items-section"
                         >
                             <div className="space-y-4">
                                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -3069,6 +3088,7 @@ export default function SettingsPage({
                                 title="Invoice settings"
                                 description="Invoice numbering, VAT, and payment terms."
                                 icon={Receipt}
+                                dataTour="settings-invoice-settings-section"
                             >
                                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                     <Field label="Invoice prefix">
@@ -3120,6 +3140,7 @@ export default function SettingsPage({
                                     title="Document text"
                                     description="Default wording for invoices."
                                     icon={FileText}
+                                    dataTour="settings-invoice-text-section"
                                 >
                                     <div className="grid grid-cols-1 gap-4">
                                         <Field label="Default invoice notes">
@@ -3142,6 +3163,7 @@ export default function SettingsPage({
                                     title="Bank Transfer Details"
                                     description="These details show on PDF invoices for customers paying by bank transfer."
                                     icon={CreditCard}
+                                    dataTour="settings-bank-transfer-section"
                                 >
                                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                         <Field label="Account name">
@@ -3187,6 +3209,7 @@ export default function SettingsPage({
                                     title="Stripe invoice payments"
                                     description="Connect your Stripe account to add secure payment links to invoices."
                                     icon={ShieldCheck}
+                                    dataTour="settings-stripe-payments-section"
                                 >
                                     <div className="space-y-5">
                                         <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -3279,6 +3302,7 @@ export default function SettingsPage({
                             title="Dashboard widgets"
                             description="Choose what shows on the dashboard."
                             icon={CloudSun}
+                            dataTour="settings-dashboard-widgets-section"
                         >
                             <div className="grid grid-cols-1 gap-4">
                                 <Toggle
@@ -3330,6 +3354,7 @@ export default function SettingsPage({
                             title="Sending email account"
                             description="These details are used when you email quotes and invoices directly from the website."
                             icon={Mail}
+                            dataTour="settings-email-account-section"
                         >
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                 <Field
@@ -3386,6 +3411,7 @@ export default function SettingsPage({
                             title="SMTP server"
                             description="Use the SMTP details from your email provider so the website can send emails without opening a separate email app."
                             icon={ShieldCheck}
+                            dataTour="settings-smtp-section"
                         >
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                 <Field label="SMTP host">
@@ -3482,6 +3508,7 @@ export default function SettingsPage({
                                 title="Workflow message templates"
                                 description="Choose how quote follow-ups and overdue invoice reminders should send from the dashboard, then reuse these templates each time."
                                 icon={Settings2}
+                                dataTour="settings-workflow-messages-section"
                             >
                                 <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
                                     <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
@@ -3630,6 +3657,7 @@ export default function SettingsPage({
                             title="Edit collaboration"
                             description="Control inactive edit warnings and what happens to unsaved work."
                             icon={Settings2}
+                            dataTour="settings-edit-collaboration-section"
                         >
                             <div className="grid grid-cols-1 gap-4">
                                 <Field
@@ -3683,6 +3711,7 @@ export default function SettingsPage({
                             title="In-app help"
                             description="Control automatic onboarding and guided tips."
                             icon={HelpCircle}
+                            dataTour="settings-help-section"
                         >
                             <div className="grid grid-cols-1 gap-4">
                                 <Toggle
@@ -3699,6 +3728,7 @@ export default function SettingsPage({
                             title="Import / export"
                             description="Backup or restore your settings."
                             icon={Database}
+                            dataTour="settings-import-export-section"
                         >
                             <div className="grid grid-cols-1 gap-4">
                                 <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
@@ -3839,6 +3869,7 @@ export default function SettingsPage({
                             title="Danger zone"
                             description="Reset everything if you need a clean start."
                             icon={Trash2}
+                            dataTour="settings-danger-zone-section"
                         >
                             <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
                                 <p className="text-sm font-medium text-red-800">

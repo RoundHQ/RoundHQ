@@ -36,6 +36,7 @@ Create a Stripe product with a monthly recurring price, then add the price ID an
 STRIPE_SECRET_KEY=
 STRIPE_PRICE_ID=
 STRIPE_WEBHOOK_SECRET=
+STRIPE_CONNECT_WEBHOOK_SECRET=
 SUPABASE_SERVICE_ROLE_KEY=
 ```
 
@@ -45,7 +46,9 @@ Webhook endpoint:
 https://roundhq.co.uk/api/stripe/webhook
 ```
 
-Send subscription events plus `checkout.session.completed` so RoundHQ can keep each workspace's subscription status in sync.
+Create one platform webhook and one connected-accounts webhook that both point to this endpoint. Save the platform webhook signing secret as `STRIPE_WEBHOOK_SECRET` and the connected-accounts signing secret as `STRIPE_CONNECT_WEBHOOK_SECRET`.
+
+Platform webhook events: subscription events plus `checkout.session.completed` so RoundHQ can keep each workspace's subscription status in sync. Connected-accounts webhook events: `checkout.session.completed`, `checkout.session.async_payment_succeeded`, and `checkout.session.expired` so customer invoice payment links update invoice status.
 
 ## Owner Admin Console
 

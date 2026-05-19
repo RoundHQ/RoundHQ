@@ -37,6 +37,7 @@ import { getAdminPlatformAnnouncement } from "@/lib/admin/platform-announcements
 import {
   saveSupportCategoryAction,
   saveSupportPriorityAction,
+  sendAdminDirectEmailAction,
   updatePlatformAnnouncementAction,
   updateAdminEmailSettingsAction,
   updateAdminHelpdeskSettingsAction,
@@ -48,6 +49,7 @@ export const dynamic = "force-dynamic";
 
 type AdminSettingsSearchParams = {
   saved?: string;
+  sent?: string;
   tab?: string;
 };
 
@@ -418,15 +420,18 @@ export default async function AdminSettingsPage({
   const emailReady = isPlatformEmailConfigured(settings);
   const stripeReady =
     isPlatformStripeConfigured(stripeSettings) &&
-    Boolean(stripeSettings.webhookSecret);
+    Boolean(stripeSettings.webhookSecret) &&
+    Boolean(stripeSettings.connectWebhookSecret);
   const saved = params.saved === "1";
   const activeTab =
     params.tab === "invoices" ||
+    params.tab === "send-email" ||
     params.tab === "stripe" ||
     params.tab === "helpdesk" ||
     params.tab === "announcements"
       ? params.tab
       : "email";
+  const sent = activeTab === "send-email" && params.sent === "1";
 
   return (
     <main className="min-h-screen bg-white text-slate-950">
@@ -455,8 +460,8 @@ export default async function AdminSettingsPage({
             value={stripeReady ? "Ready" : "Setup"}
             detail={
               stripeReady
-                ? "Checkout and webhook details are saved"
-                : "Add keys, webhook secret, and price IDs before taking payments"
+                ? "Checkout and both webhook secrets are saved"
+                : "Add keys, webhook secrets, and price IDs before taking payments"
             }
           />
           <SettingStat
@@ -485,6 +490,12 @@ export default async function AdminSettingsPage({
               isActive={activeTab === "invoices"}
               icon={<Receipt aria-hidden="true" className="size-4" />}
               label="Invoices"
+            />
+            <SettingsTabLink
+              href="/admin/settings?tab=send-email"
+              isActive={activeTab === "send-email"}
+              icon={<Mail aria-hidden="true" className="size-4" />}
+              label="Send Email"
             />
             <SettingsTabLink
               href="/admin/settings?tab=stripe"
@@ -517,6 +528,12 @@ export default async function AdminSettingsPage({
                 : activeTab === "announcements"
                   ? "Announcement saved."
                 : "Email settings saved."}
+            </div>
+          )}
+
+          {sent && (
+            <div className="mb-6 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+              Email sent successfully.
             </div>
           )}
 
@@ -859,6 +876,101 @@ export default async function AdminSettingsPage({
                 </div>
               </section>
             </form>
+          ) : activeTab === "send-email" ? (
+            <form
+              action={sendAdminDirectEmailAction}
+              className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]"
+            >
+              <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
+                <div className="mb-6 flex items-start gap-3">
+                  <div className="flex size-11 shrink-0 items-center justify-center rounded-md bg-[#e7f9ed] text-[#168b43]">
+                    <Mail aria-hidden="true" className="size-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-extrabold tracking-normal text-slate-950">
+                      Send an email
+                    </h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                      Send a plain email directly from RoundHQ using the saved
+                      platform SMTP sender.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-5">
+                  <TextInput
+                    label="Recipient email"
+                    name="recipient_email"
+                    type="email"
+                    placeholder="customer@example.co.uk"
+                    required
+                  />
+                  <TextInput
+                    label="Subject"
+                    name="email_subject"
+                    placeholder="Message from RoundHQ"
+                    required
+                  />
+                  <TextArea
+                    label="Message"
+                    name="email_message"
+                    defaultValue=""
+                    rows={11}
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={Boolean(settings.schemaError) || !emailReady}
+                  className="mt-6 inline-flex w-full items-center justify-center rounded-md bg-[#19c653] px-5 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.2)] transition hover:bg-[#22d861] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Send email
+                </button>
+              </section>
+
+              <section className="space-y-6">
+                <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
+                  <h2 className="text-xl font-extrabold tracking-normal text-slate-950">
+                    Sender status
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    Direct emails use the same SMTP account as signup
+                    verification, invoice emails, and support notifications.
+                  </p>
+
+                  <div className="mt-6 grid gap-3">
+                    <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                      <span className="font-bold text-slate-700">SMTP sender</span>
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-bold ${
+                          emailReady
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-amber-100 text-amber-800"
+                        }`}
+                      >
+                        {emailReady ? "Ready" : "Missing"}
+                      </span>
+                    </div>
+                    <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+                      From:{" "}
+                      <span className="font-bold text-slate-950">
+                        {settings.emailFromName || "RoundHQ"}{" "}
+                        {settings.emailFromAddress
+                          ? `<${settings.emailFromAddress}>`
+                          : ""}
+                      </span>
+                    </div>
+                  </div>
+
+                  {!emailReady ? (
+                    <div className="mt-5 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                      Add SMTP host, username, password, and From email in the
+                      Email tab before sending direct emails.
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+            </form>
           ) : activeTab === "stripe" ? (
             <form
               action={updateAdminStripeSettingsAction}
@@ -899,8 +1011,8 @@ export default async function AdminSettingsPage({
                   <TextInput
                     label={
                       stripeSettings.webhookSecret
-                        ? "Webhook signing secret (leave blank to keep saved secret)"
-                        : "Webhook signing secret"
+                        ? "Platform webhook signing secret (leave blank to keep saved secret)"
+                        : "Platform webhook signing secret"
                     }
                     name="stripe_webhook_secret"
                     type="password"
@@ -911,11 +1023,27 @@ export default async function AdminSettingsPage({
                     }
                     required={!stripeSettings.webhookSecret}
                   />
+                  <TextInput
+                    label={
+                      stripeSettings.connectWebhookSecret
+                        ? "Connect webhook signing secret (leave blank to keep saved secret)"
+                        : "Connect webhook signing secret"
+                    }
+                    name="stripe_connect_webhook_secret"
+                    type="password"
+                    placeholder={
+                      stripeSettings.connectWebhookSecret
+                        ? "Saved Connect webhook secret present"
+                        : "whsec_..."
+                    }
+                    required={!stripeSettings.connectWebhookSecret}
+                  />
 
                   <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-900">
-                    Webhook endpoint:{" "}
+                    Platform and Connect webhook endpoint:{" "}
                     <code className="font-bold">/api/stripe/webhook</code>.
-                    Add it in Stripe and paste the signing secret above.
+                    Add one platform webhook and one connected-accounts webhook
+                    in Stripe, then paste each signing secret above.
                   </div>
                 </div>
               </section>
@@ -956,7 +1084,14 @@ export default async function AdminSettingsPage({
                   <div className="mt-5 grid gap-3">
                     {[
                       ["Secret key", Boolean(stripeSettings.secretKey)],
-                      ["Webhook signing secret", Boolean(stripeSettings.webhookSecret)],
+                      [
+                        "Platform webhook signing secret",
+                        Boolean(stripeSettings.webhookSecret),
+                      ],
+                      [
+                        "Connect webhook signing secret",
+                        Boolean(stripeSettings.connectWebhookSecret),
+                      ],
                       ["Starter price ID", Boolean(stripeSettings.starterPriceId)],
                       ["Growth price ID", Boolean(stripeSettings.growthPriceId)],
                     ].map(([label, isReady]) => (

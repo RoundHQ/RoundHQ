@@ -61,8 +61,13 @@ export async function getStripe() {
   return stripeClient.client;
 }
 
-export async function getStripeWebhookSecret() {
-  return (await getPlatformStripeSettings()).webhookSecret;
+export async function getStripeWebhookSecrets() {
+  const settings = await getPlatformStripeSettings();
+
+  return {
+    platform: settings.webhookSecret,
+    connect: settings.connectWebhookSecret,
+  };
 }
 
 export function getBaseUrl(requestUrl: string) {
