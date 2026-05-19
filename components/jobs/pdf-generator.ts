@@ -140,6 +140,7 @@ const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
 const BODY_BOTTOM = PAGE_HEIGHT - 24;
 const FOOTER_Y = PAGE_HEIGHT - 12;
 const GBP_SYMBOL = String.fromCharCode(163);
+const STRIPE_SECURE_PAYMENT_LOGO_URL = "/stripe-secure-payment-logo-cropped.png";
 
 function formatMoney(value: number) {
     return `${GBP_SYMBOL}${value.toFixed(2)}`;
@@ -870,13 +871,24 @@ function drawDetailCard(
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
 
-    const rowHeights = safeRows.map((row) => {
+    const valueLineHeight = 4.6;
+    const labelBlockHeight = 4.8;
+    const rowGap = 4;
+    const rowValues = safeRows.map((row) => {
         const wrapped = doc.splitTextToSize(row.value || "-", width - 16);
-        return Math.max(6, wrapped.length * 4.5 + 1);
+        return wrapped.length > 0 ? wrapped : ["-"];
     });
+    const rowHeights = rowValues.map((wrapped) =>
+        Math.max(5.5, wrapped.length * valueLineHeight)
+    );
 
     const height =
-        15 + rowHeights.reduce((sum, rowHeight) => sum + rowHeight + 1.5, 0) + 5;
+        18 +
+        rowHeights.reduce(
+            (sum, rowHeight) => sum + labelBlockHeight + rowHeight + rowGap,
+            0
+        ) +
+        3;
 
     drawCardShell(doc, x, y, width, height, palette, accentColor);
     setTextColor(doc, palette.muted);
@@ -884,24 +896,78 @@ function drawDetailCard(
     doc.setFontSize(8);
     doc.text(title.toUpperCase(), x + 5, y + 9.5);
 
-    let currentY = y + 15.5;
+    let currentY = y + 17.5;
     safeRows.forEach((row, index) => {
-        const wrapped = doc.splitTextToSize(row.value || "-", width - 16);
+        const wrapped = rowValues[index];
 
         setTextColor(doc, palette.muted);
         doc.setFont("helvetica", "bold");
         doc.setFontSize(8);
-        doc.text(row.label.toUpperCase(), x + 5, currentY + 1.5);
+        doc.text(row.label.toUpperCase(), x + 5, currentY);
 
-        currentY += 5;
+        currentY += labelBlockHeight;
 
         setTextColor(doc, palette.ink);
         doc.setFont("helvetica", "normal");
         doc.setFontSize(10);
         doc.text(wrapped, x + 5, currentY);
 
-        currentY += rowHeights[index] + 0.5;
+        currentY += rowHeights[index] + rowGap;
     });
+
+    return height;
+}
+
+function drawPaymentBadgeCard(
+    doc: jsPDF,
+    options: {
+        x: number;
+        y: number;
+        width: number;
+        paymentBadgeAsset: LogoAsset | null;
+        palette: BrandPalette;
+    }
+) {
+    const { x, y, width, paymentBadgeAsset, palette } = options;
+    const copy = "Secure card payments available through Stripe.";
+    const wrappedCopy = doc.splitTextToSize(copy, width - 10);
+    const badgeMaxWidth = width - 10;
+    const badgeMaxHeight = 16;
+    const badgeDimensions = paymentBadgeAsset
+        ? fitInside(
+              badgeMaxWidth,
+              badgeMaxHeight,
+              paymentBadgeAsset.width,
+              paymentBadgeAsset.height
+          )
+        : null;
+    const imageHeight = badgeDimensions ? badgeDimensions.height + 5 : 0;
+    const height = 17 + imageHeight + wrappedCopy.length * 4.6 + 8;
+
+    drawCardShell(doc, x, y, width, height, palette, palette.primary);
+    setTextColor(doc, palette.muted);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.text("PAY ONLINE", x + 5, y + 9.5);
+
+    let currentY = y + 16.5;
+
+    if (paymentBadgeAsset && badgeDimensions) {
+        doc.addImage(
+            paymentBadgeAsset.dataUrl,
+            paymentBadgeAsset.format,
+            x + 5,
+            currentY,
+            badgeDimensions.width,
+            badgeDimensions.height
+        );
+        currentY += badgeDimensions.height + 5;
+    }
+
+    setTextColor(doc, palette.ink);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9.5);
+    doc.text(wrappedCopy, x + 5, currentY);
 
     return height;
 }
@@ -1765,6 +1831,9 @@ async function buildInvoicePdfDocument(
     const logoAsset = pdfSettings.showLogo
         ? await loadLogoAsset(businessDetails.logoUrl)
         : null;
+    const paymentBadgeAsset = invoice.stripePaymentLinkUrl?.trim()
+        ? await loadLogoAsset(STRIPE_SECURE_PAYMENT_LOGO_URL)
+        : null;
     const customerLines = buildCustomerLines(invoice, true);
     const siteLines = buildSiteLines(invoice);
     const businessCardLines = [
@@ -1883,14 +1952,12 @@ async function buildInvoicePdfDocument(
     let nextLeftY = bottomStartY;
 
     if (paymentLinkUrl) {
-        const paymentLinkHeight = drawParagraphCard(doc, {
+        const paymentLinkHeight = drawPaymentBadgeCard(doc, {
             x: MARGIN,
             y: nextLeftY,
             width: leftColumnWidth,
-            title: "Pay Online",
-            body: `Pay securely online: ${paymentLinkUrl}`,
+            paymentBadgeAsset,
             palette,
-            accentColor: palette.primary,
         });
         nextLeftY += paymentLinkHeight + 6;
     }
