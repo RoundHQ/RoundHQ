@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import type Stripe from "stripe";
 import { createClient } from "@/lib/supabase/server";
 import { ensureWorkspace } from "@/lib/workspace";
 import { getBaseUrl, getStripe } from "@/lib/stripe/server";
@@ -65,6 +66,49 @@ function serializeInvoice(row: InvoicePaymentRow) {
     stripePaymentIntentId: row.stripe_payment_intent_id,
     stripePaymentCompletedAt: row.stripe_payment_completed_at,
   };
+}
+
+function isReusableCheckoutSession(session: Stripe.Checkout.Session) {
+  const expiresAt = session.expires_at ?? 0;
+  const now = Math.floor(Date.now() / 1000);
+
+  return Boolean(
+    session.url &&
+      session.status === "open" &&
+      (!expiresAt || expiresAt > now + 60)
+  );
+}
+
+async function getReusableCheckoutSession({
+  stripe,
+  sessionId,
+  connectedAccountId,
+}: {
+  stripe: Awaited<ReturnType<typeof getStripe>>;
+  sessionId: string | null;
+  connectedAccountId: string;
+}) {
+  if (!sessionId) {
+    return null;
+  }
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(
+      sessionId,
+      {},
+      { stripeAccount: connectedAccountId }
+    );
+
+    return isReusableCheckoutSession(session) ? session : null;
+  } catch (error) {
+    console.warn(
+      "Stored invoice Checkout Session could not be reused:",
+      error instanceof Error && error.message.trim()
+        ? error.message
+        : "Unknown Stripe error"
+    );
+    return null;
+  }
 }
 
 function getSchemaErrorMessage(error: unknown) {
@@ -145,13 +189,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ invoice: serializeInvoice(invoice) });
     }
 
-    if (
-      invoice.stripe_payment_link_url &&
-      invoice.stripe_payment_status === "open"
-    ) {
-      return NextResponse.json({ invoice: serializeInvoice(invoice) });
-    }
-
     const invoiceTotal = Number(invoice.total ?? 0);
     const amount = Math.round(invoiceTotal * 100);
 
@@ -189,6 +226,28 @@ export async function POST(request: NextRequest) {
         },
         { status: 400 }
       );
+    }
+
+    if (
+      invoice.stripe_payment_link_url &&
+      invoice.stripe_payment_status === "open"
+    ) {
+      const existingSession = await getReusableCheckoutSession({
+        stripe,
+        sessionId: invoice.stripe_checkout_session_id,
+        connectedAccountId: settings.stripeConnectedAccountId,
+      });
+
+      if (existingSession?.url) {
+        return NextResponse.json({
+          invoice: serializeInvoice({
+            ...invoice,
+            stripe_checkout_session_id: existingSession.id,
+            stripe_payment_link_url: existingSession.url,
+            stripe_payment_status: "open",
+          }),
+        });
+      }
     }
 
     const { data: customerData } =

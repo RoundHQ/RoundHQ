@@ -569,13 +569,6 @@ export default function InvoicesPage({
       return invoice;
     }
 
-    if (
-      invoice.stripePaymentLinkUrl &&
-      invoice.stripePaymentStatus !== "expired"
-    ) {
-      return invoice;
-    }
-
     setPaymentLinkInvoiceId(invoice.id);
 
     try {
@@ -601,15 +594,19 @@ export default function InvoicesPage({
   }
 
   async function handlePaymentLinkAction(invoice: Invoice) {
-    if (
-      invoice.stripePaymentLinkUrl &&
-      invoice.stripePaymentStatus !== "expired"
-    ) {
-      window.open(invoice.stripePaymentLinkUrl, "_blank", "noopener,noreferrer");
-      return;
-    }
-
     if (!onCreatePaymentLink) {
+      if (
+        invoice.stripePaymentLinkUrl &&
+        invoice.stripePaymentStatus !== "expired"
+      ) {
+        window.open(
+          invoice.stripePaymentLinkUrl,
+          "_blank",
+          "noopener,noreferrer"
+        );
+        return;
+      }
+
       setPaymentLinkNotice({
         type: "error",
         text: "Stripe invoice payments are not available in this workspace.",
