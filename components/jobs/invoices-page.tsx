@@ -2,17 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  ChevronDown,
   CheckCircle2,
   CreditCard,
-  Download,
-  ExternalLink,
   FileText,
   History as HistoryIcon,
   Link2,
-  Mail,
-  Pencil,
   Repeat,
-  Trash2,
 } from "lucide-react";
 import { generateInvoicePDF } from "./pdf-generator";
 import DocumentSendDialog from "./document-send-dialog";
@@ -138,6 +134,10 @@ type Props = {
   onCreate: () => void;
   onEdit: (invoiceId: string) => void;
   onDelete: (invoiceId: string) => void;
+  onUpdateStatus: (
+    invoiceId: string,
+    status: InvoiceStatus
+  ) => Promise<void> | void;
   onMarkSent: (
     invoiceId: string,
     metadata?: DocumentSendMetadata
@@ -171,6 +171,30 @@ type RecurringEditorState = {
 } | null;
 
 type InvoiceFilter = "All" | "Draft" | "Paid" | "Overdue";
+type InvoiceAction =
+  | "edit"
+  | "paid"
+  | "pdf"
+  | "payment-link"
+  | "email"
+  | "recurring"
+  | "delete";
+
+type InvoiceActionTone = "accept" | "danger" | "neutral" | "primary";
+
+type InvoiceActionMenuItem = {
+  action: InvoiceAction;
+  label: string;
+  tone?: InvoiceActionTone;
+  separatorBefore?: boolean;
+};
+
+type InvoiceActionMenuState = {
+  invoiceId: string;
+  top: number;
+  left: number;
+  width: number;
+};
 
 const RECURRING_FREQUENCY_OPTIONS: RecurringInvoiceFrequency[] = [
   "Monthly",
@@ -328,6 +352,40 @@ function getPaymentLinkClasses(invoice: Invoice) {
   return "bg-sky-100 text-sky-700";
 }
 
+function getActionMenuPosition(
+  trigger: HTMLElement,
+  itemCount: number
+): Omit<InvoiceActionMenuState, "invoiceId"> {
+  const rect = trigger.getBoundingClientRect();
+  const width = 224;
+  const estimatedHeight = Math.min(360, 18 + itemCount * 42);
+  const top =
+    rect.bottom + estimatedHeight + 12 > window.innerHeight
+      ? Math.max(12, rect.top - estimatedHeight - 8)
+      : rect.bottom + 8;
+  const left = Math.min(
+    window.innerWidth - width - 12,
+    Math.max(12, rect.right - width)
+  );
+
+  return { top, left, width };
+}
+
+function getInvoiceActionItemClasses(tone: InvoiceActionTone = "neutral") {
+  const base =
+    "flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition";
+
+  switch (tone) {
+    case "accept":
+      return `${base} bg-emerald-600 text-white shadow-sm hover:bg-emerald-700`;
+    case "danger":
+      return `${base} text-rose-700 hover:bg-rose-50`;
+    case "primary":
+      return `${base} text-emerald-800 hover:bg-emerald-50`;
+    default:
+      return `${base} text-slate-700 hover:bg-slate-50`;
+  }
+}
 
 function getInvoiceDueDaysAfterIssue(invoice: Invoice, fallbackDays: number) {
   if (!invoice.dueDate) {
@@ -378,6 +436,7 @@ export default function InvoicesPage({
   onCreate,
   onEdit,
   onDelete,
+  onUpdateStatus,
   onMarkSent,
   stripeInvoicePaymentsEnabled = false,
   onCreatePaymentLink,
@@ -394,6 +453,8 @@ export default function InvoicesPage({
   const [paymentLinkInvoiceId, setPaymentLinkInvoiceId] = useState<string | null>(
     null
   );
+  const [openActionMenu, setOpenActionMenu] =
+    useState<InvoiceActionMenuState | null>(null);
   const [recurringEditor, setRecurringEditor] = useState<RecurringEditorState>(null);
   const [recurringFrequency, setRecurringFrequency] =
     useState<RecurringInvoiceFrequency>("Monthly");
@@ -433,6 +494,43 @@ export default function InvoicesPage({
       window.clearTimeout(timeoutId);
     };
   }, [paymentLinkNotice]);
+
+  useEffect(() => {
+    if (!openActionMenu) {
+      return undefined;
+    }
+
+    function closeIfOutside(event: PointerEvent) {
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-action-menu-root]")
+      ) {
+        return;
+      }
+
+      setOpenActionMenu(null);
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpenActionMenu(null);
+      }
+    }
+
+    const closeMenu = () => setOpenActionMenu(null);
+
+    window.addEventListener("pointerdown", closeIfOutside);
+    window.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+
+    return () => {
+      window.removeEventListener("pointerdown", closeIfOutside);
+      window.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+    };
+  }, [openActionMenu]);
 
   const activeInvoice = useMemo(
     () =>
@@ -641,6 +739,86 @@ export default function InvoicesPage({
       });
     } finally {
       setPaymentLinkInvoiceId(null);
+    }
+  }
+
+  function getInvoiceActionItems(
+    invoice: Invoice,
+    existingTemplate: RecurringInvoiceTemplate | null
+  ): InvoiceActionMenuItem[] {
+    const statusItems: InvoiceActionMenuItem[] =
+      invoice.status !== "Paid"
+        ? [
+            {
+              action: "paid",
+              label: "Mark as paid",
+              tone: "accept",
+            },
+          ]
+        : [];
+
+    return [
+      ...statusItems,
+      {
+        action: "edit",
+        label: "Edit",
+        separatorBefore: statusItems.length > 0,
+      },
+      { action: "pdf", label: "Download PDF" },
+      ...(stripeInvoicePaymentsEnabled && invoice.status !== "Paid"
+        ? [
+            {
+              action: "payment-link" as const,
+              label:
+                invoice.stripePaymentLinkUrl &&
+                invoice.stripePaymentStatus !== "expired"
+                  ? "Open payment link"
+                  : "Create payment link",
+              tone: "primary" as const,
+            },
+          ]
+        : []),
+      { action: "email", label: "Email invoice" },
+      {
+        action: "recurring",
+        label: existingTemplate ? "Edit recurring" : "Make recurring",
+      },
+      {
+        action: "delete",
+        label: "Delete",
+        tone: "danger",
+        separatorBefore: true,
+      },
+    ];
+  }
+
+  async function handleInvoiceAction(
+    invoice: Invoice,
+    action: InvoiceAction,
+    existingTemplate: RecurringInvoiceTemplate | null
+  ) {
+    switch (action) {
+      case "edit":
+        onEdit(invoice.id);
+        break;
+      case "paid":
+        await onUpdateStatus(invoice.id, "Paid");
+        break;
+      case "pdf":
+        await handleDownloadInvoicePdf(invoice);
+        break;
+      case "payment-link":
+        await handlePaymentLinkAction(invoice);
+        break;
+      case "email":
+        setSendTarget({ invoiceId: invoice.id, method: "email" });
+        break;
+      case "recurring":
+        openRecurringEditor(invoice.id, existingTemplate ?? undefined);
+        break;
+      case "delete":
+        onDelete(invoice.id);
+        break;
     }
   }
 
@@ -945,75 +1123,47 @@ export default function InvoicesPage({
                       </td>
 
                       <td className="px-4 py-4">
-                        <div className="flex justify-end gap-2">
-                          <button
-                            onClick={() => onEdit(invoice.id)}
-                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-                          >
-                            <Pencil size={14} />
-                            Edit
-                          </button>
-
-                          <button
-                            onClick={() => onDelete(invoice.id)}
-                            className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
-                          >
-                            <Trash2 size={14} />
-                            Delete
-                          </button>
-
-                          <button
-                            onClick={() => void handleDownloadInvoicePdf(invoice)}
-                            disabled={paymentLinkInvoiceId === invoice.id}
-                            className="inline-flex items-center gap-2 rounded-lg bg-[#0f2343] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#1a325b]"
-                          >
-                            <Download size={14} />
-                            PDF
-                          </button>
-
-                          {stripeInvoicePaymentsEnabled ? (
+                        <div className="flex justify-end">
+                          <div data-action-menu-root className="relative">
                             <button
-                              onClick={() => void handlePaymentLinkAction(invoice)}
-                              disabled={
-                                paymentLinkInvoiceId === invoice.id ||
-                                invoice.status === "Paid"
-                              }
-                              className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                              type="button"
+                              aria-haspopup="menu"
+                              aria-expanded={openActionMenu?.invoiceId === invoice.id}
+                              disabled={paymentLinkInvoiceId === invoice.id}
+                              onClick={(event) => {
+                                const items = getInvoiceActionItems(
+                                  invoice,
+                                  existingTemplate
+                                );
+                                const position = getActionMenuPosition(
+                                  event.currentTarget,
+                                  items.length
+                                );
+
+                                setOpenActionMenu((currentMenu) =>
+                                  currentMenu?.invoiceId === invoice.id
+                                    ? null
+                                    : {
+                                        invoiceId: invoice.id,
+                                        ...position,
+                                      }
+                                );
+                              }}
+                              className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0f2343] px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#153c3f] focus:outline-none focus:ring-2 focus:ring-emerald-200 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              {invoice.stripePaymentLinkUrl &&
-                              invoice.stripePaymentStatus !== "expired" ? (
-                                <ExternalLink size={14} />
-                              ) : (
-                                <CreditCard size={14} />
-                              )}
                               {paymentLinkInvoiceId === invoice.id
                                 ? "Working..."
-                                : invoice.stripePaymentLinkUrl &&
-                                    invoice.stripePaymentStatus !== "expired"
-                                  ? "Open link"
-                                  : "Payment link"}
+                                : "Actions"}
+                              <ChevronDown
+                                size={16}
+                                className={`transition ${
+                                  openActionMenu?.invoiceId === invoice.id
+                                    ? "rotate-180"
+                                    : ""
+                                }`}
+                              />
                             </button>
-                          ) : null}
-
-                          <button
-                            onClick={() =>
-                              setSendTarget({ invoiceId: invoice.id, method: "email" })
-                            }
-                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-                          >
-                            <Mail size={14} />
-                            Email
-                          </button>
-
-                          <button
-                            onClick={() =>
-                              openRecurringEditor(invoice.id, existingTemplate ?? undefined)
-                            }
-                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-                          >
-                            <Repeat size={14} />
-                            {existingTemplate ? "Edit Recurring" : "Recurring"}
-                          </button>
+                          </div>
                         </div>
                       </td>
                     </tr>
@@ -1024,6 +1174,58 @@ export default function InvoicesPage({
           </table>
         </div>
       </section>
+
+      {openActionMenu ? (() => {
+        const invoice =
+          invoices.find((entry) => entry.id === openActionMenu.invoiceId) ?? null;
+
+        if (!invoice) {
+          return null;
+        }
+
+        const existingTemplate =
+          recurringInvoiceTemplates.find(
+            (template) => template.sourceInvoiceId === invoice.id
+          ) ?? null;
+        const actionItems = getInvoiceActionItems(invoice, existingTemplate);
+
+        return (
+          <div
+            data-action-menu-root
+            role="menu"
+            className="fixed z-50 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-900/5"
+            style={{
+              top: openActionMenu.top,
+              left: openActionMenu.left,
+              width: openActionMenu.width,
+            }}
+          >
+            <div className="mb-1 px-3 py-2">
+              <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">
+                {invoice.invoiceNumber}
+              </p>
+            </div>
+            {actionItems.map((item) => (
+              <div
+                key={item.action}
+                className={item.separatorBefore ? "mt-1 border-t border-slate-100 pt-1" : ""}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setOpenActionMenu(null);
+                    void handleInvoiceAction(invoice, item.action, existingTemplate);
+                  }}
+                  className={getInvoiceActionItemClasses(item.tone)}
+                >
+                  <span>{item.label}</span>
+                </button>
+              </div>
+            ))}
+          </div>
+        );
+      })() : null}
 
       <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">

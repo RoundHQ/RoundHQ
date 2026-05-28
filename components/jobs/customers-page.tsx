@@ -23,6 +23,7 @@ import type {
   MonthlyPayment,
   PaymentMethod,
   RotationWeeks,
+  StaffMember,
   VisitLog,
 } from "./types";
 import { GRASS_CUT_AREA_OPTIONS } from "./types";
@@ -36,6 +37,8 @@ type Props = {
   defaultRotationWeeks?: RotationWeeks;
   customerLimit?: number;
   allowCommercialTools?: boolean;
+  staffMembers?: StaffMember[];
+  defaultAssignedStaffId?: number | null;
   autoOpenAddCustomerRequestId?: number;
   onAdd: (customer: Customer) => void | Promise<void>;
   onUpdate: (customer: Customer) => void | Promise<void>;
@@ -725,6 +728,8 @@ function CustomerModal({
                          existingCustomer,
                          defaultRotationWeeks,
                          allowCommercialTools,
+                         staffMembers,
+                         defaultAssignedStaffId,
                          editCollaboration,
                          onClose,
                          onSave,
@@ -732,6 +737,8 @@ function CustomerModal({
   existingCustomer?: Customer;
   defaultRotationWeeks: RotationWeeks;
   allowCommercialTools: boolean;
+  staffMembers: StaffMember[];
+  defaultAssignedStaffId: number | null;
   editCollaboration?: EditFormCollaboration<Customer>;
   onClose: () => void;
   onSave: (customer: Customer) => void;
@@ -751,6 +758,8 @@ function CustomerModal({
               existing={existingCustomer}
               defaultRotationWeeks={defaultRotationWeeks}
               allowCommercialTools={allowCommercialTools}
+              staffMembers={staffMembers}
+              defaultAssignedStaffId={defaultAssignedStaffId}
               editCollaboration={editCollaboration}
               onSave={onSave}
               onCancel={onClose}
@@ -1005,6 +1014,8 @@ export default function CustomersPage({
                                         defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
                                         customerLimit = Number.POSITIVE_INFINITY,
                                         allowCommercialTools = true,
+                                        staffMembers = [],
+                                        defaultAssignedStaffId = null,
                                         autoOpenAddCustomerRequestId = 0,
                                         onAdd,
                                         onUpdate,
@@ -1429,12 +1440,14 @@ export default function CustomersPage({
         </section>
 
         {isCustomerModalOpen && (
-            <CustomerModal
-                existingCustomer={editingCustomer ?? undefined}
-                defaultRotationWeeks={normalizedDefaultRotationWeeks}
-                allowCommercialTools={allowCommercialTools}
-                editCollaboration={getCustomerEditCollaboration?.(
-                    editingCustomer ?? undefined
+                <CustomerModal
+                    existingCustomer={editingCustomer ?? undefined}
+                    defaultRotationWeeks={normalizedDefaultRotationWeeks}
+                    allowCommercialTools={allowCommercialTools}
+                    staffMembers={staffMembers}
+                    defaultAssignedStaffId={defaultAssignedStaffId}
+                    editCollaboration={getCustomerEditCollaboration?.(
+                        editingCustomer ?? undefined
                 )}
                 onClose={closeCustomerModal}
                 onSave={saveCustomerModal}

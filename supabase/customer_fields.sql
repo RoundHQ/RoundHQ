@@ -215,6 +215,7 @@ begin
   ) then
     execute ''create index if not exists customers_org_name_idx on public.customers (organization_id, name)'';
     execute ''create index if not exists customers_org_round_idx on public.customers (organization_id, week, day, customer_type, route_order)'';
+    execute ''create index if not exists customers_org_assigned_staff_id_idx on public.customers (organization_id, assigned_staff_id)'';
   end if;
 end'
 language plpgsql;

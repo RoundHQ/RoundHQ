@@ -27,6 +27,7 @@ import type {
   Invoice,
   InvoiceStatus,
   RotationWeeks,
+  StaffMember,
   VisitLog,
 } from "./types";
 import CustomerForm from "./customer-form";
@@ -111,6 +112,8 @@ type Props = {
   grassCutSeasonEnd: string;
   defaultRotationWeeks?: RotationWeeks;
   allowCommercialTools?: boolean;
+  staffMembers?: StaffMember[];
+  defaultAssignedStaffId?: number | null;
   onBack: () => void;
   onOpenPayments: () => void;
   onTogglePaid: (visitId: number | string) => void;
@@ -272,6 +275,8 @@ export default function CustomerProfilePage({
                                               grassCutSeasonEnd,
                                               defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
                                               allowCommercialTools = true,
+                                              staffMembers = [],
+                                              defaultAssignedStaffId = null,
                                               onBack,
   onOpenPayments,
   onTogglePaid,
@@ -415,6 +420,8 @@ export default function CustomerProfilePage({
                     existing={customer}
                     defaultRotationWeeks={normalizedDefaultRotationWeeks}
                     allowCommercialTools={allowCommercialTools}
+                    staffMembers={staffMembers}
+                    defaultAssignedStaffId={defaultAssignedStaffId}
                     editCollaboration={getCustomerEditCollaboration?.(customer)}
                     onSave={saveProfileEdits}
                     onCancel={() => setIsEditing(false)}
@@ -513,6 +520,23 @@ export default function CustomerProfilePage({
                           </p>
                           <p className="mt-1 text-xs text-slate-500">
                             {effectiveRotationLabel} round
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                )}
+
+                {customer.isGrassCuttingCustomer && (
+                    <div className="rounded-2xl bg-slate-50 p-4">
+                      <div className="flex items-start gap-3">
+                        <User size={18} className="mt-0.5 text-slate-400" />
+                        <div>
+                          <p className="text-xs text-slate-500">Round Staff</p>
+                          <p className="mt-1 font-semibold text-slate-900">
+                            {staffMembers.find(
+                              (staffMember) =>
+                                staffMember.id === customer.assignedStaffId
+                            )?.fullName ?? "Unassigned"}
                           </p>
                         </div>
                       </div>

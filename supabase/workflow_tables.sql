@@ -16,6 +16,13 @@ create table if not exists public.quotes (
   items jsonb not null default '[]'::jsonb,
   notes text null,
   total numeric(12, 2) not null default 0,
+  work_type text null,
+  estimated_duration_minutes integer null,
+  auto_scheduling_preference text null default 'default',
+  auto_scheduling_disabled boolean not null default false,
+  service_round_scheduling_preference text null default 'default',
+  auto_scheduled_job_id text null,
+  scheduling_status text null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -116,6 +123,27 @@ alter table if exists public.quotes
 
 alter table if exists public.quotes
   add column if not exists site_postcode text null;
+
+alter table if exists public.quotes
+  add column if not exists work_type text null;
+
+alter table if exists public.quotes
+  add column if not exists estimated_duration_minutes integer null;
+
+alter table if exists public.quotes
+  add column if not exists auto_scheduling_preference text null default 'default';
+
+alter table if exists public.quotes
+  add column if not exists auto_scheduling_disabled boolean not null default false;
+
+alter table if exists public.quotes
+  add column if not exists service_round_scheduling_preference text null default 'default';
+
+alter table if exists public.quotes
+  add column if not exists auto_scheduled_job_id text null;
+
+alter table if exists public.quotes
+  add column if not exists scheduling_status text null;
 
 alter table if exists public.invoices
   add column if not exists customer_type text null;
@@ -331,6 +359,15 @@ create table if not exists public.scheduled_jobs (
   status text not null check (status in ('Scheduled', 'In Progress', 'Completed', 'Cancelled')),
   quote_ids jsonb not null default '[]'::jsonb,
   invoice_ids jsonb not null default '[]'::jsonb,
+  source_quote_id text null references public.quotes(id) on delete set null,
+  work_type text null,
+  estimated_duration_minutes integer null,
+  postcode text null,
+  auto_scheduled boolean not null default false,
+  auto_schedule_reason text null,
+  auto_schedule_reason_label text null,
+  assigned_staff_id bigint null,
+  assigned_staff_name text null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -340,6 +377,74 @@ alter table if exists public.scheduled_jobs
 
 alter table if exists public.scheduled_jobs
   add column if not exists finish_time time null;
+
+alter table if exists public.scheduled_jobs
+  add column if not exists source_quote_id text null references public.quotes(id) on delete set null;
+
+alter table if exists public.scheduled_jobs
+  add column if not exists work_type text null;
+
+alter table if exists public.scheduled_jobs
+  add column if not exists estimated_duration_minutes integer null;
+
+alter table if exists public.scheduled_jobs
+  add column if not exists postcode text null;
+
+alter table if exists public.scheduled_jobs
+  add column if not exists auto_scheduled boolean not null default false;
+
+alter table if exists public.scheduled_jobs
+  add column if not exists auto_schedule_reason text null;
+
+alter table if exists public.scheduled_jobs
+  add column if not exists auto_schedule_reason_label text null;
+
+alter table if exists public.scheduled_jobs
+  add column if not exists assigned_staff_id bigint null;
+
+alter table if exists public.scheduled_jobs
+  add column if not exists assigned_staff_name text null;
+
+create table if not exists public.scheduling_recommendations (
+  id text primary key,
+  quote_id text not null references public.quotes(id) on delete cascade,
+  quote_number text not null,
+  customer_id bigint references public.customers(id) on delete set null,
+  customer_name text not null,
+  slot jsonb not null,
+  reason text not null,
+  reason_label text not null,
+  work_type text null,
+  estimated_duration_minutes integer not null,
+  postcode text null,
+  rejected_candidates jsonb not null default '[]'::jsonb,
+  status text not null default 'pending' check (status in ('pending', 'accepted', 'rejected')),
+  created_at timestamptz not null default now(),
+  decided_at timestamptz null
+);
+
+create table if not exists public.scheduling_audit_logs (
+  id text primary key,
+  quote_id text not null references public.quotes(id) on delete cascade,
+  quote_number text not null,
+  customer_id bigint references public.customers(id) on delete set null,
+  customer_name text not null,
+  chosen_date date null,
+  start_time time null,
+  finish_time time null,
+  estimated_duration_minutes integer null,
+  work_type text null,
+  postcode text null,
+  reason text not null,
+  reason_label text not null,
+  rejected_candidates jsonb not null default '[]'::jsonb,
+  status text not null,
+  customer_email_sent boolean not null default false,
+  operator_email_sent boolean not null default false,
+  customer_email_error text null,
+  operator_email_error text null,
+  created_at timestamptz not null default now()
+);
 
 create table if not exists public.items (
   id text primary key,
@@ -363,6 +468,10 @@ create index if not exists recurring_invoice_templates_customer_id_idx on public
 create index if not exists recurring_invoice_templates_next_send_date_idx on public.recurring_invoice_templates(next_send_date asc);
 create index if not exists scheduled_jobs_customer_id_idx on public.scheduled_jobs(customer_id);
 create index if not exists scheduled_jobs_date_idx on public.scheduled_jobs(date asc);
+create index if not exists scheduled_jobs_source_quote_id_idx on public.scheduled_jobs(source_quote_id);
+create index if not exists scheduled_jobs_assigned_staff_id_idx on public.scheduled_jobs(assigned_staff_id);
+create index if not exists scheduling_recommendations_quote_id_idx on public.scheduling_recommendations(quote_id);
+create index if not exists scheduling_audit_logs_quote_id_idx on public.scheduling_audit_logs(quote_id);
 create index if not exists items_category_idx on public.items(category);
 create unique index if not exists items_unique_catalog_idx
 on public.items (lower(title), lower(coalesce(category, '')), item_type);
@@ -372,12 +481,16 @@ grant select, insert, update, delete on table public.quotes to authenticated;
 grant select, insert, update, delete on table public.invoices to authenticated;
 grant select, insert, update, delete on table public.recurring_invoice_templates to authenticated;
 grant select, insert, update, delete on table public.scheduled_jobs to authenticated;
+grant select, insert, update, delete on table public.scheduling_recommendations to authenticated;
+grant select, insert, update, delete on table public.scheduling_audit_logs to authenticated;
 grant select, insert, update, delete on table public.items to authenticated;
 
 alter table public.quotes enable row level security;
 alter table public.invoices enable row level security;
 alter table public.recurring_invoice_templates enable row level security;
 alter table public.scheduled_jobs enable row level security;
+alter table public.scheduling_recommendations enable row level security;
+alter table public.scheduling_audit_logs enable row level security;
 alter table public.items enable row level security;
 
 drop policy if exists "Authenticated users can read quotes" on public.quotes;
@@ -492,6 +605,64 @@ with check (true);
 drop policy if exists "Authenticated users can delete scheduled jobs" on public.scheduled_jobs;
 create policy "Authenticated users can delete scheduled jobs"
 on public.scheduled_jobs
+for delete
+to authenticated
+using (true);
+
+drop policy if exists "Authenticated users can read scheduling recommendations" on public.scheduling_recommendations;
+create policy "Authenticated users can read scheduling recommendations"
+on public.scheduling_recommendations
+for select
+to authenticated
+using (true);
+
+drop policy if exists "Authenticated users can insert scheduling recommendations" on public.scheduling_recommendations;
+create policy "Authenticated users can insert scheduling recommendations"
+on public.scheduling_recommendations
+for insert
+to authenticated
+with check (true);
+
+drop policy if exists "Authenticated users can update scheduling recommendations" on public.scheduling_recommendations;
+create policy "Authenticated users can update scheduling recommendations"
+on public.scheduling_recommendations
+for update
+to authenticated
+using (true)
+with check (true);
+
+drop policy if exists "Authenticated users can delete scheduling recommendations" on public.scheduling_recommendations;
+create policy "Authenticated users can delete scheduling recommendations"
+on public.scheduling_recommendations
+for delete
+to authenticated
+using (true);
+
+drop policy if exists "Authenticated users can read scheduling audit logs" on public.scheduling_audit_logs;
+create policy "Authenticated users can read scheduling audit logs"
+on public.scheduling_audit_logs
+for select
+to authenticated
+using (true);
+
+drop policy if exists "Authenticated users can insert scheduling audit logs" on public.scheduling_audit_logs;
+create policy "Authenticated users can insert scheduling audit logs"
+on public.scheduling_audit_logs
+for insert
+to authenticated
+with check (true);
+
+drop policy if exists "Authenticated users can update scheduling audit logs" on public.scheduling_audit_logs;
+create policy "Authenticated users can update scheduling audit logs"
+on public.scheduling_audit_logs
+for update
+to authenticated
+using (true)
+with check (true);
+
+drop policy if exists "Authenticated users can delete scheduling audit logs" on public.scheduling_audit_logs;
+create policy "Authenticated users can delete scheduling audit logs"
+on public.scheduling_audit_logs
 for delete
 to authenticated
 using (true);

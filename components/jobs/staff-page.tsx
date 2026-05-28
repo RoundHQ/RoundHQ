@@ -123,8 +123,10 @@ export default function StaffPage({
     );
   }, [rolePermissions]);
 
-  const assignedCustomerCount = useMemo(() => {
-    return customers.filter((customer) => customer.assignedStaffId != null).length;
+  const assignedRoundCount = useMemo(() => {
+    return customers.filter(
+      (customer) => customer.isGrassCuttingCustomer && customer.assignedStaffId != null
+    ).length;
   }, [customers]);
 
   const activeStaffCount = useMemo(() => {
@@ -175,8 +177,11 @@ export default function StaffPage({
     return permissionLookup.get(`${role}:${pageKey}`) ?? false;
   }
 
-  function getStaffMemberAssignedCustomers(staffMemberId: number) {
-    return customers.filter((customer) => customer.assignedStaffId === staffMemberId).length;
+  function getStaffMemberAssignedRounds(staffMemberId: number) {
+    return customers.filter(
+      (customer) =>
+        customer.isGrassCuttingCustomer && customer.assignedStaffId === staffMemberId
+    ).length;
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -402,9 +407,9 @@ export default function StaffPage({
               </span>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                  Assigned Customers
+                  Assigned Rounds
                 </p>
-                <p className="text-2xl font-black text-slate-900">{assignedCustomerCount}</p>
+                <p className="text-2xl font-black text-slate-900">{assignedRoundCount}</p>
               </div>
             </div>
           </div>
@@ -483,9 +488,9 @@ export default function StaffPage({
                           {staffMember.phone ? <p>{staffMember.phone}</p> : null}
                           {staffMember.notes ? <p>{staffMember.notes}</p> : null}
                           <p>
-                            {getStaffMemberAssignedCustomers(staffMember.id)} assigned
-                            customer
-                            {getStaffMemberAssignedCustomers(staffMember.id) === 1 ? "" : "s"}
+                            {getStaffMemberAssignedRounds(staffMember.id)} assigned
+                            round
+                            {getStaffMemberAssignedRounds(staffMember.id) === 1 ? "" : "s"}
                           </p>
                         </div>
                       </div>

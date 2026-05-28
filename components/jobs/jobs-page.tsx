@@ -3,7 +3,7 @@
 import { ArrowRight, Calendar, FileText, Receipt, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { getCustomerDisplayAddress } from "./helpers";
-import type { Customer } from "./types";
+import type { Customer, StaffMember } from "./types";
 
 type ScheduledJobType =
     | "One Off"
@@ -30,6 +30,8 @@ type ScheduledJob = {
     status: ScheduledJobStatus;
     quoteIds?: string[];
     invoiceIds?: string[];
+    assignedStaffId?: number | null;
+    assignedStaffName?: string;
     createdAt: string;
 };
 
@@ -55,6 +57,7 @@ type Props = {
     customers: Customer[];
     quotes: Quote[];
     invoices: Invoice[];
+    staffMembers?: StaffMember[];
     allowCommercialTools?: boolean;
     onOpenJob: (jobId: string) => void;
     onOpenCustomer: (customerId: number) => void;
@@ -168,6 +171,7 @@ export default function JobsPage({
     customers,
     quotes,
     invoices,
+    staffMembers = [],
     allowCommercialTools = true,
     onOpenJob,
     onOpenCustomer,
@@ -201,6 +205,14 @@ export default function JobsPage({
         }
         return lookup;
     }, [invoices]);
+
+    const staffNameById = useMemo(() => {
+        const lookup = new Map<number, string>();
+        for (const staffMember of staffMembers) {
+            lookup.set(staffMember.id, staffMember.fullName);
+        }
+        return lookup;
+    }, [staffMembers]);
 
     const jobRows = useMemo(() => {
         return jobs
@@ -248,6 +260,12 @@ export default function JobsPage({
                     typeof job.customerName === "string" && job.customerName.trim()
                         ? job.customerName.trim()
                         : "";
+                const assignedStaffName =
+                    job.assignedStaffId != null
+                        ? staffNameById.get(job.assignedStaffId) ??
+                          job.assignedStaffName ??
+                          "Unknown staff member"
+                        : job.assignedStaffName ?? "";
                 const sortDate =
                     typeof job.date === "string" && job.date.trim() ? job.date.trim() : "";
 
@@ -259,6 +277,7 @@ export default function JobsPage({
                     displayTitle: title,
                     displayNotes: notes,
                     displayCustomerName: customerName,
+                    assignedStaffName,
                     sortDate,
                     sortTitle: title.toLowerCase(),
                     searchableText: [
@@ -266,6 +285,7 @@ export default function JobsPage({
                         notes,
                         customerName,
                         customer?.name,
+                        assignedStaffName,
                         customer ? getCustomerDisplayAddress(customer) : "",
                         ...relatedQuotes.map((quote) => quote.quoteNumber),
                         ...relatedInvoices.map((invoice) => invoice.invoiceNumber),
@@ -278,7 +298,7 @@ export default function JobsPage({
                         .toLowerCase(),
                 };
             });
-    }, [customerLookup, invoices, invoiceLookup, jobs, quoteLookup]);
+    }, [customerLookup, invoices, invoiceLookup, jobs, quoteLookup, staffNameById]);
 
     const rows = useMemo(() => {
         return jobRows
@@ -317,7 +337,7 @@ export default function JobsPage({
         return {
             total: jobRows.length,
             upcoming: jobRows.filter((entry) => entry.sortDate >= todayKey).length,
-            withCustomer: jobRows.filter((entry) => entry.job.customerId != null).length,
+            assignedStaff: jobRows.filter((entry) => entry.assignedStaffName).length,
             withDocuments: jobRows.filter(
                 (entry) =>
                     entry.relatedQuotes.length > 0 || entry.relatedInvoices.length > 0
@@ -349,8 +369,8 @@ export default function JobsPage({
                             <p className="mt-2 text-2xl font-black">{stats.upcoming}</p>
                         </div>
                         <div className="rounded-2xl bg-white/10 px-4 py-3">
-                            <p className="text-xs uppercase tracking-wide text-white/55">Assigned</p>
-                            <p className="mt-2 text-2xl font-black">{stats.withCustomer}</p>
+                            <p className="text-xs uppercase tracking-wide text-white/55">Assigned Staff</p>
+                            <p className="mt-2 text-2xl font-black">{stats.assignedStaff}</p>
                         </div>
                         <div className="rounded-2xl bg-white/10 px-4 py-3">
                             <p className="text-xs uppercase tracking-wide text-white/55">With Docs</p>
@@ -430,6 +450,7 @@ export default function JobsPage({
                                 <th className="px-4 py-3">Job</th>
                                 <th className="px-4 py-3">Date</th>
                                 <th className="px-4 py-3">Customer</th>
+                                <th className="px-4 py-3">Assigned Staff</th>
                                 <th className="px-4 py-3">Status</th>
                                 <th className="px-4 py-3">Related Documents</th>
                                 <th className="px-4 py-3 text-right">Actions</th>
@@ -440,7 +461,7 @@ export default function JobsPage({
                             {rows.length === 0 ? (
                                 <tr>
                                     <td
-                                        colSpan={6}
+                                        colSpan={7}
                                         className="px-4 py-10 text-center text-sm text-slate-500"
                                     >
                                         No jobs match the current filters.
@@ -456,6 +477,7 @@ export default function JobsPage({
                                         displayTitle,
                                         displayNotes,
                                         displayCustomerName,
+                                        assignedStaffName,
                                         sortDate,
                                     }) => (
                                     <tr key={job.id} className="border-t border-slate-100">
@@ -518,6 +540,12 @@ export default function JobsPage({
                                                     </p>
                                                 </div>
                                             )}
+                                        </td>
+
+                                        <td className="px-4 py-4 text-sm text-slate-600">
+                                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+                                                {assignedStaffName || "Unassigned"}
+                                            </span>
                                         </td>
 
                                         <td className="px-4 py-4">

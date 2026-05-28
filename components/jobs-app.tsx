@@ -106,6 +106,22 @@ import {
 import {
   sendCustomerEmailMessage,
 } from "@/components/jobs/document-delivery";
+import {
+  DEFAULT_AUTO_SCHEDULING_SETTINGS,
+  buildSchedulingEmailDrafts,
+  chooseSchedulingSlot,
+  normalizeAutoSchedulingSettings,
+  normalizeQuoteAutoSchedulingPreference,
+  normalizeQuoteWorkType,
+  normalizeServiceRoundSchedulingPreference,
+  type AutoSchedulingSettings,
+  type QuoteAutoSchedulingPreference,
+  type QuoteWorkType,
+  type RejectedSchedulingCandidate,
+  type SchedulingDecision,
+  type SchedulingSlot,
+  type ServiceRoundSchedulingPreference,
+} from "@/lib/scheduling/quote-scheduler";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import {
   COMMERCIAL_RAMS_SELECT_FIELDS,
@@ -236,6 +252,7 @@ type AppSettings = {
   editInactivityMinutes: number;
   editInactiveAction: EditInactiveAction;
   helpEnabled: boolean;
+  autoScheduling: AutoSchedulingSettings;
 
   defaultGrassCutPrice: number;
   defaultHedgeCutPrice: number;
@@ -416,6 +433,18 @@ type Quote = {
   items: LineItem[];
   notes?: string;
   total: number;
+  workType?: QuoteWorkType;
+  estimatedDurationMinutes?: number;
+  autoSchedulingPreference?: QuoteAutoSchedulingPreference;
+  autoSchedulingDisabled?: boolean;
+  serviceRoundSchedulingPreference?: ServiceRoundSchedulingPreference;
+  autoScheduledJobId?: string;
+  schedulingStatus?:
+      | "not_required"
+      | "suggested"
+      | "scheduled"
+      | "manual_required"
+      | "skipped";
 };
 
 type Invoice = {
@@ -475,6 +504,56 @@ type ScheduledJob = {
   status: ScheduledJobStatus;
   quoteIds?: string[];
   invoiceIds?: string[];
+  sourceQuoteId?: string;
+  workType?: QuoteWorkType;
+  estimatedDurationMinutes?: number;
+  postcode?: string;
+  autoScheduled?: boolean;
+  autoScheduleReason?: string;
+  autoScheduleReasonLabel?: string;
+  assignedStaffId?: number | null;
+  assignedStaffName?: string;
+  createdAt: string;
+};
+
+type SchedulingRecommendationRecord = {
+  id: string;
+  quoteId: string;
+  quoteNumber: string;
+  customerId: number | null;
+  customerName: string;
+  slot: SchedulingSlot;
+  reason: SchedulingDecision["reason"];
+  reasonLabel: string;
+  workType?: QuoteWorkType;
+  estimatedDurationMinutes: number;
+  postcode?: string;
+  rejectedCandidates: RejectedSchedulingCandidate[];
+  status: "pending" | "accepted" | "rejected";
+  createdAt: string;
+  decidedAt?: string;
+};
+
+type SchedulingAuditLog = {
+  id: string;
+  quoteId: string;
+  quoteNumber: string;
+  customerId: number | null;
+  customerName: string;
+  chosenDate?: string;
+  startTime?: string;
+  finishTime?: string;
+  estimatedDurationMinutes: number | null;
+  workType?: QuoteWorkType;
+  postcode?: string;
+  reason: SchedulingDecision["reason"];
+  reasonLabel: string;
+  rejectedCandidates: RejectedSchedulingCandidate[];
+  status: SchedulingDecision["status"];
+  customerEmailSent: boolean;
+  operatorEmailSent: boolean;
+  customerEmailError?: string;
+  operatorEmailError?: string;
   createdAt: string;
 };
 
@@ -495,6 +574,7 @@ type PendingQuoteSchedule = {
   scheduledDate?: string;
   startTime?: string;
   finishTime?: string;
+  assignedStaffId?: number | null;
   hasExistingJob: boolean;
 };
 
@@ -531,6 +611,8 @@ type PersistedAppState = {
   ignoredMoveSuggestionIds: string[];
   routeChangeHistory: RouteChangeRecord[];
   routeNotes: Record<string, string>;
+  schedulingRecommendations: SchedulingRecommendationRecord[];
+  schedulingAuditLogs: SchedulingAuditLog[];
   quotes: Quote[];
   invoices: Invoice[];
   expenseSuppliers: ExpenseSupplier[];
@@ -648,6 +730,13 @@ type QuoteRow = {
   items: LineItem[] | null;
   notes: string | null;
   total: number | null;
+  work_type?: string | null;
+  estimated_duration_minutes?: number | null;
+  auto_scheduling_preference?: string | null;
+  auto_scheduling_disabled?: boolean | null;
+  service_round_scheduling_preference?: string | null;
+  auto_scheduled_job_id?: string | null;
+  scheduling_status?: string | null;
   created_at: string | null;
 };
 
@@ -669,6 +758,13 @@ type QuoteWriteRow = {
   items: LineItem[];
   notes: string | null;
   total: number;
+  work_type?: QuoteWorkType | null;
+  estimated_duration_minutes?: number | null;
+  auto_scheduling_preference?: QuoteAutoSchedulingPreference | null;
+  auto_scheduling_disabled?: boolean;
+  service_round_scheduling_preference?: ServiceRoundSchedulingPreference | null;
+  auto_scheduled_job_id?: string | null;
+  scheduling_status?: Quote["schedulingStatus"] | null;
 };
 
 type InvoiceRow = {
@@ -803,6 +899,15 @@ type ScheduledJobRow = {
   status: string;
   quote_ids: string[] | null;
   invoice_ids: string[] | null;
+  source_quote_id?: string | null;
+  work_type?: string | null;
+  estimated_duration_minutes?: number | null;
+  postcode?: string | null;
+  auto_scheduled?: boolean | null;
+  auto_schedule_reason?: string | null;
+  auto_schedule_reason_label?: string | null;
+  assigned_staff_id?: number | null;
+  assigned_staff_name?: string | null;
   created_at: string | null;
 };
 
@@ -819,6 +924,15 @@ type ScheduledJobWriteRow = {
   status: ScheduledJobStatus;
   quote_ids: string[];
   invoice_ids: string[];
+  source_quote_id?: string | null;
+  work_type?: QuoteWorkType | null;
+  estimated_duration_minutes?: number | null;
+  postcode?: string | null;
+  auto_scheduled?: boolean;
+  auto_schedule_reason?: string | null;
+  auto_schedule_reason_label?: string | null;
+  assigned_staff_id?: number | null;
+  assigned_staff_name?: string | null;
   created_at: string;
 };
 
@@ -839,7 +953,7 @@ type MonthlyPaymentWriteRow = {
 
 const CUSTOMER_SELECT_FIELDS = "*";
 const QUOTE_SELECT_FIELDS =
-    "id,quote_number,customer_id,customer_name,customer_type,customer_address,customer_town,customer_postcode,site_name,site_address,site_town,site_postcode,date,status,items,notes,total,created_at";
+    "id,quote_number,customer_id,customer_name,customer_type,customer_address,customer_town,customer_postcode,site_name,site_address,site_town,site_postcode,date,status,items,notes,total,work_type,estimated_duration_minutes,auto_scheduling_preference,auto_scheduling_disabled,service_round_scheduling_preference,auto_scheduled_job_id,scheduling_status,created_at";
 const INVOICE_SELECT_FIELDS =
     "id,invoice_number,customer_id,customer_name,customer_type,customer_address,customer_town,customer_postcode,site_name,site_address,site_town,site_postcode,date,due_date,status,items,notes,terms,vat_rate,vat_amount,total,linked_quote_id,stripe_checkout_session_id,stripe_payment_link_url,stripe_payment_status,stripe_payment_intent_id,stripe_payment_completed_at,created_at";
 const RECURRING_INVOICE_TEMPLATE_SELECT_FIELDS = "*";
@@ -886,6 +1000,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   editInactivityMinutes: 5,
   editInactiveAction: "notify",
   helpEnabled: true,
+  autoScheduling: DEFAULT_AUTO_SCHEDULING_SETTINGS,
 
   defaultGrassCutPrice: 15,
   defaultHedgeCutPrice: 40,
@@ -1163,6 +1278,7 @@ function mergeAppSettings(value?: Partial<AppSettings> | null): AppSettings {
     ),
     editInactiveAction: normalizeEditInactiveAction(value?.editInactiveAction),
     helpEnabled: value?.helpEnabled !== false,
+    autoScheduling: normalizeAutoSchedulingSettings(value?.autoScheduling),
     stripeConnectedAccountId:
         typeof value?.stripeConnectedAccountId === "string"
             ? value.stripeConnectedAccountId
@@ -1834,6 +1950,8 @@ const DEFAULT_PERSISTED_APP_STATE: PersistedAppState = {
   ignoredMoveSuggestionIds: [],
   routeChangeHistory: [],
   routeNotes: {},
+  schedulingRecommendations: [],
+  schedulingAuditLogs: [],
   quotes: [],
   invoices: [],
   expenseSuppliers: [],
@@ -2380,6 +2498,18 @@ function normalizePersistedAppState(value: unknown): PersistedAppState {
               .map(([key, entry]) => [key, String(entry)])
       )
       : {};
+  const schedulingRecommendations = Array.isArray(state.schedulingRecommendations)
+      ? state.schedulingRecommendations
+            .map(normalizeSchedulingRecommendationRecord)
+            .filter(
+                (entry): entry is SchedulingRecommendationRecord => Boolean(entry)
+            )
+      : [];
+  const schedulingAuditLogs = Array.isArray(state.schedulingAuditLogs)
+      ? state.schedulingAuditLogs
+            .map(normalizeSchedulingAuditLog)
+            .filter((entry): entry is SchedulingAuditLog => Boolean(entry))
+      : [];
 
   return {
     version: 1,
@@ -2396,6 +2526,8 @@ function normalizePersistedAppState(value: unknown): PersistedAppState {
     ignoredMoveSuggestionIds,
     routeChangeHistory,
     routeNotes,
+    schedulingRecommendations,
+    schedulingAuditLogs,
     quotes: Array.isArray(state.quotes) ? (state.quotes as Quote[]) : [],
     invoices: Array.isArray(state.invoices)
         ? sortInvoices(state.invoices as Invoice[])
@@ -2928,6 +3060,179 @@ function normalizeStringList(value: unknown) {
       .filter(Boolean);
 }
 
+function normalizeQuoteSchedulingStatus(
+    value: unknown
+): Quote["schedulingStatus"] | undefined {
+  return value === "not_required" ||
+      value === "suggested" ||
+      value === "scheduled" ||
+      value === "manual_required" ||
+      value === "skipped"
+      ? value
+      : undefined;
+}
+
+function normalizeEstimatedDurationMinutes(value: unknown) {
+  const numericValue = typeof value === "number" ? value : Number(value);
+
+  if (!Number.isFinite(numericValue) || numericValue <= 0) {
+    return undefined;
+  }
+
+  return Math.min(24 * 60, Math.max(1, Math.round(numericValue)));
+}
+
+function normalizeRejectedSchedulingCandidates(
+    value: unknown
+): RejectedSchedulingCandidate[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+      .map((entry): RejectedSchedulingCandidate | null => {
+        if (!isRecord(entry) || typeof entry.date !== "string") {
+          return null;
+        }
+
+        return {
+          date: entry.date,
+          startTime:
+              typeof entry.startTime === "string" ? entry.startTime : undefined,
+          reason: typeof entry.reason === "string" ? entry.reason : "rejected",
+        };
+      })
+      .filter((entry): entry is RejectedSchedulingCandidate => Boolean(entry))
+      .slice(0, 80);
+}
+
+function normalizeSchedulingSlot(value: unknown): SchedulingSlot | null {
+  if (
+      !isRecord(value) ||
+      typeof value.date !== "string" ||
+      typeof value.startTime !== "string" ||
+      typeof value.finishTime !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    date: value.date,
+    startTime: value.startTime,
+    finishTime: value.finishTime,
+  };
+}
+
+function normalizeSchedulingRecommendationRecord(
+    value: unknown
+): SchedulingRecommendationRecord | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const id = normalizeUnknownText(value.id);
+  const quoteId = normalizeUnknownText(value.quoteId);
+  const quoteNumber = normalizeUnknownText(value.quoteNumber);
+  const customerName = normalizeUnknownText(value.customerName);
+  const slot = normalizeSchedulingSlot(value.slot);
+  const estimatedDurationMinutes = normalizeEstimatedDurationMinutes(
+      value.estimatedDurationMinutes
+  );
+
+  if (!id || !quoteId || !quoteNumber || !customerName || !slot || !estimatedDurationMinutes) {
+    return null;
+  }
+
+  const status =
+      value.status === "accepted" || value.status === "rejected"
+          ? value.status
+          : "pending";
+
+  return {
+    id,
+    quoteId,
+    quoteNumber,
+    customerId: normalizeUnknownNumber(value.customerId),
+    customerName,
+    slot,
+    reason:
+        typeof value.reason === "string"
+            ? (value.reason as SchedulingDecision["reason"])
+            : "next_available",
+    reasonLabel:
+        normalizeUnknownText(value.reasonLabel) ?? "next available slot",
+    workType:
+        typeof value.workType === "string"
+            ? normalizeQuoteWorkType(value.workType)
+            : undefined,
+    estimatedDurationMinutes,
+    postcode: normalizeUnknownText(value.postcode),
+    rejectedCandidates: normalizeRejectedSchedulingCandidates(
+        value.rejectedCandidates
+    ),
+    status,
+    createdAt: normalizeUnknownText(value.createdAt) ?? new Date().toISOString(),
+    decidedAt: normalizeUnknownText(value.decidedAt),
+  };
+}
+
+function normalizeSchedulingAuditLog(value: unknown): SchedulingAuditLog | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const id = normalizeUnknownText(value.id);
+  const quoteId = normalizeUnknownText(value.quoteId);
+  const quoteNumber = normalizeUnknownText(value.quoteNumber);
+  const customerName = normalizeUnknownText(value.customerName);
+
+  if (!id || !quoteId || !quoteNumber || !customerName) {
+    return null;
+  }
+
+  const status =
+      value.status === "scheduled" ||
+      value.status === "suggested" ||
+      value.status === "manual_required" ||
+      value.status === "skipped"
+          ? value.status
+          : "manual_required";
+
+  return {
+    id,
+    quoteId,
+    quoteNumber,
+    customerId: normalizeUnknownNumber(value.customerId),
+    customerName,
+    chosenDate: normalizeUnknownText(value.chosenDate),
+    startTime: normalizeUnknownText(value.startTime),
+    finishTime: normalizeUnknownText(value.finishTime),
+    estimatedDurationMinutes: normalizeEstimatedDurationMinutes(
+        value.estimatedDurationMinutes
+    ) ?? null,
+    workType:
+        typeof value.workType === "string"
+            ? normalizeQuoteWorkType(value.workType)
+            : undefined,
+    postcode: normalizeUnknownText(value.postcode),
+    reason:
+        typeof value.reason === "string"
+            ? (value.reason as SchedulingDecision["reason"])
+            : "no_available_slot",
+    reasonLabel:
+        normalizeUnknownText(value.reasonLabel) ?? "needs manual scheduling",
+    rejectedCandidates: normalizeRejectedSchedulingCandidates(
+        value.rejectedCandidates
+    ),
+    status,
+    customerEmailSent: value.customerEmailSent === true,
+    operatorEmailSent: value.operatorEmailSent === true,
+    customerEmailError: normalizeUnknownText(value.customerEmailError),
+    operatorEmailError: normalizeUnknownText(value.operatorEmailError),
+    createdAt: normalizeUnknownText(value.createdAt) ?? new Date().toISOString(),
+  };
+}
+
 function normalizeDocumentCustomerFields(
     fields: DocumentCustomerFields
 ): DocumentCustomerFields {
@@ -3015,6 +3320,20 @@ function normalizePersistedScheduledJob(
     ),
     quoteIds: normalizeStringList(value.quoteIds),
     invoiceIds: normalizeStringList(value.invoiceIds),
+    sourceQuoteId: normalizeUnknownText(value.sourceQuoteId),
+    workType:
+        typeof value.workType === "string"
+            ? normalizeQuoteWorkType(value.workType)
+            : undefined,
+    estimatedDurationMinutes: normalizeEstimatedDurationMinutes(
+        value.estimatedDurationMinutes
+    ),
+    postcode: normalizeUnknownText(value.postcode),
+    autoScheduled: value.autoScheduled === true,
+    autoScheduleReason: normalizeUnknownText(value.autoScheduleReason),
+    autoScheduleReasonLabel: normalizeUnknownText(value.autoScheduleReasonLabel),
+    assignedStaffId: normalizeUnknownNumber(value.assignedStaffId),
+    assignedStaffName: normalizeUnknownText(value.assignedStaffName),
     createdAt,
   };
 }
@@ -3038,6 +3357,22 @@ function mapQuoteRowToQuote(row: QuoteRow): Quote {
     items: Array.isArray(row.items) ? row.items : [],
     notes: row.notes ?? undefined,
     total: Number(row.total ?? 0),
+    workType:
+        typeof row.work_type === "string"
+            ? normalizeQuoteWorkType(row.work_type)
+            : undefined,
+    estimatedDurationMinutes: normalizeEstimatedDurationMinutes(
+        row.estimated_duration_minutes
+    ),
+    autoSchedulingPreference: normalizeQuoteAutoSchedulingPreference(
+        row.auto_scheduling_preference
+    ),
+    autoSchedulingDisabled: row.auto_scheduling_disabled === true,
+    serviceRoundSchedulingPreference: normalizeServiceRoundSchedulingPreference(
+        row.service_round_scheduling_preference
+    ),
+    autoScheduledJobId: normalizeOptionalText(row.auto_scheduled_job_id ?? null),
+    schedulingStatus: normalizeQuoteSchedulingStatus(row.scheduling_status),
   };
 }
 
@@ -3062,6 +3397,14 @@ function mapQuoteToRow(quote: Quote): QuoteWriteRow {
     items: quote.items,
     notes: quote.notes?.trim() || null,
     total: Number(quote.total ?? 0),
+    work_type: quote.workType ?? null,
+    estimated_duration_minutes: quote.estimatedDurationMinutes ?? null,
+    auto_scheduling_preference: quote.autoSchedulingPreference ?? "default",
+    auto_scheduling_disabled: quote.autoSchedulingDisabled === true,
+    service_round_scheduling_preference:
+        quote.serviceRoundSchedulingPreference ?? "default",
+    auto_scheduled_job_id: quote.autoScheduledJobId ?? null,
+    scheduling_status: quote.schedulingStatus ?? null,
   };
 }
 
@@ -3249,6 +3592,22 @@ function mapScheduledJobRowToScheduledJob(row: ScheduledJobRow): ScheduledJob {
     status: normalizeScheduledJobStatus(row.status),
     quoteIds: Array.isArray(row.quote_ids) ? row.quote_ids : [],
     invoiceIds: Array.isArray(row.invoice_ids) ? row.invoice_ids : [],
+    sourceQuoteId: normalizeOptionalText(row.source_quote_id ?? null),
+    workType:
+        typeof row.work_type === "string"
+            ? normalizeQuoteWorkType(row.work_type)
+            : undefined,
+    estimatedDurationMinutes: normalizeEstimatedDurationMinutes(
+        row.estimated_duration_minutes
+    ),
+    postcode: normalizeOptionalText(row.postcode ?? null),
+    autoScheduled: row.auto_scheduled === true,
+    autoScheduleReason: normalizeOptionalText(row.auto_schedule_reason ?? null),
+    autoScheduleReasonLabel: normalizeOptionalText(
+        row.auto_schedule_reason_label ?? null
+    ),
+    assignedStaffId: row.assigned_staff_id ?? null,
+    assignedStaffName: normalizeOptionalText(row.assigned_staff_name ?? null),
     createdAt: row.created_at ?? new Date().toISOString(),
   };
 }
@@ -3267,6 +3626,15 @@ function mapScheduledJobToRow(job: ScheduledJob): ScheduledJobWriteRow {
     status: job.status,
     quote_ids: job.quoteIds ?? [],
     invoice_ids: job.invoiceIds ?? [],
+    source_quote_id: job.sourceQuoteId ?? null,
+    work_type: job.workType ?? null,
+    estimated_duration_minutes: job.estimatedDurationMinutes ?? null,
+    postcode: job.postcode ?? null,
+    auto_scheduled: job.autoScheduled === true,
+    auto_schedule_reason: job.autoScheduleReason ?? null,
+    auto_schedule_reason_label: job.autoScheduleReasonLabel ?? null,
+    assigned_staff_id: job.assignedStaffId ?? null,
+    assigned_staff_name: job.assignedStaffName?.trim() || null,
     created_at: job.createdAt,
   };
 
@@ -3470,6 +3838,8 @@ function ScheduledJobProfileSection({
                                       job,
                                       checklist,
                                       customers,
+                                      staffMembers,
+                                      defaultAssignedStaffId,
                                       quotes,
                                       invoices,
                                       onBack,
@@ -3485,6 +3855,8 @@ function ScheduledJobProfileSection({
   job: ScheduledJob;
   checklist: ScheduledJobChecklistState;
   customers: Customer[];
+  staffMembers: StaffMember[];
+  defaultAssignedStaffId: number | null;
   quotes: Quote[];
   invoices: Invoice[];
   onBack: () => void;
@@ -3521,6 +3893,13 @@ function ScheduledJobProfileSection({
   const [draftCustomerName, setDraftCustomerName] = useState(
       job.customerName ?? ""
   );
+  const [draftAssignedStaffId, setDraftAssignedStaffId] = useState(
+      job.assignedStaffId != null
+          ? String(job.assignedStaffId)
+          : defaultAssignedStaffId != null
+            ? String(defaultAssignedStaffId)
+            : ""
+  );
   const [draftNotes, setDraftNotes] = useState(job.notes ?? "");
 
   useEffect(() => {
@@ -3531,8 +3910,17 @@ function ScheduledJobProfileSection({
     setDraftType(job.type);
     setDraftCustomerId(job.customerId != null ? String(job.customerId) : "");
     setDraftCustomerName(job.customerName ?? "");
+    setDraftAssignedStaffId(
+        job.assignedStaffId != null
+            ? String(job.assignedStaffId)
+            : defaultAssignedStaffId != null
+              ? String(defaultAssignedStaffId)
+              : ""
+    );
     setDraftNotes(job.notes ?? "");
   }, [
+    defaultAssignedStaffId,
+    job.assignedStaffId,
     job.customerId,
     job.customerName,
     job.date,
@@ -3599,6 +3987,14 @@ function ScheduledJobProfileSection({
               ? `Finishes ${formatSingleTime(job.finishTime)}`
               : null;
   const linkedCustomerAddress = linkedCustomer ? getCustomerDisplayAddress(linkedCustomer) : "";
+  const activeStaffMembers = staffMembers.filter((staffMember) => staffMember.isActive);
+  const assignedStaff =
+      job.assignedStaffId != null
+          ? staffMembers.find((staffMember) => staffMember.id === job.assignedStaffId) ??
+            null
+          : null;
+  const assignedStaffName =
+      assignedStaff?.fullName ?? job.assignedStaffName ?? "Unassigned";
   const linkedCustomerHasCoordinates =
       typeof linkedCustomer?.latitude === "number" &&
       !Number.isNaN(linkedCustomer.latitude) &&
@@ -3780,6 +4176,13 @@ function ScheduledJobProfileSection({
     setDraftType(job.type);
     setDraftCustomerId(job.customerId != null ? String(job.customerId) : "");
     setDraftCustomerName(job.customerName ?? "");
+    setDraftAssignedStaffId(
+        job.assignedStaffId != null
+            ? String(job.assignedStaffId)
+            : defaultAssignedStaffId != null
+              ? String(defaultAssignedStaffId)
+              : ""
+    );
     setDraftNotes(job.notes ?? "");
     setIsEditing(false);
   }
@@ -3818,6 +4221,12 @@ function ScheduledJobProfileSection({
             ? customers.find((customer) => customer.id === Number(draftCustomerId)) ??
               null
             : null;
+    const selectedStaff =
+        draftAssignedStaffId !== ""
+            ? staffMembers.find(
+                (staffMember) => staffMember.id === Number(draftAssignedStaffId)
+              ) ?? null
+            : null;
 
     try {
       setIsSavingDetails(true);
@@ -3832,6 +4241,8 @@ function ScheduledJobProfileSection({
         customerName:
             selectedCustomer?.name ?? (draftCustomerName.trim() || undefined),
         type: draftType,
+        assignedStaffId: selectedStaff?.id ?? null,
+        assignedStaffName: selectedStaff?.fullName,
       });
 
       if (!savedJob) {
@@ -3945,6 +4356,9 @@ function ScheduledJobProfileSection({
                 </span>
                 <span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/90 ring-1 ring-white/10">
                   {jobTimeRange ?? "No time added"}
+                </span>
+                <span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/90 ring-1 ring-white/10">
+                  {assignedStaffName}
                 </span>
                 <span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-white/90 ring-1 ring-white/10">
                   {linkedDocumentCount} linked document{linkedDocumentCount === 1 ? "" : "s"}
@@ -4103,6 +4517,26 @@ function ScheduledJobProfileSection({
                       </label>
                   )}
 
+                  <label className="md:col-span-2">
+                    <span className="mb-2 block text-sm font-medium text-slate-700">
+                      Assigned Staff
+                    </span>
+                    <select
+                        value={draftAssignedStaffId}
+                        onChange={(event) =>
+                            setDraftAssignedStaffId(event.target.value)
+                        }
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
+                    >
+                      <option value="">Unassigned</option>
+                      {activeStaffMembers.map((staffMember) => (
+                          <option key={staffMember.id} value={staffMember.id}>
+                            {staffMember.fullName}
+                          </option>
+                      ))}
+                    </select>
+                  </label>
+
                   <label className="md:col-span-2 xl:col-span-4">
                     <span className="mb-2 block text-sm font-medium text-slate-700">
                       Notes
@@ -4185,8 +4619,7 @@ function ScheduledJobProfileSection({
             </div>
           </div>
 
-          <div className="mt-6 grid items-start gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             <div className="rounded-2xl border border-slate-200 bg-slate-50/90 p-4 shadow-sm">
               <p className="text-xs text-slate-400">Job Type</p>
               <p className="mt-2 font-semibold text-slate-900">
@@ -4197,6 +4630,13 @@ function ScheduledJobProfileSection({
             <div className="rounded-2xl border border-slate-200 bg-slate-50/90 p-4 shadow-sm">
               <p className="text-xs text-slate-400">Status</p>
               <p className="mt-2 font-semibold text-slate-900">{job.status}</p>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/90 p-4 shadow-sm">
+              <p className="text-xs text-slate-400">Assigned Staff</p>
+              <p className="mt-2 font-semibold text-slate-900">
+                {assignedStaffName}
+              </p>
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-slate-50/90 p-4 shadow-sm">
@@ -4215,17 +4655,20 @@ function ScheduledJobProfileSection({
               <p className="text-xs text-slate-400">Linked Invoices</p>
               <p className="mt-2 font-semibold text-slate-900">{relatedInvoices.length}</p>
             </div>
+          </div>
 
-            <div className="rounded-[22px] border border-slate-200 bg-slate-50/80 p-5 shadow-sm md:col-span-2 xl:col-span-3">
+          <div className="mt-6 grid items-start gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(420px,1.05fr)]">
+            <div className="space-y-5">
+            <div className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
               <p className="text-xs text-slate-400">Assigned Customer</p>
               {linkedCustomer ? (
                   <div className="mt-2 space-y-4">
                     <p className="text-xl font-black tracking-tight text-slate-900">{linkedCustomer.name}</p>
                     <p className="text-sm leading-6 text-slate-500">
-                      {getCustomerDisplayAddress(linkedCustomer) || "—"}
+                      {getCustomerDisplayAddress(linkedCustomer) || "-"}
                     </p>
                     <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
                           Phone
                         </p>
@@ -4234,7 +4677,7 @@ function ScheduledJobProfileSection({
                         </p>
                       </div>
 
-                      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
                           Email
                         </p>
@@ -4282,9 +4725,9 @@ function ScheduledJobProfileSection({
               )}
             </div>
 
-            <div className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm md:col-span-2 xl:col-span-2">
+            <div className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
               <p className="text-xs text-slate-400">Job Checklist</p>
-              <div className="mt-3 space-y-3">
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 {checklistItems.map((item) => (
                     <label
                         key={item.key}
@@ -4309,7 +4752,7 @@ function ScheduledJobProfileSection({
               </div>
             </div>
 
-            <div className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm md:col-span-2 xl:col-span-5">
+            <div className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
               <p className="text-xs text-slate-400">Notes</p>
               <p className={`mt-2 text-sm leading-6 ${trimmedJobNotes ? "text-slate-700" : "text-slate-400"}`}>
                 {trimmedJobNotes || "No notes added yet for this scheduled job."}
@@ -4317,7 +4760,7 @@ function ScheduledJobProfileSection({
             </div>
             </div>
 
-            <div className="rounded-[24px] border border-slate-200 bg-slate-50/70 p-5 shadow-sm">
+            <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
@@ -4346,17 +4789,17 @@ function ScheduledJobProfileSection({
                 )}
               </div>
 
-              <div className="mt-5 overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
+              <div className="mt-5 overflow-hidden rounded-[22px] border border-slate-200 bg-slate-50 shadow-sm">
                 {jobMapEmbedUrl ? (
                     <iframe
                         title={`Map for ${job.title}`}
                         src={jobMapEmbedUrl}
                         loading="lazy"
                         allowFullScreen
-                        className="h-[420px] w-full"
+                        className="h-[360px] w-full"
                     />
                 ) : (
-                    <div className="flex h-[420px] items-center justify-center px-6 text-center">
+                    <div className="flex h-[360px] items-center justify-center px-6 text-center">
                       <div className="space-y-3">
                         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-50 text-slate-500 ring-1 ring-slate-200">
                           <MapPin size={20} />
@@ -4773,6 +5216,12 @@ export default function JobsApp({
   const [routeNotes, setRouteNotes] = useState<Record<string, string>>(
       DEFAULT_PERSISTED_APP_STATE.routeNotes
   );
+  const [schedulingRecommendations, setSchedulingRecommendations] = useState<
+      SchedulingRecommendationRecord[]
+  >(DEFAULT_PERSISTED_APP_STATE.schedulingRecommendations);
+  const [schedulingAuditLogs, setSchedulingAuditLogs] = useState<
+      SchedulingAuditLog[]
+  >(DEFAULT_PERSISTED_APP_STATE.schedulingAuditLogs);
   const [quotes, setQuotes] = useState<Quote[]>(DEFAULT_PERSISTED_APP_STATE.quotes);
   const [quotesTableInitialized, setQuotesTableInitialized] = useState(
       DEFAULT_PERSISTED_APP_STATE.quotesTableInitialized
@@ -4922,6 +5371,29 @@ export default function JobsApp({
 
     return Boolean(currentStaffMember.isSystemAdmin) || currentStaffMember.role === "Admin";
   }, [currentStaffMember, staffSystemReady]);
+  const activeStaffMembers = useMemo(
+      () => staffMembers.filter((staffMember) => staffMember.isActive),
+      [staffMembers]
+  );
+  const ownerStaffMember = useMemo(
+      () =>
+          activeStaffMembers.find((staffMember) => staffMember.isSystemAdmin) ??
+          activeStaffMembers.find((staffMember) => staffMember.role === "Admin") ??
+          activeStaffMembers[0] ??
+          null,
+      [activeStaffMembers]
+  );
+  const defaultAssignedStaffId =
+      currentStaffMember?.id ?? ownerStaffMember?.id ?? null;
+  const staffNameById = useMemo(() => {
+    const lookup = new Map<number, string>();
+
+    for (const staffMember of staffMembers) {
+      lookup.set(staffMember.id, staffMember.fullName);
+    }
+
+    return lookup;
+  }, [staffMembers]);
   const allowedRolePages = useMemo(() => {
     if (!staffSystemReady || currentUserIsAdmin) {
       return new Set<StaffPageAccessKey>(
@@ -5385,6 +5857,8 @@ export default function JobsApp({
         ignoredMoveSuggestionIds,
         routeChangeHistory,
         routeNotes,
+        schedulingRecommendations,
+        schedulingAuditLogs,
         quotes,
         invoices,
         expenseSuppliers,
@@ -5421,6 +5895,8 @@ export default function JobsApp({
         quotesTableInitialized,
         routeChangeHistory,
         routeNotes,
+        schedulingAuditLogs,
+        schedulingRecommendations,
         recurringInvoiceTemplates,
         recurringInvoiceTemplatesFallbackActive,
         scheduledJobs,
@@ -6386,6 +6862,8 @@ export default function JobsApp({
         setIgnoredMoveSuggestionIds(nextState.ignoredMoveSuggestionIds);
         setRouteChangeHistory(nextState.routeChangeHistory);
         setRouteNotes(nextState.routeNotes);
+        setSchedulingRecommendations(nextState.schedulingRecommendations);
+        setSchedulingAuditLogs(nextState.schedulingAuditLogs);
         setLockedRounds(nextState.lockedRounds);
         setActiveRoundCycles(nextState.activeRoundCycles);
         setPendingCashPaymentDates(nextState.pendingCashPaymentDates);
@@ -7058,6 +7536,8 @@ export default function JobsApp({
           ignoredMoveSuggestionIds: importedData.ignoredMoveSuggestionIds,
           routeChangeHistory: nextRouteChangeHistory,
           routeNotes: importedData.routeNotes,
+          schedulingRecommendations: importedData.schedulingRecommendations,
+          schedulingAuditLogs: importedData.schedulingAuditLogs,
           quotes: nextQuotes,
           invoices: nextInvoices,
           expenseSuppliers: importedData.expenseSuppliers,
@@ -7093,6 +7573,10 @@ export default function JobsApp({
         setIgnoredMoveSuggestionIds(normalizedImportedState.ignoredMoveSuggestionIds);
         setRouteChangeHistory(normalizedImportedState.routeChangeHistory);
         setRouteNotes(normalizedImportedState.routeNotes);
+        setSchedulingRecommendations(
+            normalizedImportedState.schedulingRecommendations
+        );
+        setSchedulingAuditLogs(normalizedImportedState.schedulingAuditLogs);
         setLockedRounds(normalizedImportedState.lockedRounds);
         setActiveRoundCycles(normalizedImportedState.activeRoundCycles);
         setPendingCashPaymentDates(normalizedImportedState.pendingCashPaymentDates);
@@ -8427,6 +8911,53 @@ export default function JobsApp({
     );
   }
 
+  async function updateQuoteStatusFromList(
+      quoteId: string,
+      status: QuoteStatus
+  ) {
+    const existingQuote = quotes.find((quote) => quote.id === quoteId) ?? null;
+
+    if (!existingQuote) {
+      return;
+    }
+
+    const nextStatus = normalizeQuoteStatus(status);
+
+    if (existingQuote.status === nextStatus) {
+      if (
+          nextStatus === "Accepted" &&
+          !hasScheduledJobForQuote(existingQuote.id) &&
+          !hasPendingSchedulingSuggestionForQuote(existingQuote.id)
+      ) {
+        await handleAcceptedQuoteScheduling(existingQuote);
+      }
+
+      return;
+    }
+
+    const nextQuote: Quote = {
+      ...existingQuote,
+      status: nextStatus,
+    };
+    const quoteSaved = await saveQuoteRecord(nextQuote);
+
+    if (!quoteSaved) {
+      return;
+    }
+
+    appendQuoteHistory(
+        quoteId,
+        createDocumentHistoryEntry(
+            "updated",
+            `Marked quote ${existingQuote.quoteNumber} as ${nextStatus}.`
+        )
+    );
+
+    if (nextStatus === "Accepted") {
+      await handleAcceptedQuoteScheduling(nextQuote);
+    }
+  }
+
   async function markInvoiceSent(
       invoiceId: string,
       metadata: DocumentSendMetadata = {}
@@ -8462,6 +8993,41 @@ export default function JobsApp({
                 metadata.recipient ? ` to ${metadata.recipient.trim()}` : ""
             }.`,
             metadata
+        )
+    );
+  }
+
+  async function updateInvoiceStatusFromList(
+      invoiceId: string,
+      status: InvoiceStatus
+  ) {
+    const existingInvoice =
+        invoices.find((invoice) => invoice.id === invoiceId) ?? null;
+
+    if (!existingInvoice) {
+      return;
+    }
+
+    const nextStatus = normalizeInvoiceStatus(status);
+
+    if (existingInvoice.status === nextStatus) {
+      return;
+    }
+
+    const invoiceSaved = await saveInvoiceRecord({
+      ...existingInvoice,
+      status: nextStatus,
+    });
+
+    if (!invoiceSaved) {
+      return;
+    }
+
+    appendInvoiceHistory(
+        invoiceId,
+        createDocumentHistoryEntry(
+            "updated",
+            `Marked invoice ${existingInvoice.invoiceNumber} as ${nextStatus}.`
         )
     );
   }
@@ -8834,19 +9400,46 @@ export default function JobsApp({
     }
   }
 
+  function normalizeScheduledJobAssignment(job: ScheduledJob): ScheduledJob {
+    const assignedStaffName =
+        job.assignedStaffId != null
+            ? staffNameById.get(job.assignedStaffId) ?? job.assignedStaffName
+            : job.assignedStaffName;
+
+    return {
+      ...job,
+      assignedStaffId: job.assignedStaffId ?? null,
+      assignedStaffName: assignedStaffName?.trim() || undefined,
+    };
+  }
+
+  function getDefaultJobAssignment() {
+    const assignedStaffId = defaultAssignedStaffId;
+
+    return {
+      assignedStaffId,
+      assignedStaffName:
+          assignedStaffId != null
+              ? staffNameById.get(assignedStaffId)
+              : undefined,
+    };
+  }
+
   async function createScheduledJobRecord(job: ScheduledJob) {
+    const nextJob = normalizeScheduledJobAssignment(job);
+
     if (!workflowTablesReady.scheduledJobs) {
       setScheduledJobs((prev) =>
-          [...prev, job].sort((a, b) => a.date.localeCompare(b.date))
+          [...prev, nextJob].sort((a, b) => a.date.localeCompare(b.date))
       );
-      return job;
+      return nextJob;
     }
 
     try {
       const supabase = createSupabaseClient();
       const { data, error } = await supabase
           .from("scheduled_jobs")
-          .insert(withCurrentOrganizationId(mapScheduledJobToRow(job)))
+          .insert(withCurrentOrganizationId(mapScheduledJobToRow(nextJob)))
           .select(SCHEDULED_JOB_SELECT_FIELDS)
           .single();
 
@@ -8872,21 +9465,23 @@ export default function JobsApp({
   }
 
   async function saveScheduledJobRecord(updatedJob: ScheduledJob) {
+    const nextJob = normalizeScheduledJobAssignment(updatedJob);
+
     if (!workflowTablesReady.scheduledJobs) {
       setScheduledJobs((prev) =>
           prev
-              .map((job) => (job.id === updatedJob.id ? updatedJob : job))
+              .map((job) => (job.id === nextJob.id ? nextJob : job))
               .sort((a, b) => a.date.localeCompare(b.date))
       );
-      return updatedJob;
+      return nextJob;
     }
 
     try {
       const supabase = createSupabaseClient();
       const { data, error } = await supabase
           .from("scheduled_jobs")
-          .update(withCurrentOrganizationId(mapScheduledJobToRow(updatedJob)))
-          .eq("id", updatedJob.id)
+          .update(withCurrentOrganizationId(mapScheduledJobToRow(nextJob)))
+          .eq("id", nextJob.id)
           .eq("organization_id", getWritableOrganizationId())
           .select(SCHEDULED_JOB_SELECT_FIELDS)
           .single();
@@ -9438,6 +10033,33 @@ export default function JobsApp({
     return map;
   }, [customers]);
 
+  const shouldRestrictWorkToCurrentStaff =
+      staffSystemReady && !currentUserIsAdmin && Boolean(currentStaffMember?.id);
+  const visibleRoundCustomers = useMemo(() => {
+    if (!shouldRestrictWorkToCurrentStaff || !currentStaffMember?.id) {
+      return customers;
+    }
+
+    return customers.filter(
+        (customer) =>
+            customer.isGrassCuttingCustomer &&
+            customer.assignedStaffId === currentStaffMember.id
+    );
+  }, [currentStaffMember?.id, customers, shouldRestrictWorkToCurrentStaff]);
+  const visibleScheduledJobs = useMemo(() => {
+    if (!shouldRestrictWorkToCurrentStaff || !currentStaffMember?.id) {
+      return scheduledJobs;
+    }
+
+    return scheduledJobs.filter(
+        (job) => job.assignedStaffId === currentStaffMember.id
+    );
+  }, [
+    currentStaffMember?.id,
+    scheduledJobs,
+    shouldRestrictWorkToCurrentStaff,
+  ]);
+
   const dashboardAttentionItems = useMemo<DashboardAttentionItem[]>(() => {
     const today = getTodayDateInputValue();
     const linkedQuoteIds = new Set(
@@ -9912,6 +10534,33 @@ export default function JobsApp({
   }, [isHydrating, jobProfileBackPage, page, selectedScheduledJob]);
 
   useEffect(() => {
+    if (
+        isHydrating ||
+        page !== "scheduledJobProfile" ||
+        !shouldRestrictWorkToCurrentStaff ||
+        !selectedScheduledJobId
+    ) {
+      return;
+    }
+
+    const canViewSelectedJob = visibleScheduledJobs.some(
+        (job) => job.id === selectedScheduledJobId
+    );
+
+    if (!canViewSelectedJob) {
+      setSelectedScheduledJobId(null);
+      navigateToPage(jobProfileBackPage);
+    }
+  }, [
+    isHydrating,
+    jobProfileBackPage,
+    page,
+    selectedScheduledJobId,
+    shouldRestrictWorkToCurrentStaff,
+    visibleScheduledJobs,
+  ]);
+
+  useEffect(() => {
     if (isHydrating || page !== "customerProfile" || selectedCustomer) {
       return;
     }
@@ -9938,6 +10587,16 @@ export default function JobsApp({
 
   function getNextInvoiceNumber(existingInvoices: Invoice[]) {
     return buildInvoiceNumber(appSettings, existingInvoices);
+  }
+
+  function hasScheduledJobForQuote(quoteId: string) {
+    return scheduledJobs.some((job) => (job.quoteIds ?? []).includes(quoteId));
+  }
+
+  function hasPendingSchedulingSuggestionForQuote(quoteId: string) {
+    return schedulingRecommendations.some(
+        (entry) => entry.quoteId === quoteId && entry.status === "pending"
+    );
   }
 
   function getQuoteSchedulingContext(quoteId: string) {
@@ -9972,6 +10631,7 @@ export default function JobsApp({
     }
 
     const { quote, existingJob } = context;
+    const defaultQuoteAssignment = getDefaultJobAssignment();
 
     if (!navigateToPage("schedule")) {
       return;
@@ -9986,8 +10646,398 @@ export default function JobsApp({
       scheduledDate: existingJob?.date,
       startTime: existingJob?.startTime,
       finishTime: existingJob?.finishTime,
+      assignedStaffId:
+          existingJob?.assignedStaffId ?? defaultQuoteAssignment.assignedStaffId,
       hasExistingJob: Boolean(existingJob),
     });
+  }
+
+  function getSchedulingServiceRoundDateKeys(searchDays = 60) {
+    const today = new Date();
+    const dateKeys = new Set<string>();
+
+    for (let offset = 0; offset < searchDays; offset += 1) {
+      const date = new Date(today);
+      date.setDate(today.getDate() + offset);
+      const panelState = getTodayPanelState(date, defaultRotationWeeks);
+
+      if (!panelState.selectedDay) {
+        continue;
+      }
+
+      const hasRoundCustomers = customers.some(
+          (customer) =>
+              customer.isGrassCuttingCustomer &&
+              customer.day === panelState.selectedDay &&
+              isCustomerDueInSelectedWeek(
+                  customer,
+                  panelState.week,
+                  defaultRotationWeeks
+              )
+      );
+
+      if (hasRoundCustomers) {
+        dateKeys.add(getInputDateValue(date.toISOString()) || date.toISOString().slice(0, 10));
+      }
+    }
+
+    scheduledJobs.forEach((job) => {
+      if (job.type === "Grass Cut" || job.type === "Commercial") {
+        const dateKey = getInputDateValue(job.date);
+
+        if (dateKey) {
+          dateKeys.add(dateKey);
+        }
+      }
+    });
+
+    return Array.from(dateKeys);
+  }
+
+  function getSchedulingJobPostcode(job: ScheduledJob) {
+    if (job.postcode?.trim()) {
+      return job.postcode.trim();
+    }
+
+    const customer =
+        job.customerId != null ? customerMap.get(job.customerId) ?? null : null;
+
+    return (
+      customer?.sitePostcode?.trim() ||
+      customer?.postcode?.trim() ||
+      undefined
+    );
+  }
+
+  function getSchedulingQuotePostcode(quote: Quote) {
+    return (
+      quote.sitePostcode?.trim() ||
+      quote.customerPostcode?.trim() ||
+      undefined
+    );
+  }
+
+  function getSchedulingDecision(quote: Quote) {
+    return chooseSchedulingSlot({
+      settings: appSettings.autoScheduling,
+      quote: {
+        id: quote.id,
+        quoteNumber: quote.quoteNumber,
+        customerId: quote.customerId,
+        customerName: quote.customerName,
+        customerAddress: quote.customerAddress,
+        customerPostcode: quote.customerPostcode,
+        siteAddress: quote.siteAddress,
+        sitePostcode: quote.sitePostcode,
+        workType: quote.workType,
+        estimatedDurationMinutes: quote.estimatedDurationMinutes,
+        autoSchedulingPreference: quote.autoSchedulingPreference,
+        autoSchedulingDisabled: quote.autoSchedulingDisabled,
+        serviceRoundSchedulingPreference: quote.serviceRoundSchedulingPreference,
+      },
+      jobs: scheduledJobs.map((job) => ({
+        id: job.id,
+        title: job.title,
+        date: job.date,
+        startTime: job.startTime,
+        finishTime: job.finishTime,
+        customerId: job.customerId,
+        customerName: job.customerName,
+        type: job.type,
+        status: job.status,
+        quoteIds: job.quoteIds,
+        workType: job.workType,
+        postcode: getSchedulingJobPostcode(job),
+        estimatedDurationMinutes: job.estimatedDurationMinutes,
+      })),
+      serviceRoundDateKeys: getSchedulingServiceRoundDateKeys(),
+      now: new Date(),
+      searchDays: 60,
+    });
+  }
+
+  function buildSchedulingAuditLog(
+      quote: Quote,
+      decision: SchedulingDecision,
+      emailStatus: {
+        customerEmailSent?: boolean;
+        operatorEmailSent?: boolean;
+        customerEmailError?: string;
+        operatorEmailError?: string;
+      } = {}
+  ): SchedulingAuditLog {
+    return {
+      id: crypto.randomUUID(),
+      quoteId: quote.id,
+      quoteNumber: quote.quoteNumber,
+      customerId: quote.customerId,
+      customerName: quote.customerName,
+      chosenDate: decision.slot?.date,
+      startTime: decision.slot?.startTime,
+      finishTime: decision.slot?.finishTime,
+      estimatedDurationMinutes: decision.estimatedDurationMinutes,
+      workType: decision.workType,
+      postcode: decision.postcode ?? getSchedulingQuotePostcode(quote),
+      reason: decision.reason,
+      reasonLabel: decision.reasonLabel,
+      rejectedCandidates: decision.rejectedCandidates,
+      status: decision.status,
+      customerEmailSent: emailStatus.customerEmailSent === true,
+      operatorEmailSent: emailStatus.operatorEmailSent === true,
+      customerEmailError: emailStatus.customerEmailError,
+      operatorEmailError: emailStatus.operatorEmailError,
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  function addSchedulingAuditLog(log: SchedulingAuditLog) {
+    setSchedulingAuditLogs((previousLogs) => [log, ...previousLogs].slice(0, 200));
+  }
+
+  async function sendSchedulingNotifications(
+      quote: Quote,
+      decision: SchedulingDecision
+  ) {
+    const result: {
+      customerEmailSent: boolean;
+      operatorEmailSent: boolean;
+      customerEmailError?: string;
+      operatorEmailError?: string;
+    } = {
+      customerEmailSent: false,
+      operatorEmailSent: false,
+    };
+    const customer =
+        quote.customerId != null ? customerMap.get(quote.customerId) ?? null : null;
+    const customerRecipient = customer
+        ? getCustomerEmailAddresses(customer)[0]
+        : undefined;
+    const operatorRecipient =
+        appSettings.businessEmail.trim() || currentUserEmail?.trim() || "";
+    const emailDrafts = buildSchedulingEmailDrafts({
+      quote: {
+        id: quote.id,
+        quoteNumber: quote.quoteNumber,
+        customerId: quote.customerId,
+        customerName: quote.customerName,
+        customerAddress: quote.customerAddress,
+        customerPostcode: quote.customerPostcode,
+        siteAddress: quote.siteAddress,
+        sitePostcode: quote.sitePostcode,
+      },
+      decision,
+      businessName: getBusinessDisplayName(appSettings),
+      businessEmail: appSettings.businessEmail,
+      businessPhone: appSettings.businessPhone,
+    });
+
+    if (customerRecipient) {
+      try {
+        await sendCustomerEmailMessage({
+          recipient: customerRecipient,
+          subject: emailDrafts.customerSubject,
+          message: emailDrafts.customerMessage,
+          businessDetails: appSettings,
+        });
+        result.customerEmailSent = true;
+      } catch (error) {
+        result.customerEmailError = isErrorWithMessage(error)
+            ? error.message
+            : "Unable to send customer scheduling email.";
+      }
+    } else {
+      result.customerEmailError = "No customer email address saved.";
+    }
+
+    if (operatorRecipient) {
+      try {
+        await sendCustomerEmailMessage({
+          recipient: operatorRecipient,
+          subject: emailDrafts.operatorSubject,
+          message: emailDrafts.operatorMessage,
+          businessDetails: appSettings,
+        });
+        result.operatorEmailSent = true;
+      } catch (error) {
+        result.operatorEmailError = isErrorWithMessage(error)
+            ? error.message
+            : "Unable to send operator scheduling email.";
+      }
+    } else {
+      result.operatorEmailError = "No operator email address configured.";
+    }
+
+    return result;
+  }
+
+  async function createPendingSchedulingSuggestion(
+      quote: Quote,
+      decision: SchedulingDecision
+  ) {
+    if (!decision.slot) {
+      return false;
+    }
+
+    const recommendation: SchedulingRecommendationRecord = {
+      id: crypto.randomUUID(),
+      quoteId: quote.id,
+      quoteNumber: quote.quoteNumber,
+      customerId: quote.customerId,
+      customerName: quote.customerName,
+      slot: decision.slot,
+      reason: decision.reason,
+      reasonLabel: decision.reasonLabel,
+      workType: decision.workType,
+      estimatedDurationMinutes: decision.estimatedDurationMinutes ?? 0,
+      postcode: decision.postcode,
+      rejectedCandidates: decision.rejectedCandidates,
+      status: "pending",
+      createdAt: new Date().toISOString(),
+    };
+
+    setSchedulingRecommendations((previousRecommendations) => [
+      recommendation,
+      ...previousRecommendations.filter(
+          (entry) => entry.quoteId !== quote.id || entry.status !== "pending"
+      ),
+    ]);
+
+    const quoteSaved = await saveQuoteRecord({
+      ...quote,
+      schedulingStatus: "suggested",
+    });
+
+    appendQuoteHistory(
+        quote.id,
+        createDocumentHistoryEntry(
+            "updated",
+            `Suggested scheduling slot for ${quote.quoteNumber}: ${decision.slot.date} ${decision.slot.startTime}-${decision.slot.finishTime}.`
+        )
+    );
+    addSchedulingAuditLog(buildSchedulingAuditLog(quote, decision));
+
+    return quoteSaved;
+  }
+
+  async function scheduleQuoteAtSlot(
+      quote: Quote,
+      slot: SchedulingSlot,
+      decision: Pick<
+          SchedulingDecision,
+          "reason" | "reasonLabel" | "workType" | "estimatedDurationMinutes" | "postcode"
+      >,
+      options: { autoScheduled: boolean }
+  ) {
+    const relatedInvoiceIds = invoices
+        .filter((invoice) => invoice.linkedQuoteId === quote.id)
+        .map((invoice) => invoice.id);
+    const existingJob =
+        scheduledJobs.find((job) => (job.quoteIds ?? []).includes(quote.id)) ?? null;
+    const jobAssignment =
+        existingJob?.assignedStaffId != null
+            ? {
+                assignedStaffId: existingJob.assignedStaffId,
+                assignedStaffName:
+                    staffNameById.get(existingJob.assignedStaffId) ??
+                    existingJob.assignedStaffName,
+              }
+            : getDefaultJobAssignment();
+    const baseJob: ScheduledJob = {
+      id: existingJob?.id ?? crypto.randomUUID(),
+      title: existingJob?.title?.trim() || `Quoted Work - ${quote.customerName}`,
+      date: slot.date,
+      notes: quote.notes ?? existingJob?.notes ?? "",
+      startTime: slot.startTime,
+      finishTime: slot.finishTime,
+      customerId: quote.customerId ?? existingJob?.customerId ?? null,
+      customerName: quote.customerName,
+      type: "Quote Accepted",
+      status: existingJob?.status === "Cancelled" ? "Scheduled" : existingJob?.status ?? "Scheduled",
+      quoteIds: Array.from(new Set([...(existingJob?.quoteIds ?? []), quote.id])),
+      invoiceIds: Array.from(
+          new Set([...(existingJob?.invoiceIds ?? []), ...relatedInvoiceIds])
+      ),
+      sourceQuoteId: quote.id,
+      workType: decision.workType ?? quote.workType,
+      estimatedDurationMinutes:
+          decision.estimatedDurationMinutes ?? quote.estimatedDurationMinutes,
+      postcode: decision.postcode ?? getSchedulingQuotePostcode(quote),
+      autoScheduled: options.autoScheduled,
+      autoScheduleReason: decision.reason,
+      autoScheduleReasonLabel: decision.reasonLabel,
+      assignedStaffId: jobAssignment.assignedStaffId ?? null,
+      assignedStaffName: jobAssignment.assignedStaffName,
+      createdAt: existingJob?.createdAt ?? new Date().toISOString(),
+    };
+    const persistedJob = existingJob
+        ? await saveScheduledJobRecord(baseJob)
+        : await createScheduledJobRecord(baseJob);
+
+    return persistedJob;
+  }
+
+  async function handleAcceptedQuoteScheduling(quote: Quote) {
+    const decision = getSchedulingDecision(quote);
+
+    if (decision.status === "skipped" || decision.status === "manual_required") {
+      await saveQuoteRecord({
+        ...quote,
+        schedulingStatus: decision.status === "skipped" ? "skipped" : "manual_required",
+      });
+      addSchedulingAuditLog(buildSchedulingAuditLog(quote, decision));
+      return;
+    }
+
+    if (!decision.slot) {
+      await saveQuoteRecord({
+        ...quote,
+        schedulingStatus: "manual_required",
+      });
+      addSchedulingAuditLog(
+          buildSchedulingAuditLog(quote, {
+            ...decision,
+            status: "manual_required",
+            reason: "no_available_slot",
+            reasonLabel: "needs manual scheduling",
+          })
+      );
+      return;
+    }
+
+    if (decision.status === "suggested") {
+      await createPendingSchedulingSuggestion(quote, decision);
+      return;
+    }
+
+    const scheduledJob = await scheduleQuoteAtSlot(quote, decision.slot, decision, {
+      autoScheduled: true,
+    });
+
+    if (!scheduledJob) {
+      await createPendingSchedulingSuggestion(quote, {
+        ...decision,
+        status: "suggested",
+        effectiveMode: "suggest",
+      });
+      return;
+    }
+
+    const emailStatus = await sendSchedulingNotifications(quote, decision);
+
+    await saveQuoteRecord({
+      ...quote,
+      status: "Scheduled",
+      schedulingStatus: "scheduled",
+      autoScheduledJobId: scheduledJob.id,
+    });
+    appendQuoteHistory(
+        quote.id,
+        createDocumentHistoryEntry(
+            "updated",
+            `Auto-scheduled quote ${quote.quoteNumber} for ${decision.slot.date} ${decision.slot.startTime}-${decision.slot.finishTime}.`
+        )
+    );
+    addSchedulingAuditLog(buildSchedulingAuditLog(quote, decision, emailStatus));
   }
 
   function openCustomerProfile(customerId: number) {
@@ -10200,6 +11250,18 @@ export default function JobsApp({
         notes: quote.notes?.trim() || undefined,
         total: getLineItemsSubtotal(quote.items),
       };
+      const shouldRunScheduling =
+          nextQuote.status === "Accepted" &&
+          !hasScheduledJobForQuote(nextQuote.id) &&
+          !hasPendingSchedulingSuggestionForQuote(nextQuote.id) &&
+          (
+              existingQuote.status !== "Accepted" ||
+              !existingQuote.schedulingStatus ||
+              existingQuote.schedulingStatus === "manual_required" ||
+              existingQuote.estimatedDurationMinutes !== nextQuote.estimatedDurationMinutes ||
+              existingQuote.workType !== nextQuote.workType ||
+              existingQuote.autoSchedulingPreference !== nextQuote.autoSchedulingPreference
+          );
 
       const quoteSaved = await saveQuoteRecord(nextQuote);
 
@@ -10211,6 +11273,9 @@ export default function JobsApp({
                 describeQuoteChanges(existingQuote, nextQuote)
             )
         );
+        if (shouldRunScheduling) {
+          await handleAcceptedQuoteScheduling(nextQuote);
+        }
         setSelectedQuoteId(null);
         navigateToPage("quotes");
       }
@@ -10235,6 +11300,7 @@ export default function JobsApp({
       notes: quote.notes?.trim() || appSettings.defaultQuoteNotes || undefined,
       total: getLineItemsSubtotal(quote.items),
     };
+    const shouldRunScheduling = nextQuote.status === "Accepted";
 
     const quoteCreated = await createQuoteRecord(nextQuote);
 
@@ -10246,6 +11312,9 @@ export default function JobsApp({
               `Created quote ${nextQuote.quoteNumber}.`
           )
       );
+      if (shouldRunScheduling) {
+        await handleAcceptedQuoteScheduling(nextQuote);
+      }
       if (pendingLeadQuoteDraft) {
         const linkedLead =
             customerLeads.find((lead) => lead.id === pendingLeadQuoteDraft.leadId) ??
@@ -10383,11 +11452,13 @@ export default function JobsApp({
       date,
       startTime,
       finishTime,
+      assignedStaffId,
     }: {
       quoteId: string;
       date: string;
       startTime: string;
       finishTime: string;
+      assignedStaffId?: number | null;
     }) {
     const context = getQuoteSchedulingContext(quoteId);
 
@@ -10399,6 +11470,16 @@ export default function JobsApp({
 
     const trimmedStartTime = startTime.trim();
     const trimmedFinishTime = finishTime.trim();
+    const selectedAssignment =
+        assignedStaffId !== undefined
+            ? {
+                assignedStaffId,
+                assignedStaffName:
+                    assignedStaffId != null
+                        ? staffNameById.get(assignedStaffId)
+                        : undefined,
+              }
+            : getDefaultJobAssignment();
 
     if (existingJob) {
       const updatedJob: ScheduledJob = {
@@ -10416,6 +11497,14 @@ export default function JobsApp({
         invoiceIds: Array.from(
             new Set([...(existingJob.invoiceIds ?? []), ...relatedInvoiceIds])
         ),
+        sourceQuoteId: quote.id,
+        workType: quote.workType ?? existingJob.workType,
+        estimatedDurationMinutes:
+            quote.estimatedDurationMinutes ?? existingJob.estimatedDurationMinutes,
+        postcode: getSchedulingQuotePostcode(quote) ?? existingJob.postcode,
+        autoScheduled: false,
+        assignedStaffId: selectedAssignment.assignedStaffId ?? null,
+        assignedStaffName: selectedAssignment.assignedStaffName,
       };
 
       const persistedJob = await saveScheduledJobRecord(updatedJob);
@@ -10427,6 +11516,8 @@ export default function JobsApp({
       const quoteSaved = await saveQuoteRecord({
         ...quote,
         status: "Scheduled",
+        schedulingStatus: "scheduled",
+        autoScheduledJobId: persistedJob.id,
       });
 
       if (!quoteSaved) {
@@ -10450,6 +11541,13 @@ export default function JobsApp({
       status: "Scheduled",
       quoteIds: [quote.id],
       invoiceIds: relatedInvoiceIds,
+      sourceQuoteId: quote.id,
+      workType: quote.workType,
+      estimatedDurationMinutes: quote.estimatedDurationMinutes,
+      postcode: getSchedulingQuotePostcode(quote),
+      autoScheduled: false,
+      assignedStaffId: selectedAssignment.assignedStaffId ?? null,
+      assignedStaffName: selectedAssignment.assignedStaffName,
       createdAt: new Date().toISOString(),
     };
 
@@ -10462,6 +11560,8 @@ export default function JobsApp({
     const quoteSaved = await saveQuoteRecord({
       ...quote,
       status: "Scheduled",
+      schedulingStatus: "scheduled",
+      autoScheduledJobId: persistedJob.id,
     });
 
     if (!quoteSaved) {
@@ -10470,6 +11570,111 @@ export default function JobsApp({
 
     setPendingQuoteSchedule(null);
     return true;
+  }
+
+  async function acceptSchedulingRecommendation(recommendationId: string) {
+    const recommendation =
+        schedulingRecommendations.find(
+            (entry) => entry.id === recommendationId && entry.status === "pending"
+        ) ?? null;
+
+    if (!recommendation) {
+      return;
+    }
+
+    const context = getQuoteSchedulingContext(recommendation.quoteId);
+
+    if (!context) {
+      return;
+    }
+
+    const { quote } = context;
+    const decision: SchedulingDecision = {
+      status: "scheduled",
+      effectiveMode: "suggest",
+      reason: recommendation.reason,
+      reasonLabel: recommendation.reasonLabel,
+      slot: recommendation.slot,
+      estimatedDurationMinutes: recommendation.estimatedDurationMinutes,
+      workType: recommendation.workType,
+      postcode: recommendation.postcode,
+      rejectedCandidates: recommendation.rejectedCandidates,
+    };
+    const scheduledJob = await scheduleQuoteAtSlot(
+        quote,
+        recommendation.slot,
+        decision,
+        { autoScheduled: false }
+    );
+
+    if (!scheduledJob) {
+      addSchedulingAuditLog(
+          buildSchedulingAuditLog(quote, {
+            ...decision,
+            status: "manual_required",
+            reason: "no_available_slot",
+            reasonLabel: "needs manual scheduling",
+          })
+      );
+      return;
+    }
+
+    await saveQuoteRecord({
+      ...quote,
+      status: "Scheduled",
+      schedulingStatus: "scheduled",
+      autoScheduledJobId: scheduledJob.id,
+    });
+    setSchedulingRecommendations((previousRecommendations) =>
+        previousRecommendations.map((entry) =>
+            entry.id === recommendation.id
+                ? { ...entry, status: "accepted", decidedAt: new Date().toISOString() }
+                : entry
+        )
+    );
+    addSchedulingAuditLog(buildSchedulingAuditLog(quote, decision));
+  }
+
+  async function rejectSchedulingRecommendation(recommendationId: string) {
+    const recommendation =
+        schedulingRecommendations.find(
+            (entry) => entry.id === recommendationId && entry.status === "pending"
+        ) ?? null;
+
+    if (!recommendation) {
+      return;
+    }
+
+    const quote = quotes.find((entry) => entry.id === recommendation.quoteId) ?? null;
+    const decidedAt = new Date().toISOString();
+
+    setSchedulingRecommendations((previousRecommendations) =>
+        previousRecommendations.map((entry) =>
+            entry.id === recommendation.id
+                ? { ...entry, status: "rejected", decidedAt }
+                : entry
+        )
+    );
+
+    if (quote) {
+      await saveQuoteRecord({
+        ...quote,
+        schedulingStatus: "manual_required",
+      });
+      addSchedulingAuditLog(
+          buildSchedulingAuditLog(quote, {
+            status: "manual_required",
+            effectiveMode: "suggest",
+            reason: "no_available_slot",
+            reasonLabel: "suggestion rejected",
+            slot: recommendation.slot,
+            estimatedDurationMinutes: recommendation.estimatedDurationMinutes,
+            workType: recommendation.workType,
+            postcode: recommendation.postcode,
+            rejectedCandidates: recommendation.rejectedCandidates,
+          })
+      );
+    }
   }
 
   async function convertQuoteToInvoice(quoteId: string) {
@@ -12254,8 +13459,8 @@ export default function JobsApp({
                   <DashboardPage
                       key={`dashboard-${appSettings.primaryColor}-${appSettings.showWeatherWidget}-${appSettings.showRevenueWidget}-${appSettings.showJobsWidget}-${appSettings.showUnpaidWidget}-${appSettings.showRecentActivityWidget}`}
                       visits={visitLogs}
-                      customers={customers}
-                      scheduledJobs={scheduledJobs}
+                      customers={visibleRoundCustomers}
+                      scheduledJobs={visibleScheduledJobs}
                       quotes={quotes}
                       invoices={invoices}
                       monthlyPayments={monthlyPayments}
@@ -12309,14 +13514,17 @@ export default function JobsApp({
 
               {page === "schedule" && (
                   <SchedulePage
-                      jobs={scheduledJobs as any}
-                      customers={customers as any}
+                      key={pendingQuoteSchedule?.quoteId ?? "manual-schedule"}
+                      jobs={visibleScheduledJobs}
+                      customers={visibleRoundCustomers}
                       grassCutSeasonStart={appSettings.grassCutSeasonStart}
                       grassCutSeasonEnd={appSettings.grassCutSeasonEnd}
                       defaultRotationWeeks={defaultRotationWeeks}
                       activeRotationWeeks={activeRotationWeeks}
                       allowCommercialTools={hasGrowthPlan}
-                      onAddJob={addScheduledJob as any}
+                      staffMembers={staffMembers}
+                      defaultAssignedStaffId={defaultAssignedStaffId}
+                      onAddJob={addScheduledJob}
                       pendingQuoteSchedule={pendingQuoteSchedule}
                       onScheduleQuote={scheduleQuoteFromCalendar}
                       onClearPendingQuoteSchedule={clearPendingQuoteSchedule}
@@ -12326,10 +13534,11 @@ export default function JobsApp({
 
               {page === "jobs" && (
                   <JobsPage
-                      jobs={scheduledJobs as any}
-                      customers={customers as any}
-                      quotes={quotes as any}
-                      invoices={invoices as any}
+                      jobs={visibleScheduledJobs}
+                      customers={customers}
+                      quotes={quotes}
+                      invoices={invoices}
+                      staffMembers={staffMembers}
                       allowCommercialTools={hasGrowthPlan}
                       onOpenJob={(jobId) => openScheduledJob(jobId, "jobs")}
                       onOpenCustomer={openCustomerProfile}
@@ -12344,6 +13553,8 @@ export default function JobsApp({
                         DEFAULT_SCHEDULED_JOB_CHECKLIST
                       }
                       customers={customers}
+                      staffMembers={staffMembers}
+                      defaultAssignedStaffId={defaultAssignedStaffId}
                       quotes={quotes}
                       invoices={invoices}
                       onBack={goBackFromScheduledJobProfile}
@@ -12362,7 +13573,7 @@ export default function JobsApp({
 
                 {(page === "rounds" || page === "commercial") && (
                   <RoundsPage
-                      customers={customers as any}
+                      customers={visibleRoundCustomers as any}
                       visits={visitLogs as any}
                       selectedWeek={selectedWeek}
                       selectedDay={selectedDay}
@@ -12380,7 +13591,7 @@ export default function JobsApp({
 
               {page === "routeEfficiency" && (
                   <RouteEfficiencyPage
-                      customers={customers}
+                      customers={visibleRoundCustomers}
                       selectedWeek={selectedWeek}
                       selectedDay={selectedDay}
                       defaultRotationWeeks={defaultRotationWeeks}
@@ -12409,6 +13620,8 @@ export default function JobsApp({
                       defaultRotationWeeks={defaultRotationWeeks}
                       customerLimit={activeSubscriptionPlan.customerLimit}
                       allowCommercialTools={hasGrowthPlan}
+                      staffMembers={staffMembers}
+                      defaultAssignedStaffId={defaultAssignedStaffId}
                       autoOpenAddCustomerRequestId={addCustomerHelpRequestId}
                       onAdd={addCustomer as any}
                       onUpdate={updateCustomer as any}
@@ -12525,6 +13738,8 @@ export default function JobsApp({
                       grassCutSeasonEnd={appSettings.grassCutSeasonEnd}
                       defaultRotationWeeks={defaultRotationWeeks}
                       allowCommercialTools={hasGrowthPlan}
+                      staffMembers={staffMembers}
+                      defaultAssignedStaffId={defaultAssignedStaffId}
                       onBack={goBackToCustomers}
                       onOpenPayments={() => navigateToPage("payments")}
                       onTogglePaid={togglePaid}
@@ -12548,7 +13763,7 @@ export default function JobsApp({
               {page === "history" && (
                   <HistoryPage
                       visitLogs={visitLogs as any}
-                      customers={customers as any}
+                      customers={visibleRoundCustomers as any}
                       updatePaymentStatus={togglePaid as any}
                       onClearHistory={clearVisitHistory}
                       isClearingHistory={isClearingHistory}
@@ -12558,7 +13773,7 @@ export default function JobsApp({
               {page === "actions" && (
                   <ActionsPage
                       visits={visitLogs as any}
-                      customers={customers as any}
+                      customers={visibleRoundCustomers as any}
                       onTogglePaid={togglePaid}
                   />
               )}
@@ -12581,7 +13796,7 @@ export default function JobsApp({
 
               {page === "map" && (
                   <MapPage
-                      customers={customers as any}
+                      customers={visibleRoundCustomers as any}
                       visits={visitLogs as any}
                       selectedWeek={selectedWeek}
                       selectedDay={selectedDay}
@@ -12637,7 +13852,11 @@ export default function JobsApp({
                       onCreate={() => openNewQuoteForm()}
                       onEdit={openEditQuoteForm}
                       onDelete={deleteQuoteRecord}
+                      onUpdateStatus={updateQuoteStatusFromList}
                       onConvertToSchedule={beginQuoteScheduling}
+                      schedulingRecommendations={schedulingRecommendations}
+                      onAcceptSchedulingSuggestion={acceptSchedulingRecommendation}
+                      onRejectSchedulingSuggestion={rejectSchedulingRecommendation}
                       onConvertToInvoice={convertQuoteToInvoice}
                       allowQuoteConversionWorkflows={hasGrowthPlan}
                       onMarkSent={markQuoteSent}
@@ -12774,6 +13993,7 @@ export default function JobsApp({
                       onCreate={() => openNewInvoiceForm()}
                       onEdit={openEditInvoiceForm}
                       onDelete={deleteInvoiceRecord}
+                      onUpdateStatus={updateInvoiceStatusFromList}
                       onMarkSent={markInvoiceSent}
                       onCreatePaymentLink={createInvoicePaymentLink}
                       onSaveRecurringTemplate={saveRecurringInvoiceTemplate}
@@ -12889,6 +14109,8 @@ export default function JobsApp({
                         invoiceHistory,
                         routeChangeHistory,
                         routeNotes,
+                        schedulingRecommendations,
+                        schedulingAuditLogs,
                         lockedRounds,
                         activeRoundCycles,
                         pendingCashPaymentDates,

@@ -153,6 +153,26 @@ export const QUOTE_STATUS_OPTIONS = [
 
 export type QuoteStatus = (typeof QUOTE_STATUS_OPTIONS)[number];
 
+export const QUOTE_WORK_TYPE_OPTIONS = [
+  "Hedge cutting",
+  "Grass cutting",
+  "Pressure washing",
+  "Garden clearance",
+  "Other",
+] as const;
+
+export type QuoteWorkType = (typeof QUOTE_WORK_TYPE_OPTIONS)[number];
+export type QuoteAutoSchedulingPreference =
+  | "default"
+  | "disabled"
+  | "suggest"
+  | "auto";
+export type ServiceRoundSchedulingPreference =
+  | "default"
+  | "allow"
+  | "avoid"
+  | "force";
+
 export const INVOICE_STATUS_OPTIONS = [
   "Draft",
   "Approved",
@@ -186,6 +206,7 @@ export type DocumentDeliveryMethod =
 
 export type Quote = {
   id: string;
+  quoteNumber: string;
   customerId: number | null;
   customerName: string;
   customerType?: CustomerType;
@@ -201,6 +222,18 @@ export type Quote = {
   items: LineItem[];
   notes?: string;
   total: number;
+  workType?: QuoteWorkType;
+  estimatedDurationMinutes?: number;
+  autoSchedulingPreference?: QuoteAutoSchedulingPreference;
+  autoSchedulingDisabled?: boolean;
+  serviceRoundSchedulingPreference?: ServiceRoundSchedulingPreference;
+  autoScheduledJobId?: string;
+  schedulingStatus?:
+    | "not_required"
+    | "suggested"
+    | "scheduled"
+    | "manual_required"
+    | "skipped";
 };
 
 export type Invoice = {
@@ -419,6 +452,15 @@ export type ScheduledJob = {
 
   quoteIds?: string[];
   invoiceIds?: string[];
+  sourceQuoteId?: string;
+  workType?: QuoteWorkType;
+  estimatedDurationMinutes?: number;
+  postcode?: string;
+  autoScheduled?: boolean;
+  autoScheduleReason?: string;
+  autoScheduleReasonLabel?: string;
+  assignedStaffId?: number | null;
+  assignedStaffName?: string;
 
   createdAt: string;
 };

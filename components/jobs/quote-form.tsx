@@ -11,6 +11,15 @@ import {
     type RotationWeeks,
 } from "./types";
 import type { EditFormCollaboration } from "./edit-collaboration";
+import {
+    QUOTE_WORK_TYPE_OPTIONS,
+    normalizeQuoteAutoSchedulingPreference,
+    normalizeQuoteWorkType,
+    normalizeServiceRoundSchedulingPreference,
+    type QuoteAutoSchedulingPreference,
+    type QuoteWorkType,
+    type ServiceRoundSchedulingPreference,
+} from "@/lib/scheduling/quote-scheduler";
 
 type CustomerType = "Residential" | "Commercial";
 
@@ -50,6 +59,18 @@ type Quote = {
     items: LineItem[];
     notes?: string;
     total: number;
+    workType?: QuoteWorkType;
+    estimatedDurationMinutes?: number;
+    autoSchedulingPreference?: QuoteAutoSchedulingPreference;
+    autoSchedulingDisabled?: boolean;
+    serviceRoundSchedulingPreference?: ServiceRoundSchedulingPreference;
+    autoScheduledJobId?: string;
+    schedulingStatus?:
+        | "not_required"
+        | "suggested"
+        | "scheduled"
+        | "manual_required"
+        | "skipped";
 };
 
 type QuoteService = {
@@ -287,6 +308,33 @@ export default function QuoteForm({
     );
     const [quoteStatus, setQuoteStatus] = useState<QuoteStatus>(
         existingQuote?.status ?? "Draft"
+    );
+    const initialEstimatedDuration = existingQuote?.estimatedDurationMinutes ?? 0;
+    const [estimatedHours, setEstimatedHours] = useState(
+        String(Math.floor(initialEstimatedDuration / 60))
+    );
+    const [estimatedMinutes, setEstimatedMinutes] = useState(
+        String(initialEstimatedDuration % 60)
+    );
+    const [workType, setWorkType] = useState<QuoteWorkType>(
+        existingQuote?.workType
+            ? normalizeQuoteWorkType(existingQuote.workType)
+            : "Other"
+    );
+    const [autoSchedulingPreference, setAutoSchedulingPreference] =
+        useState<QuoteAutoSchedulingPreference>(
+            normalizeQuoteAutoSchedulingPreference(
+                existingQuote?.autoSchedulingPreference
+            )
+        );
+    const [serviceRoundSchedulingPreference, setServiceRoundSchedulingPreference] =
+        useState<ServiceRoundSchedulingPreference>(
+            normalizeServiceRoundSchedulingPreference(
+                existingQuote?.serviceRoundSchedulingPreference
+            )
+        );
+    const [autoSchedulingDisabled, setAutoSchedulingDisabled] = useState(
+        existingQuote?.autoSchedulingDisabled === true
     );
     const [notes, setNotes] = useState(existingQuote?.notes ?? initialNotes ?? "");
     const [isCreatingInvoice, setIsCreatingInvoice] = useState(false);
@@ -551,6 +599,15 @@ export default function QuoteForm({
                 Number(item.quantity) > 0 ||
                 Number(item.price) > 0
         );
+        const durationHours = Math.max(0, Math.floor(Number(estimatedHours) || 0));
+        const durationMinutes = Math.min(
+            59,
+            Math.max(0, Math.floor(Number(estimatedMinutes) || 0))
+        );
+        const estimatedDurationMinutes =
+            durationHours * 60 + durationMinutes > 0
+                ? durationHours * 60 + durationMinutes
+                : undefined;
 
         return {
             id: draftQuoteIdRef.current,
@@ -582,6 +639,13 @@ export default function QuoteForm({
             items: cleanedItems,
             notes: notes.trim() || undefined,
             total,
+            workType,
+            estimatedDurationMinutes,
+            autoSchedulingPreference,
+            autoSchedulingDisabled,
+            serviceRoundSchedulingPreference,
+            autoScheduledJobId: existingQuote?.autoScheduledJobId,
+            schedulingStatus: existingQuote?.schedulingStatus,
         };
     }, [
         activeCustomerAddress,
@@ -592,16 +656,23 @@ export default function QuoteForm({
         activeSiteName,
         activeSitePostcode,
         activeSiteTown,
-        existingQuote?.id,
+        autoSchedulingDisabled,
+        autoSchedulingPreference,
+        estimatedHours,
+        estimatedMinutes,
+        existingQuote?.autoScheduledJobId,
         existingQuote?.quoteNumber,
+        existingQuote?.schedulingStatus,
         items,
         notes,
         quoteCustomerName,
         quoteDate,
         quoteStatus,
         selectedCustomerId,
+        serviceRoundSchedulingPreference,
         showCommercialTools,
         total,
+        workType,
     ]);
 
     useEffect(() => {
@@ -916,6 +987,120 @@ export default function QuoteForm({
                             ))}
                         </select>
                     </div>
+                </div>
+            </section>
+
+            <section className="rounded-[22px] border border-emerald-100 bg-emerald-50/50 p-5 shadow-sm">
+                <div className="flex flex-col gap-1">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+                        Internal Scheduling
+                    </p>
+                    <h2 className="text-lg font-black tracking-tight text-slate-900">
+                        Estimated Time
+                    </h2>
+                    <p className="text-sm text-slate-600">
+                        Used for operator scheduling only. This is not shown to the customer.
+                    </p>
+                </div>
+
+                <div className="mt-4 grid gap-4 lg:grid-cols-4">
+                    <div>
+                        <label className="mb-2 block text-sm font-medium text-slate-700">
+                            Work type
+                        </label>
+                        <select
+                            value={workType}
+                            onChange={(e) =>
+                                setWorkType(normalizeQuoteWorkType(e.target.value))
+                            }
+                            className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-emerald-400"
+                        >
+                            {QUOTE_WORK_TYPE_OPTIONS.map((option) => (
+                                <option key={option} value={option}>
+                                    {option}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="mb-2 block text-sm font-medium text-slate-700">
+                            Hours
+                        </label>
+                        <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={estimatedHours}
+                            onChange={(e) => setEstimatedHours(e.target.value)}
+                            className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-emerald-400"
+                        />
+                    </div>
+
+                    <div>
+                        <label className="mb-2 block text-sm font-medium text-slate-700">
+                            Minutes
+                        </label>
+                        <input
+                            type="number"
+                            min="0"
+                            max="59"
+                            step="15"
+                            value={estimatedMinutes}
+                            onChange={(e) => setEstimatedMinutes(e.target.value)}
+                            className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-emerald-400"
+                        />
+                    </div>
+
+                    <div>
+                        <label className="mb-2 block text-sm font-medium text-slate-700">
+                            Auto-scheduling
+                        </label>
+                        <select
+                            value={autoSchedulingPreference}
+                            onChange={(e) =>
+                                setAutoSchedulingPreference(
+                                    normalizeQuoteAutoSchedulingPreference(e.target.value)
+                                )
+                            }
+                            className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-emerald-400"
+                        >
+                            <option value="default">Use settings default</option>
+                            <option value="disabled">Disable for this quote</option>
+                            <option value="suggest">Suggest slot only</option>
+                            <option value="auto">Auto-schedule</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="mb-2 block text-sm font-medium text-slate-700">
+                            Service round days
+                        </label>
+                        <select
+                            value={serviceRoundSchedulingPreference}
+                            onChange={(e) =>
+                                setServiceRoundSchedulingPreference(
+                                    normalizeServiceRoundSchedulingPreference(e.target.value)
+                                )
+                            }
+                            className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-emerald-400"
+                        >
+                            <option value="default">Use settings default</option>
+                            <option value="allow">Allow round days</option>
+                            <option value="avoid">Avoid round days</option>
+                            <option value="force">Only round days</option>
+                        </select>
+                    </div>
+
+                    <label className="flex items-center gap-3 rounded-xl border border-emerald-100 bg-white px-4 py-3 text-sm font-semibold text-slate-700 lg:col-span-3">
+                        <input
+                            type="checkbox"
+                            checked={autoSchedulingDisabled}
+                            onChange={(e) => setAutoSchedulingDisabled(e.target.checked)}
+                            className="h-4 w-4 rounded border-slate-300 text-emerald-600"
+                        />
+                        Disable automatic scheduling for this quote
+                    </label>
                 </div>
             </section>
 

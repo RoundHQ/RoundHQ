@@ -26,6 +26,7 @@ import {
     UserCircle,
     KeyRound,
     HelpCircle,
+    Calendar as CalendarIcon,
 } from "lucide-react";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import {
@@ -53,6 +54,14 @@ import {
     normalizeEditInactiveMinutes,
     type EditInactiveAction,
 } from "./edit-collaboration";
+import {
+    DEFAULT_AUTO_SCHEDULING_SETTINGS,
+    SCHEDULING_DAY_NAMES,
+    normalizeAutoSchedulingSettings,
+    normalizeSchedulingMode,
+    type AutoSchedulingSettings,
+    type SchedulingUnavailableWindow,
+} from "@/lib/scheduling/quote-scheduler";
 import type { ExpenseProduct, ExpenseRecord, ExpenseSupplier } from "./expenses-page";
 import type { RouteChangeRecord } from "./route-efficiency";
 import type {
@@ -130,6 +139,7 @@ export type SettingsData = {
     editInactivityMinutes: number;
     editInactiveAction: EditInactiveAction;
     helpEnabled: boolean;
+    autoScheduling: AutoSchedulingSettings;
 
     defaultGrassCutPrice: number;
     defaultHedgeCutPrice: number;
@@ -233,6 +243,8 @@ export type RoundHqDataExportRecords = {
     invoiceHistory: Record<string, DocumentHistoryEntry[]>;
     routeChangeHistory: RouteChangeRecord[];
     routeNotes: Record<string, string>;
+    schedulingRecommendations: unknown[];
+    schedulingAuditLogs: unknown[];
     lockedRounds: Record<string, boolean>;
     activeRoundCycles: Record<string, number>;
     pendingCashPaymentDates: Record<string, string>;
@@ -290,6 +302,8 @@ const emptyExportRecords: RoundHqDataExportRecords = {
     invoiceHistory: {},
     routeChangeHistory: [],
     routeNotes: {},
+    schedulingRecommendations: [],
+    schedulingAuditLogs: [],
     lockedRounds: {},
     activeRoundCycles: {},
     pendingCashPaymentDates: {},
@@ -341,6 +355,7 @@ const defaultSettings: SettingsData = {
     editInactivityMinutes: 5,
     editInactiveAction: "notify",
     helpEnabled: true,
+    autoScheduling: DEFAULT_AUTO_SCHEDULING_SETTINGS,
 
     defaultGrassCutPrice: 15,
     defaultHedgeCutPrice: 40,
@@ -1056,6 +1071,7 @@ function safeMergeSettings(source?: Partial<SettingsData> | null): SettingsData 
         ),
         editInactiveAction: normalizeEditInactiveAction(source?.editInactiveAction),
         helpEnabled: source?.helpEnabled !== false,
+        autoScheduling: normalizeAutoSchedulingSettings(source?.autoScheduling),
         stripeConnectedAccountId:
             typeof source?.stripeConnectedAccountId === "string"
                 ? source.stripeConnectedAccountId
@@ -1128,6 +1144,10 @@ function normalizeImportedFullDataRecords(value: unknown): RoundHqDataExportReco
             data.routeChangeHistory
         ),
         routeNotes: readImportRecord<string>(data.routeNotes),
+        schedulingRecommendations: readImportArray<unknown>(
+            data.schedulingRecommendations
+        ),
+        schedulingAuditLogs: readImportArray<unknown>(data.schedulingAuditLogs),
         lockedRounds: readImportRecord<boolean>(data.lockedRounds),
         activeRoundCycles: readImportRecord<number>(data.activeRoundCycles),
         pendingCashPaymentDates: readImportRecord<string>(
@@ -1199,6 +1219,8 @@ function getFullDataExportCounts(records: RoundHqDataExportRecords) {
         records.recurringInvoiceTemplates.length +
         records.commercialRamsDocuments.length +
         records.customerLeads.length +
+        records.schedulingRecommendations.length +
+        records.schedulingAuditLogs.length +
         Object.keys(records.quoteFollowUps).length +
         Object.keys(records.invoiceReminders).length +
         countRecordEntries(records.quoteHistory) +
@@ -1378,6 +1400,69 @@ export default function SettingsPage({
             ...prev,
             [key]: value,
         }));
+    }
+
+    function updateAutoScheduling(
+        value: Partial<AutoSchedulingSettings>
+    ) {
+        setSettings((prev) => ({
+            ...prev,
+            autoScheduling: normalizeAutoSchedulingSettings({
+                ...prev.autoScheduling,
+                ...value,
+            }),
+        }));
+    }
+
+    function updateSchedulingDayHours(
+        day: (typeof SCHEDULING_DAY_NAMES)[number],
+        value: Partial<AutoSchedulingSettings["workingHours"][typeof day]>
+    ) {
+        updateAutoScheduling({
+            workingHours: {
+                ...settings.autoScheduling.workingHours,
+                [day]: {
+                    ...settings.autoScheduling.workingHours[day],
+                    ...value,
+                },
+            },
+        });
+    }
+
+    function addUnavailableWindow() {
+        const nextWindow: SchedulingUnavailableWindow = {
+            id: crypto.randomUUID(),
+            day: "Monday",
+            start: "12:00",
+            end: "13:00",
+            label: "Break",
+        };
+
+        updateAutoScheduling({
+            unavailableWindows: [
+                ...settings.autoScheduling.unavailableWindows,
+                nextWindow,
+            ],
+        });
+    }
+
+    function updateUnavailableWindow(
+        id: string,
+        value: Partial<SchedulingUnavailableWindow>
+    ) {
+        updateAutoScheduling({
+            unavailableWindows: settings.autoScheduling.unavailableWindows.map((window) =>
+                window.id === id ? { ...window, ...value } : window
+            ),
+        });
+    }
+
+    function removeUnavailableWindow(id: string) {
+        updateAutoScheduling({
+            unavailableWindows: settings.autoScheduling.unavailableWindows.filter(
+                (window) => window.id !== id
+            ),
+        });
     }
 
     function addQuoteService() {
@@ -2736,6 +2821,253 @@ export default function SettingsPage({
                                         label="Require before/after photos"
                                         description="Good for pressure washing and transformations."
                                     />
+                                </div>
+                            </div>
+                        </Card>
+
+                        <Card
+                            title="Automatic scheduling"
+                            description="Suggest or book accepted quotes into your working calendar."
+                            icon={CalendarIcon}
+                            dataTour="settings-auto-scheduling-section"
+                        >
+                            <div className="grid grid-cols-1 gap-4">
+                                <Toggle
+                                    checked={settings.autoScheduling.enabled}
+                                    onChange={(value) =>
+                                        updateAutoScheduling({
+                                            enabled: value,
+                                            mode: value
+                                                ? settings.autoScheduling.mode === "off"
+                                                    ? "suggest"
+                                                    : settings.autoScheduling.mode
+                                                : "off",
+                                        })
+                                    }
+                                    label="Enable quote auto-scheduling"
+                                    description="Use estimated time, work type, existing jobs, and postcode grouping when quotes are accepted."
+                                />
+
+                                <Field label="Scheduling mode">
+                                    <Select
+                                        value={settings.autoScheduling.mode}
+                                        onChange={(event) =>
+                                            updateAutoScheduling({
+                                                mode: normalizeSchedulingMode(event.target.value),
+                                                enabled: event.target.value !== "off",
+                                            })
+                                        }
+                                    >
+                                        <option value="off">Off</option>
+                                        <option value="suggest">Suggest slot only</option>
+                                        <option value="auto">Auto-schedule after quote acceptance</option>
+                                    </Select>
+                                </Field>
+
+                                <div>
+                                    <p className="text-sm font-semibold text-slate-900">
+                                        Working days and hours
+                                    </p>
+                                    <div className="mt-3 grid grid-cols-1 gap-3">
+                                        {SCHEDULING_DAY_NAMES.map((day) => {
+                                            const hours = settings.autoScheduling.workingHours[day];
+
+                                            return (
+                                                <div
+                                                    key={day}
+                                                    className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:grid-cols-[1fr_120px_120px]"
+                                                >
+                                                    <label className="flex items-center gap-3 text-sm font-semibold text-slate-700">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={hours.enabled}
+                                                            onChange={(event) =>
+                                                                updateAutoScheduling({
+                                                                    workingDays: event.target.checked
+                                                                        ? Array.from(
+                                                                            new Set([
+                                                                                ...settings.autoScheduling.workingDays,
+                                                                                day,
+                                                                            ])
+                                                                        )
+                                                                        : settings.autoScheduling.workingDays.filter(
+                                                                            (entry) => entry !== day
+                                                                        ),
+                                                                    workingHours: {
+                                                                        ...settings.autoScheduling.workingHours,
+                                                                        [day]: {
+                                                                            ...hours,
+                                                                            enabled: event.target.checked,
+                                                                        },
+                                                                    },
+                                                                })
+                                                            }
+                                                            className="h-4 w-4 rounded border-slate-300 text-emerald-600"
+                                                        />
+                                                        {day}
+                                                    </label>
+                                                    <Input
+                                                        type="time"
+                                                        value={hours.start}
+                                                        onChange={(event) =>
+                                                            updateSchedulingDayHours(day, {
+                                                                start: event.target.value,
+                                                            })
+                                                        }
+                                                    />
+                                                    <Input
+                                                        type="time"
+                                                        value={hours.end}
+                                                        onChange={(event) =>
+                                                            updateSchedulingDayHours(day, {
+                                                                end: event.target.value,
+                                                            })
+                                                        }
+                                                    />
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                    <Field label="Travel buffer between jobs (minutes)">
+                                        <NumberInput
+                                            value={settings.autoScheduling.defaultTravelBufferMinutes}
+                                            onChange={(value) =>
+                                                updateAutoScheduling({
+                                                    defaultTravelBufferMinutes: value,
+                                                })
+                                            }
+                                            step="5"
+                                            min="0"
+                                        />
+                                    </Field>
+
+                                    <Field
+                                        label="Maximum jobs per day"
+                                        hint="Set to 0 for no daily limit."
+                                    >
+                                        <NumberInput
+                                            value={settings.autoScheduling.maxJobsPerDay ?? 0}
+                                            onChange={(value) =>
+                                                updateAutoScheduling({
+                                                    maxJobsPerDay: value > 0 ? value : null,
+                                                })
+                                            }
+                                            step="1"
+                                            min="0"
+                                        />
+                                    </Field>
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                    <Field label="Postcode grouping">
+                                        <Select
+                                            value={settings.autoScheduling.postcodeGrouping}
+                                            onChange={(event) =>
+                                                updateAutoScheduling({
+                                                    postcodeGrouping: event.target.value as AutoSchedulingSettings["postcodeGrouping"],
+                                                })
+                                            }
+                                        >
+                                            <option value="none">Do not group by postcode</option>
+                                            <option value="outward">Group by outward code</option>
+                                            <option value="sector">Group by postcode sector</option>
+                                        </Select>
+                                    </Field>
+
+                                    <Toggle
+                                        checked={settings.autoScheduling.allowServiceRoundDays}
+                                        onChange={(value) =>
+                                            updateAutoScheduling({
+                                                allowServiceRoundDays: value,
+                                            })
+                                        }
+                                        label="Allow quote jobs on service round days"
+                                        description="Turn this off to keep one-off quoted work away from recurring round days."
+                                    />
+                                </div>
+
+                                <div>
+                                    <div className="flex items-center justify-between gap-3">
+                                        <p className="text-sm font-semibold text-slate-900">
+                                            Breaks and unavailable time
+                                        </p>
+                                        <button
+                                            type="button"
+                                            onClick={addUnavailableWindow}
+                                            className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
+                                        >
+                                            Add break
+                                        </button>
+                                    </div>
+
+                                    <div className="mt-3 space-y-3">
+                                        {settings.autoScheduling.unavailableWindows.length === 0 ? (
+                                            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                                                No breaks or unavailable periods set.
+                                            </div>
+                                        ) : (
+                                            settings.autoScheduling.unavailableWindows.map(
+                                                (window) => (
+                                                    <div
+                                                        key={window.id}
+                                                        className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-[1fr_120px_120px_1fr_auto]"
+                                                    >
+                                                        <Select
+                                                            value={window.day}
+                                                            onChange={(event) =>
+                                                                updateUnavailableWindow(window.id, {
+                                                                    day: event.target.value as SchedulingUnavailableWindow["day"],
+                                                                })
+                                                            }
+                                                        >
+                                                            {SCHEDULING_DAY_NAMES.map((day) => (
+                                                                <option key={day} value={day}>
+                                                                    {day}
+                                                                </option>
+                                                            ))}
+                                                        </Select>
+                                                        <Input
+                                                            type="time"
+                                                            value={window.start}
+                                                            onChange={(event) =>
+                                                                updateUnavailableWindow(window.id, {
+                                                                    start: event.target.value,
+                                                                })
+                                                            }
+                                                        />
+                                                        <Input
+                                                            type="time"
+                                                            value={window.end}
+                                                            onChange={(event) =>
+                                                                updateUnavailableWindow(window.id, {
+                                                                    end: event.target.value,
+                                                                })
+                                                            }
+                                                        />
+                                                        <Input
+                                                            value={window.label ?? ""}
+                                                            onChange={(event) =>
+                                                                updateUnavailableWindow(window.id, {
+                                                                    label: event.target.value,
+                                                                })
+                                                            }
+                                                            placeholder="Break, school run, supplier collection..."
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => removeUnavailableWindow(window.id)}
+                                                            className="rounded-xl border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-50"
+                                                        >
+                                                            Remove
+                                                        </button>
+                                                    </div>
+                                                )
+                                            )
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         </Card>

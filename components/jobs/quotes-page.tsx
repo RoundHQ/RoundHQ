@@ -2,13 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  Calendar,
   CheckCircle2,
-  Download,
+  ChevronDown,
   History as HistoryIcon,
-  Mail,
-  Pencil,
-  Trash2,
 } from "lucide-react";
 import { generateQuotePDF } from "./pdf-generator";
 import DocumentSendDialog from "./document-send-dialog";
@@ -20,6 +16,12 @@ import type {
   DocumentHistoryEntry,
   QuoteStatus,
 } from "./types";
+import type {
+  QuoteWorkType,
+  RejectedSchedulingCandidate,
+  SchedulingDecision,
+  SchedulingSlot,
+} from "@/lib/scheduling/quote-scheduler";
 
 type LineItem = {
   id: string;
@@ -46,6 +48,26 @@ type Quote = {
   items: LineItem[];
   notes?: string;
   total: number;
+  workType?: QuoteWorkType;
+  estimatedDurationMinutes?: number;
+  schedulingStatus?:
+    | "not_required"
+    | "suggested"
+    | "scheduled"
+    | "manual_required"
+    | "skipped";
+};
+
+type SchedulingRecommendation = {
+  id: string;
+  quoteId: string;
+  slot: SchedulingSlot;
+  reason: SchedulingDecision["reason"];
+  reasonLabel: string;
+  workType?: QuoteWorkType;
+  estimatedDurationMinutes: number;
+  rejectedCandidates: RejectedSchedulingCandidate[];
+  status: "pending" | "accepted" | "rejected";
 };
 
 type Props = {
@@ -86,7 +108,14 @@ type Props = {
   onCreate: () => void;
   onEdit: (quoteId: string) => void;
   onDelete: (quoteId: string) => void;
+  onUpdateStatus: (
+    quoteId: string,
+    status: QuoteStatus
+  ) => Promise<void> | void;
   onConvertToSchedule: (quoteId: string) => void;
+  schedulingRecommendations?: SchedulingRecommendation[];
+  onAcceptSchedulingSuggestion?: (recommendationId: string) => void | Promise<void>;
+  onRejectSchedulingSuggestion?: (recommendationId: string) => void | Promise<void>;
   onConvertToInvoice: (quoteId: string) => void;
   allowQuoteConversionWorkflows?: boolean;
   onMarkSent: (
@@ -111,6 +140,31 @@ type QuoteHistoryItem = {
 };
 
 type QuoteFilter = "All" | "Draft" | "Accepted" | "Declined" | "Scheduled";
+type QuoteAction =
+  | "edit"
+  | "accept"
+  | "decline"
+  | "schedule"
+  | "invoice"
+  | "pdf"
+  | "email"
+  | "delete";
+
+type QuoteActionTone = "accept" | "decline" | "danger" | "neutral" | "primary";
+
+type QuoteActionMenuItem = {
+  action: QuoteAction;
+  label: string;
+  tone?: QuoteActionTone;
+  separatorBefore?: boolean;
+};
+
+type QuoteActionMenuState = {
+  quoteId: string;
+  top: number;
+  left: number;
+  width: number;
+};
 
 const QUOTE_FILTER_OPTIONS: QuoteFilter[] = [
   "All",
@@ -161,6 +215,43 @@ function getHistoryTypeLabel(type: DocumentHistoryEntry["type"]) {
 
 function canAddQuoteToSchedule(status: QuoteStatus) {
   return status === "Accepted" || status === "Approved" || status === "Scheduled";
+}
+
+function getActionMenuPosition(
+  trigger: HTMLElement,
+  itemCount: number
+): Omit<QuoteActionMenuState, "quoteId"> {
+  const rect = trigger.getBoundingClientRect();
+  const width = 224;
+  const estimatedHeight = Math.min(360, 18 + itemCount * 42);
+  const top =
+    rect.bottom + estimatedHeight + 12 > window.innerHeight
+      ? Math.max(12, rect.top - estimatedHeight - 8)
+      : rect.bottom + 8;
+  const left = Math.min(
+    window.innerWidth - width - 12,
+    Math.max(12, rect.right - width)
+  );
+
+  return { top, left, width };
+}
+
+function getQuoteActionItemClasses(tone: QuoteActionTone = "neutral") {
+  const base =
+    "flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition";
+
+  switch (tone) {
+    case "accept":
+      return `${base} bg-emerald-600 text-white shadow-sm hover:bg-emerald-700`;
+    case "decline":
+      return `${base} bg-rose-600 text-white shadow-sm hover:bg-rose-700`;
+    case "danger":
+      return `${base} text-rose-700 hover:bg-rose-50`;
+    case "primary":
+      return `${base} text-emerald-800 hover:bg-emerald-50`;
+    default:
+      return `${base} text-slate-700 hover:bg-slate-50`;
+  }
 }
 
 function formatHistoryDate(value: string) {
@@ -230,7 +321,11 @@ export default function QuotesPage({
   onCreate,
   onEdit,
   onDelete,
+  onUpdateStatus,
   onConvertToSchedule,
+  schedulingRecommendations = [],
+  onAcceptSchedulingSuggestion,
+  onRejectSchedulingSuggestion,
   onConvertToInvoice,
   allowQuoteConversionWorkflows = true,
   onMarkSent,
@@ -238,6 +333,8 @@ export default function QuotesPage({
   const [sendTarget, setSendTarget] = useState<SendTarget>(null);
   const [activeFilter, setActiveFilter] = useState<QuoteFilter>("All");
   const [sendNotice, setSendNotice] = useState<string | null>(null);
+  const [openActionMenu, setOpenActionMenu] =
+    useState<QuoteActionMenuState | null>(null);
 
   useEffect(() => {
     if (!sendNotice) {
@@ -252,6 +349,43 @@ export default function QuotesPage({
       window.clearTimeout(timeoutId);
     };
   }, [sendNotice]);
+
+  useEffect(() => {
+    if (!openActionMenu) {
+      return undefined;
+    }
+
+    function closeIfOutside(event: PointerEvent) {
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-action-menu-root]")
+      ) {
+        return;
+      }
+
+      setOpenActionMenu(null);
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpenActionMenu(null);
+      }
+    }
+
+    const closeMenu = () => setOpenActionMenu(null);
+
+    window.addEventListener("pointerdown", closeIfOutside);
+    window.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+
+    return () => {
+      window.removeEventListener("pointerdown", closeIfOutside);
+      window.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+    };
+  }, [openActionMenu]);
 
   const activeQuote = useMemo(
     () =>
@@ -288,6 +422,15 @@ export default function QuotesPage({
     }),
     [quotes]
   );
+  const pendingSchedulingRecommendations = useMemo(
+    () =>
+      new Map(
+        schedulingRecommendations
+          .filter((recommendation) => recommendation.status === "pending")
+          .map((recommendation) => [recommendation.quoteId, recommendation])
+      ),
+    [schedulingRecommendations]
+  );
   const emptyStateMessage =
     activeFilter === "All"
       ? "No quotes created yet."
@@ -307,6 +450,94 @@ export default function QuotesPage({
     [documentHistory, quotes]
   );
   const recentHistoryItems = historyItems.slice(0, 12);
+
+  function getQuoteActionItems(
+    quote: Quote,
+    canScheduleQuote: boolean,
+    scheduleButtonLabel: string
+  ): QuoteActionMenuItem[] {
+    const statusItems: QuoteActionMenuItem[] = [];
+
+    if (quote.status !== "Accepted" && quote.status !== "Scheduled") {
+      statusItems.push({
+        action: "accept",
+        label: "Accept quote",
+        tone: "accept",
+      });
+    }
+
+    if (quote.status !== "Declined" && quote.status !== "Scheduled") {
+      statusItems.push({
+        action: "decline",
+        label: "Decline quote",
+        tone: "decline",
+      });
+    }
+
+    return [
+      ...statusItems,
+      {
+        action: "edit",
+        label: "Edit",
+        separatorBefore: statusItems.length > 0,
+      },
+      { action: "pdf", label: "Download PDF" },
+      { action: "email", label: "Email quote" },
+      ...(canScheduleQuote
+        ? [
+            {
+              action: "schedule" as const,
+              label: scheduleButtonLabel,
+              tone: "primary" as const,
+            },
+          ]
+        : []),
+      ...(allowQuoteConversionWorkflows
+        ? [
+            {
+              action: "invoice" as const,
+              label: "Create invoice",
+              tone: "primary" as const,
+            },
+          ]
+        : []),
+      {
+        action: "delete",
+        label: "Delete",
+        tone: "danger",
+        separatorBefore: true,
+      },
+    ];
+  }
+
+  async function handleQuoteAction(quote: Quote, action: QuoteAction) {
+    switch (action) {
+      case "edit":
+        onEdit(quote.id);
+        break;
+      case "accept":
+        await onUpdateStatus(quote.id, "Accepted");
+        break;
+      case "decline":
+        await onUpdateStatus(quote.id, "Declined");
+        break;
+      case "schedule":
+        onConvertToSchedule(quote.id);
+        break;
+      case "invoice":
+        onConvertToInvoice(quote.id);
+        break;
+      case "pdf":
+        await generateQuotePDF(quote, businessDetails);
+        break;
+      case "email":
+        setSendTarget({ quoteId: quote.id, method: "email" });
+        break;
+      case "delete":
+        onDelete(quote.id);
+        break;
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -408,11 +639,26 @@ export default function QuotesPage({
                   const canScheduleQuote = canAddQuoteToSchedule(quote.status);
                   const scheduleButtonLabel =
                     quote.status === "Scheduled" ? "Reschedule" : "Add to Schedule";
+                  const schedulingRecommendation =
+                    pendingSchedulingRecommendations.get(quote.id) ?? null;
+                  const needsManualScheduling =
+                    !schedulingRecommendation &&
+                    quote.status === "Accepted" &&
+                    quote.schedulingStatus === "manual_required";
 
                   return (
                     <tr key={quote.id} className="border-t border-slate-100">
                       <td className="px-4 py-4 font-semibold text-slate-900">
-                        {quote.quoteNumber}
+                        <div>{quote.quoteNumber}</div>
+                        {quote.workType || quote.estimatedDurationMinutes ? (
+                          <div className="mt-1 text-xs font-medium text-slate-500">
+                            {[quote.workType, quote.estimatedDurationMinutes
+                              ? `${quote.estimatedDurationMinutes} min`
+                              : ""]
+                              .filter(Boolean)
+                              .join(" | ")}
+                          </div>
+                        ) : null}
                       </td>
                       <td className="px-4 py-4 font-semibold text-slate-900">
                         {quote.customerName}
@@ -423,13 +669,77 @@ export default function QuotesPage({
                       </td>
 
                       <td className="px-4 py-4">
-                        <span
-                          className={`rounded-full px-3 py-1 text-xs font-semibold ${getQuoteStatusClasses(
-                            quote.status
-                          )}`}
-                        >
-                          {quote.status}
-                        </span>
+                        <div className="space-y-2">
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${getQuoteStatusClasses(
+                              quote.status
+                            )}`}
+                          >
+                            {quote.status}
+                          </span>
+                          {schedulingRecommendation ? (
+                            <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+                              <p className="font-semibold">
+                                Suggested:{" "}
+                                {new Date(
+                                  `${schedulingRecommendation.slot.date}T00:00:00`
+                                ).toLocaleDateString()}{" "}
+                                {schedulingRecommendation.slot.startTime}-
+                                {schedulingRecommendation.slot.finishTime}
+                              </p>
+                              <p className="mt-1 text-emerald-700">
+                                {schedulingRecommendation.reasonLabel}
+                              </p>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    onAcceptSchedulingSuggestion?.(
+                                      schedulingRecommendation.id
+                                    )
+                                  }
+                                  className="rounded-lg bg-emerald-600 px-2.5 py-1 font-semibold text-white transition hover:bg-emerald-700"
+                                >
+                                  Accept
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => onConvertToSchedule(quote.id)}
+                                  className="rounded-lg border border-emerald-200 bg-white px-2.5 py-1 font-semibold text-emerald-800 transition hover:bg-emerald-50"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    onRejectSchedulingSuggestion?.(
+                                      schedulingRecommendation.id
+                                    )
+                                  }
+                                  className="rounded-lg border border-rose-200 bg-white px-2.5 py-1 font-semibold text-rose-700 transition hover:bg-rose-50"
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            </div>
+                          ) : needsManualScheduling ? (
+                            <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                              <p className="font-semibold">
+                                Needs scheduling
+                              </p>
+                              <p className="mt-1 text-amber-700">
+                                Auto-scheduling could not complete. Choose a slot manually.
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => onConvertToSchedule(quote.id)}
+                                className="mt-2 rounded-lg border border-amber-200 bg-white px-2.5 py-1 font-semibold text-amber-800 transition hover:bg-amber-100"
+                              >
+                                Add to schedule
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
                       </td>
 
                       <td className="px-4 py-4 text-sm font-semibold text-slate-900">
@@ -437,59 +747,45 @@ export default function QuotesPage({
                       </td>
 
                       <td className="px-4 py-4">
-                        <div className="flex justify-end gap-2">
-                          <button
-                            onClick={() => onEdit(quote.id)}
-                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-                          >
-                            <Pencil size={14} />
-                            Edit
-                          </button>
-
-                          <button
-                            onClick={() => onDelete(quote.id)}
-                            className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
-                          >
-                            <Trash2 size={14} />
-                            Delete
-                          </button>
-
-                          <button
-                            onClick={() => generateQuotePDF(quote, businessDetails)}
-                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-                          >
-                            <Download size={14} />
-                            PDF
-                          </button>
-
-                          <button
-                            onClick={() =>
-                              setSendTarget({ quoteId: quote.id, method: "email" })
-                            }
-                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-                          >
-                            <Mail size={14} />
-                            Email
-                          </button>
-
-                          {canScheduleQuote ? (
+                        <div className="flex justify-end">
+                          <div data-action-menu-root className="relative">
                             <button
-                              onClick={() => onConvertToSchedule(quote.id)}
-                              className="inline-flex items-center gap-2 rounded-lg bg-[#0f2343] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#1a325b]"
-                            >
-                              <Calendar size={14} />
-                              {scheduleButtonLabel}
-                            </button>
-                          ) : null}
+                              type="button"
+                              aria-haspopup="menu"
+                              aria-expanded={openActionMenu?.quoteId === quote.id}
+                              onClick={(event) => {
+                                const items = getQuoteActionItems(
+                                  quote,
+                                  canScheduleQuote,
+                                  scheduleButtonLabel
+                                );
+                                const position = getActionMenuPosition(
+                                  event.currentTarget,
+                                  items.length
+                                );
 
-                          {allowQuoteConversionWorkflows ? (
-                            <button
-                              onClick={() => onConvertToInvoice(quote.id)}
-                              className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700"
+                                setOpenActionMenu((currentMenu) =>
+                                  currentMenu?.quoteId === quote.id
+                                    ? null
+                                    : {
+                                        quoteId: quote.id,
+                                        ...position,
+                                      }
+                                );
+                              }}
+                              className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#0f2343] px-3.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#153c3f] focus:outline-none focus:ring-2 focus:ring-emerald-200"
                             >
-                              Create Invoice
+                              Actions
+                              <ChevronDown
+                                size={16}
+                                className={`transition ${
+                                  openActionMenu?.quoteId === quote.id
+                                    ? "rotate-180"
+                                    : ""
+                                }`}
+                              />
                             </button>
-                          ) : null}
+                          </div>
                         </div>
                       </td>
                     </tr>
@@ -500,6 +796,68 @@ export default function QuotesPage({
           </table>
         </div>
       </section>
+
+      {openActionMenu ? (() => {
+        const quote =
+          quotes.find((entry) => entry.id === openActionMenu.quoteId) ?? null;
+
+        if (!quote) {
+          return null;
+        }
+
+        const canScheduleQuote = canAddQuoteToSchedule(quote.status);
+        const scheduleButtonLabel =
+          quote.status === "Scheduled" ? "Reschedule" : "Add to Schedule";
+        const actionItems = getQuoteActionItems(
+          quote,
+          canScheduleQuote,
+          scheduleButtonLabel
+        );
+
+        return (
+          <div
+            data-action-menu-root
+            role="menu"
+            className="fixed z-50 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-900/15 ring-1 ring-slate-900/5"
+            style={{
+              top: openActionMenu.top,
+              left: openActionMenu.left,
+              width: openActionMenu.width,
+            }}
+          >
+            <div className="mb-1 px-3 py-2">
+              <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">
+                {quote.quoteNumber}
+              </p>
+            </div>
+            {actionItems.map((item) => (
+              <div
+                key={item.action}
+                className={[
+                  item.separatorBefore
+                    ? "mt-1 border-t border-slate-100 pt-1"
+                    : "",
+                  item.action === "decline" ? "mt-1" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setOpenActionMenu(null);
+                    void handleQuoteAction(quote, item.action);
+                  }}
+                  className={getQuoteActionItemClasses(item.tone)}
+                >
+                  <span>{item.label}</span>
+                </button>
+              </div>
+            ))}
+          </div>
+        );
+      })() : null}
 
       <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">

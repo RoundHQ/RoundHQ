@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import {
   getCustomerDisplayAddress,
@@ -14,7 +14,13 @@ import {
   isCustomerDueOnDate,
   normalizeRotationWeeks,
 } from "./rotation";
-import type { Customer, DayName, RotationWeeks, WeekNumber } from "./types";
+import type {
+  Customer,
+  DayName,
+  RotationWeeks,
+  StaffMember,
+  WeekNumber,
+} from "./types";
 
 type ScheduledJobType =
   | "One Off"
@@ -41,6 +47,8 @@ type ScheduledJob = {
   status: ScheduledJobStatus;
   quoteIds?: string[];
   invoiceIds?: string[];
+  assignedStaffId?: number | null;
+  assignedStaffName?: string;
   createdAt: string;
 };
 
@@ -62,6 +70,7 @@ type PendingQuoteSchedule = {
   scheduledDate?: string;
   startTime?: string;
   finishTime?: string;
+  assignedStaffId?: number | null;
   hasExistingJob: boolean;
 };
 
@@ -73,6 +82,8 @@ type Props = {
   defaultRotationWeeks?: RotationWeeks;
   activeRotationWeeks?: RotationWeeks;
   allowCommercialTools?: boolean;
+  staffMembers?: StaffMember[];
+  defaultAssignedStaffId?: number | null;
   onAddJob: (job: ScheduledJob) => void | boolean | Promise<void | boolean>;
   pendingQuoteSchedule: PendingQuoteSchedule | null;
   onScheduleQuote: (details: {
@@ -80,6 +91,7 @@ type Props = {
     date: string;
     startTime: string;
     finishTime: string;
+    assignedStaffId?: number | null;
   }) => void | boolean | Promise<void | boolean>;
   onClearPendingQuoteSchedule: () => void;
   onOpenJob: (jobId: string) => void;
@@ -327,6 +339,8 @@ export default function SchedulePage({
   defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
   activeRotationWeeks,
   allowCommercialTools = true,
+  staffMembers = [],
+  defaultAssignedStaffId = null,
   onAddJob,
   pendingQuoteSchedule,
   onScheduleQuote,
@@ -334,9 +348,11 @@ export default function SchedulePage({
   onOpenJob,
 }: Props) {
   const today = new Date();
+  const initialSelectedDate =
+    pendingQuoteSchedule?.scheduledDate ?? toDateInputValue(today);
 
-  const [viewDate, setViewDate] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState<string>(toDateInputValue(today));
+  const [viewDate, setViewDate] = useState(fromDateInputValue(initialSelectedDate));
+  const [selectedDate, setSelectedDate] = useState<string>(initialSelectedDate);
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<"job" | "quote">("job");
   const normalizedDefaultRotationWeeks =
@@ -351,8 +367,29 @@ export default function SchedulePage({
   const [linkedCustomerId, setLinkedCustomerId] = useState("");
   const [startTime, setStartTime] = useState("");
   const [finishTime, setFinishTime] = useState("");
+  const [assignedStaffId, setAssignedStaffId] = useState(
+    defaultAssignedStaffId != null ? String(defaultAssignedStaffId) : ""
+  );
 
   const { monthStart, days } = useMemo(() => getMonthGrid(viewDate), [viewDate]);
+  const activeStaffMembers = useMemo(
+    () => staffMembers.filter((staffMember) => staffMember.isActive),
+    [staffMembers]
+  );
+
+  function getSelectedStaffMember() {
+    const numericStaffId = Number(assignedStaffId);
+
+    if (!assignedStaffId || !Number.isFinite(numericStaffId)) {
+      return null;
+    }
+
+    return activeStaffMembers.find((staffMember) => staffMember.id === numericStaffId) ?? null;
+  }
+
+  function getDefaultStaffIdForJob() {
+    return defaultAssignedStaffId ?? null;
+  }
 
   const jobsByDate = useMemo(() => {
     const map = new Map<string, ScheduleEntry[]>();
@@ -433,18 +470,6 @@ export default function SchedulePage({
     [jobsByDate]
   );
 
-  useEffect(() => {
-    if (!pendingQuoteSchedule) {
-      return;
-    }
-
-    const focusDate =
-      pendingQuoteSchedule.scheduledDate ?? toDateInputValue(new Date());
-
-    setSelectedDate(focusDate);
-    setViewDate(fromDateInputValue(focusDate));
-  }, [pendingQuoteSchedule]);
-
   function openNewJobModal(date?: string) {
     setSelectedDate(date ?? toDateInputValue(today));
     setModalMode("job");
@@ -454,6 +479,7 @@ export default function SchedulePage({
     setLinkedCustomerId("");
     setStartTime("");
     setFinishTime("");
+    setAssignedStaffId(defaultAssignedStaffId != null ? String(defaultAssignedStaffId) : "");
     setShowModal(true);
   }
 
@@ -468,6 +494,13 @@ export default function SchedulePage({
     setModalMode("quote");
     setStartTime(pendingQuoteSchedule.startTime ?? "");
     setFinishTime(pendingQuoteSchedule.finishTime ?? "");
+    setAssignedStaffId(
+      pendingQuoteSchedule.assignedStaffId != null
+        ? String(pendingQuoteSchedule.assignedStaffId)
+        : defaultAssignedStaffId != null
+        ? String(defaultAssignedStaffId)
+        : ""
+    );
     setShowModal(true);
   }
 
@@ -500,6 +533,8 @@ export default function SchedulePage({
         status: "Scheduled",
         customerId: linkedCustomerId ? Number(linkedCustomerId) : null,
         customerName: selectedCustomer?.name,
+        assignedStaffId: getSelectedStaffMember()?.id ?? null,
+        assignedStaffName: getSelectedStaffMember()?.fullName,
         quoteIds: [],
         invoiceIds: [],
         createdAt: new Date().toISOString(),
@@ -540,6 +575,7 @@ export default function SchedulePage({
         date: selectedDate,
         startTime: trimmedStartTime,
         finishTime: trimmedFinishTime,
+        assignedStaffId: getSelectedStaffMember()?.id ?? null,
       });
 
       if (result === false) {
@@ -817,6 +853,11 @@ export default function SchedulePage({
                         {jobTimeRange}
                       </p>
                     ) : null}
+                    {!job.isVirtual && job.assignedStaffName ? (
+                      <p className="mt-1 text-xs font-semibold text-slate-500">
+                        Assigned to {job.assignedStaffName}
+                      </p>
+                    ) : null}
                     {job.notes ? (
                       <p className="mt-2 text-sm text-slate-600">{job.notes}</p>
                     ) : null}
@@ -902,6 +943,24 @@ export default function SchedulePage({
                       />
                     </div>
                   </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">
+                      Assigned Staff
+                    </label>
+                    <select
+                      value={assignedStaffId}
+                      onChange={(event) => setAssignedStaffId(event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
+                    >
+                      <option value="">Unassigned</option>
+                      {activeStaffMembers.map((staffMember) => (
+                        <option key={staffMember.id} value={staffMember.id}>
+                          {staffMember.fullName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </>
               ) : (
                 <>
@@ -941,7 +1000,16 @@ export default function SchedulePage({
                     </label>
                     <select
                       value={linkedCustomerId}
-                      onChange={(event) => setLinkedCustomerId(event.target.value)}
+                      onChange={(event) => {
+                        const nextCustomerId = event.target.value;
+                        setLinkedCustomerId(nextCustomerId);
+                        const nextAssignedStaffId = getDefaultStaffIdForJob();
+                        setAssignedStaffId(
+                          nextAssignedStaffId != null
+                            ? String(nextAssignedStaffId)
+                            : ""
+                        );
+                      }}
                       className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
                     >
                       <option value="">No linked customer</option>
@@ -949,6 +1017,24 @@ export default function SchedulePage({
                       <option key={customer.id} value={customer.id}>
                           {customer.name} - {getCustomerDisplayAddress(customer)}
                       </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">
+                      Assigned Staff
+                    </label>
+                    <select
+                      value={assignedStaffId}
+                      onChange={(event) => setAssignedStaffId(event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
+                    >
+                      <option value="">Unassigned</option>
+                      {activeStaffMembers.map((staffMember) => (
+                        <option key={staffMember.id} value={staffMember.id}>
+                          {staffMember.fullName}
+                        </option>
                       ))}
                     </select>
                   </div>

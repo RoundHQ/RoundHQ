@@ -22,6 +22,7 @@ import {
     type GrassCutArea,
     type PaymentMethod,
     type RotationWeeks,
+    type StaffMember,
     type WeekNumber,
 } from "./types";
 import AddressAutocompleteInput from "./address-autocomplete-input";
@@ -32,6 +33,8 @@ type Props = {
     initialName?: string;
     defaultRotationWeeks?: RotationWeeks;
     allowCommercialTools?: boolean;
+    staffMembers?: StaffMember[];
+    defaultAssignedStaffId?: number | null;
     editCollaboration?: EditFormCollaboration<Customer>;
     onSave: (customer: Customer) => void | Promise<void>;
     onCancel: () => void;
@@ -40,7 +43,8 @@ type Props = {
 function buildInitialCustomer(
     existing: Customer | undefined,
     defaultRotationWeeks: RotationWeeks,
-    initialName = ""
+    initialName = "",
+    defaultAssignedStaffId: number | null = null
 ): Customer {
     if (existing) {
         const effectiveRotationWeeks = getEffectiveRotationWeeks(
@@ -60,6 +64,7 @@ function buildInitialCustomer(
                 existing.grassCutAreas,
                 existing.isGrassCuttingCustomer
             ),
+            assignedStaffId: existing.assignedStaffId ?? null,
         };
     }
 
@@ -81,6 +86,7 @@ function buildInitialCustomer(
         isGrassCuttingCustomer: true,
         grassCutAreas: ["All"],
         grassCutAmount: 0,
+        assignedStaffId: defaultAssignedStaffId,
         siteName: "",
         siteAddress: "",
         siteTown: "",
@@ -111,6 +117,8 @@ export default function CustomerForm({
     initialName = "",
     defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
     allowCommercialTools = true,
+    staffMembers = [],
+    defaultAssignedStaffId = null,
     editCollaboration,
     onSave,
     onCancel,
@@ -118,7 +126,12 @@ export default function CustomerForm({
     const normalizedDefaultRotationWeeks =
         normalizeRotationWeeks(defaultRotationWeeks);
     const [form, setForm] = useState<Customer>(() =>
-        buildInitialCustomer(existing, normalizedDefaultRotationWeeks, initialName)
+        buildInitialCustomer(
+            existing,
+            normalizedDefaultRotationWeeks,
+            initialName,
+            defaultAssignedStaffId
+        )
     );
     const initialDraftRef = useRef("");
     const handledSaveRequestRef = useRef(0);
@@ -137,6 +150,10 @@ export default function CustomerForm({
         setForm((prev) => ({
             ...prev,
             isGrassCuttingCustomer,
+            assignedStaffId:
+                isGrassCuttingCustomer && prev.assignedStaffId == null
+                    ? defaultAssignedStaffId
+                    : prev.assignedStaffId,
             grassCutAreas: normalizeGrassCutAreas(
                 prev.grassCutAreas,
                 isGrassCuttingCustomer
@@ -188,6 +205,7 @@ export default function CustomerForm({
         form.rotationWeeksOverride == null ? "default" : String(form.rotationWeeksOverride);
     const commercialEmailInputs =
         form.contactEmails && form.contactEmails.length > 0 ? form.contactEmails : [""];
+    const activeStaffMembers = staffMembers.filter((staffMember) => staffMember.isActive);
 
     const getCleanCustomerDraft = useCallback((): Customer => {
         const draftEffectiveRotationWeeks = getEffectiveRotationWeeks(
@@ -224,6 +242,9 @@ export default function CustomerForm({
             sitePostcode: form.sitePostcode?.trim() || undefined,
             notes: form.notes?.trim() || undefined,
             accessNotes: form.accessNotes?.trim() || undefined,
+            assignedStaffId: form.isGrassCuttingCustomer
+                ? form.assignedStaffId ?? null
+                : null,
         };
     }, [form, normalizedDefaultRotationWeeks, showCommercialTools]);
 
@@ -772,6 +793,32 @@ export default function CustomerForm({
                                     <option value="On Day Transfer">On Day Transfer</option>
                                     <option value="Cash">Cash</option>
                                 </select>
+                            </div>
+
+                            <div>
+                                <label className="mb-2 block text-sm font-medium text-slate-700">
+                                    Round Staff
+                                </label>
+                                <select
+                                    className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
+                                    value={form.assignedStaffId ?? ""}
+                                    onChange={(e) =>
+                                        update(
+                                            "assignedStaffId",
+                                            e.target.value ? Number(e.target.value) : null
+                                        )
+                                    }
+                                >
+                                    <option value="">Unassigned round</option>
+                                    {activeStaffMembers.map((staffMember) => (
+                                        <option key={staffMember.id} value={staffMember.id}>
+                                            {staffMember.fullName}
+                                        </option>
+                                    ))}
+                                </select>
+                                <p className="mt-2 text-xs text-slate-400">
+                                    This only assigns the service round, not the customer record.
+                                </p>
                             </div>
 
                             <div className="md:col-span-2 lg:col-span-3">
