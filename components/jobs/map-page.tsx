@@ -2,7 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LocateFixed, Navigation } from "lucide-react";
-import { formatGrassCutAreas, getCustomerDisplayAddress } from "./helpers";
+import {
+  buildPaymentYearMonths,
+  formatGrassCutAreas,
+  formatStoredDate,
+  getConfiguredSeasonStartYear,
+  getCustomerDisplayAddress,
+  getInputDateValue,
+  getMonthlyPlanCharge,
+  getTodayDateInputValue,
+  isDateInSeasonRange,
+} from "./helpers";
 import {
   DEFAULT_ROTATION_WEEKS,
   getRotationCycleLabel,
@@ -13,6 +23,7 @@ import type {
   Customer,
   VisitLog,
   DayName,
+  MonthlyPayment,
   WeekNumber,
   NotCutReason,
   RotationWeeks,
@@ -25,6 +36,10 @@ type Props = {
   selectedDay: DayName;
   defaultRotationWeeks?: RotationWeeks;
   activeRotationWeeks?: RotationWeeks;
+  monthlyPayments: MonthlyPayment[];
+  grassCutSeasonStart: string;
+  grassCutSeasonEnd: string;
+  monthlyPaymentsReady: boolean;
   isLocked: boolean;
   getCurrentVisit: (customerId: number) => VisitLog | null;
   onUpdateCustomer: (customer: Customer) => Promise<unknown>;
@@ -34,6 +49,15 @@ type Props = {
     extra?: { notes?: string; notCutReason?: NotCutReason; paid?: boolean }
   ) => void;
   onSetPaidStatus: (visitId: number | string, paid: boolean) => void;
+  onSaveMonthlyPayment: (
+    customerId: number,
+    paymentMonth: string,
+    paymentDate: string | null
+  ) => Promise<void>;
+  onSaveVisitPaymentDate: (
+    visitId: number | string,
+    paymentDate: string | null
+  ) => Promise<void>;
   pendingCashPaymentDates: Record<string, string>;
   onSetPendingCashPayment: (customerId: number, paid: boolean) => void;
   onCompleteRound: () => void;
@@ -44,11 +68,57 @@ type Point = {
   longitude: number;
 };
 
-declare global {
-  interface Window {
-    google?: any;
-  }
-}
+type OutstandingPaymentItem =
+  | {
+      kind: "monthly";
+      key: string;
+      label: string;
+      dueFrom: string;
+      amount: number;
+      paymentMonth: string;
+    }
+  | {
+      kind: "visit";
+      key: string;
+      label: string;
+      dueFrom: string;
+      amount: number;
+      visitId: VisitLog["id"];
+    };
+
+type CustomerOutstandingPaymentSummary = {
+  customerId: number;
+  method: string;
+  amount: number;
+  items: OutstandingPaymentItem[];
+};
+
+type GoogleMapInstance = {
+  fitBounds: (bounds: GoogleLatLngBounds, padding?: number) => void;
+};
+
+type GoogleMarker = {
+  addListener: (eventName: string, handler: () => void) => void;
+  getPosition: () => unknown;
+  setMap: (map: GoogleMapInstance | null) => void;
+};
+
+type GoogleLatLngBounds = {
+  extend: (position: unknown) => void;
+};
+
+type GoogleDirectionsRenderer = {
+  set: (key: string, value: unknown) => void;
+  setDirections: (result: unknown) => void;
+  setMap: (map: GoogleMapInstance) => void;
+};
+
+type GoogleDirectionsService = {
+  route: (
+    request: Record<string, unknown>,
+    callback: (result: unknown, status: string) => void
+  ) => void;
+};
 
 const NOT_CUT_REASONS: NotCutReason[] = [
   "Too Wet",
@@ -61,8 +131,34 @@ const NOT_CUT_REASONS: NotCutReason[] = [
   "Other",
 ];
 
+const PAY_ON_DAY_PAYMENT_METHODS = new Set(["Cash", "On Day Transfer"]);
+
 function formatMoney(value: number | null | undefined) {
   return `£${Number(value ?? 0).toFixed(2)}`;
+}
+
+function getMonthlyOutstandingStartDate(monthKey: string) {
+  const normalizedMonth = getInputDateValue(monthKey);
+
+  if (!normalizedMonth) {
+    return "";
+  }
+
+  const [year, month] = normalizedMonth.split("-").map(Number);
+
+  if (!Number.isInteger(year) || !Number.isInteger(month)) {
+    return "";
+  }
+
+  const outstandingDate = new Date(year, month + 1, 1);
+
+  return `${outstandingDate.getFullYear()}-${String(
+    outstandingDate.getMonth() + 1
+  ).padStart(2, "0")}-01`;
+}
+
+function isPayOnDayCustomer(customer: Customer) {
+  return PAY_ON_DAY_PAYMENT_METHODS.has(customer.paymentMethod ?? "Monthly");
 }
 
 function getCustomerAddress(customer: Customer) {
@@ -219,11 +315,17 @@ export default function MapPage({
   selectedDay,
   defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
   activeRotationWeeks,
+  monthlyPayments,
+  grassCutSeasonStart,
+  grassCutSeasonEnd,
+  monthlyPaymentsReady,
   isLocked,
   getCurrentVisit,
   onUpdateCustomer,
   onMarkVisit,
   onSetPaidStatus,
+  onSaveMonthlyPayment,
+  onSaveVisitPaymentDate,
   pendingCashPaymentDates,
   onSetPendingCashPayment,
   onCompleteRound,
@@ -240,6 +342,8 @@ export default function MapPage({
   const [routeComment, setRouteComment] = useState("");
   const [isSavingRouteComment, setIsSavingRouteComment] = useState(false);
   const [routeCommentStatus, setRouteCommentStatus] = useState<string | null>(null);
+  const [isMarkingOutstandingPaid, setIsMarkingOutstandingPaid] = useState(false);
+  const [outstandingPaymentStatus, setOutstandingPaymentStatus] = useState<string | null>(null);
   const [isOptimizingRoute, setIsOptimizingRoute] = useState(false);
   const [routePlanningStatus, setRoutePlanningStatus] = useState<string | null>(null);
   const [showCommentEditor, setShowCommentEditor] = useState(false);
@@ -250,9 +354,9 @@ export default function MapPage({
   const selectedCycleLabel = getRotationCycleLabel(selectedWeek, routeRotationWeeks);
 
   const mapRef = useRef<HTMLDivElement | null>(null);
-  const mapInstanceRef = useRef<any>(null);
-  const markersRef = useRef<any[]>([]);
-  const directionsRendererRef = useRef<any>(null);
+  const mapInstanceRef = useRef<GoogleMapInstance | null>(null);
+  const markersRef = useRef<GoogleMarker[]>([]);
+  const directionsRendererRef = useRef<GoogleDirectionsRenderer | null>(null);
 
   const dayStops = useMemo(() => {
     const filtered = customers.filter(
@@ -276,6 +380,122 @@ export default function MapPage({
     routeStarted && dayStops.length > 0 ? dayStops[currentStopIndex] : null;
 
   const selectedOrCurrentCustomer = currentStop ?? selectedCustomer;
+  const seasonStartYear = useMemo(
+    () => getConfiguredSeasonStartYear(new Date(), grassCutSeasonStart),
+    [grassCutSeasonStart]
+  );
+  const paymentYearMonths = useMemo(
+    () => buildPaymentYearMonths(seasonStartYear, grassCutSeasonStart),
+    [grassCutSeasonStart, seasonStartYear]
+  );
+  const monthlyPaymentLookup = useMemo(() => {
+    const lookup = new Map<string, MonthlyPayment>();
+
+    monthlyPayments.forEach((payment) => {
+      lookup.set(`${payment.customerId}:${getInputDateValue(payment.paymentMonth)}`, payment);
+    });
+
+    return lookup;
+  }, [monthlyPayments]);
+  const selectedCustomerOutstanding = useMemo<CustomerOutstandingPaymentSummary | null>(() => {
+    if (!selectedOrCurrentCustomer) {
+      return null;
+    }
+
+    const todayValue = getTodayDateInputValue();
+    const method = selectedOrCurrentCustomer.paymentMethod ?? "Monthly";
+
+    if (method === "Monthly") {
+      const monthlyCharge = getMonthlyPlanCharge(selectedOrCurrentCustomer);
+      const items: OutstandingPaymentItem[] = paymentYearMonths
+        .filter((month) => {
+          const outstandingStartDate = getMonthlyOutstandingStartDate(month.key);
+          const payment = monthlyPaymentLookup.get(
+            `${selectedOrCurrentCustomer.id}:${month.key}`
+          );
+
+          return (
+            Boolean(outstandingStartDate) &&
+            outstandingStartDate <= todayValue &&
+            !getInputDateValue(payment?.paymentDate)
+          );
+        })
+        .map((month) => ({
+          kind: "monthly" as const,
+          key: `monthly:${month.key}`,
+          label: `${month.fullLabel} payment`,
+          dueFrom: getMonthlyOutstandingStartDate(month.key),
+          amount: monthlyCharge,
+          paymentMonth: month.key,
+        }));
+
+      if (items.length === 0) {
+        return null;
+      }
+
+      return {
+        customerId: selectedOrCurrentCustomer.id,
+        method,
+        amount: items.reduce((total, item) => total + item.amount, 0),
+        items,
+      };
+    }
+
+    if (!isPayOnDayCustomer(selectedOrCurrentCustomer)) {
+      return null;
+    }
+
+    const items: OutstandingPaymentItem[] = visits
+      .filter((visit) => visit.customerId === selectedOrCurrentCustomer.id)
+      .filter((visit) => visit.status === "completed")
+      .filter((visit) =>
+        isDateInSeasonRange(
+          visit.visitDate,
+          seasonStartYear,
+          grassCutSeasonStart,
+          grassCutSeasonEnd
+        )
+      )
+      .filter((visit) => !getInputDateValue(visit.paidAt))
+      .sort(
+        (left, right) =>
+          new Date(left.visitDate).getTime() - new Date(right.visitDate).getTime()
+      )
+      .map((visit) => ({
+        kind: "visit" as const,
+        key: `visit:${visit.id}`,
+        label: `Cut ${formatStoredDate(visit.visitDate)}`,
+        dueFrom: getInputDateValue(visit.visitDate),
+        amount: Number(
+          visit.priceAtVisit ?? selectedOrCurrentCustomer.grassCutAmount ?? 0
+        ),
+        visitId: visit.id,
+      }));
+
+    if (items.length === 0) {
+      return null;
+    }
+
+    return {
+      customerId: selectedOrCurrentCustomer.id,
+      method,
+      amount: items.reduce((total, item) => total + item.amount, 0),
+      items,
+    };
+  }, [
+    grassCutSeasonEnd,
+    grassCutSeasonStart,
+    monthlyPaymentLookup,
+    paymentYearMonths,
+    seasonStartYear,
+    selectedOrCurrentCustomer,
+    visits,
+  ]);
+  const selectedOutstandingHasMonthlyItems =
+    selectedCustomerOutstanding?.items.some((item) => item.kind === "monthly") ?? false;
+  const canMarkOutstandingPaid =
+    Boolean(selectedCustomerOutstanding) &&
+    (!selectedOutstandingHasMonthlyItems || monthlyPaymentsReady);
 
   useEffect(() => {
     if (!dayStops.length) {
@@ -295,20 +515,22 @@ export default function MapPage({
     if (!mapRef.current || !window.google?.maps) return;
 
     if (!mapInstanceRef.current) {
-      mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
+      const map = new window.google.maps.Map(mapRef.current, {
         center: { lat: 55.8642, lng: -4.2518 },
         zoom: 11,
         mapTypeControl: false,
         streetViewControl: false,
         fullscreenControl: false,
-      });
+      }) as GoogleMapInstance;
 
-      directionsRendererRef.current = new window.google.maps.DirectionsRenderer({
+      const renderer = new window.google.maps.DirectionsRenderer({
         suppressMarkers: true,
         preserveViewport: false,
-      });
+      }) as GoogleDirectionsRenderer;
 
-      directionsRendererRef.current.setMap(mapInstanceRef.current);
+      renderer.setMap(map);
+      mapInstanceRef.current = map;
+      directionsRendererRef.current = renderer;
     }
 
     markersRef.current.forEach((marker) => marker.setMap(null));
@@ -364,7 +586,8 @@ export default function MapPage({
     }
 
     if (routeStarted && dayStops.length >= 2 && window.google?.maps) {
-      const directionsService = new window.google.maps.DirectionsService();
+      const directionsService =
+        new window.google.maps.DirectionsService() as GoogleDirectionsService;
       const routeCandidates = dayStops.filter(
         (customer) => hasCoordinates(customer) || getCustomerAddress(customer)
       );
@@ -393,7 +616,7 @@ export default function MapPage({
             travelMode: window.google.maps.TravelMode.DRIVING,
             optimizeWaypoints: false,
           },
-          (result: any, status: string) => {
+          (result: unknown, status: string) => {
             if (status === "OK") {
               directionsRendererRef.current?.setDirections(result);
             }
@@ -487,6 +710,10 @@ export default function MapPage({
   }, [selectedWeek, selectedDay]);
 
   useEffect(() => {
+    setOutstandingPaymentStatus(null);
+  }, [selectedOrCurrentCustomer?.id]);
+
+  useEffect(() => {
     setRouteComment(currentStop?.notes ?? "");
     setRouteCommentStatus(null);
     setShowCommentEditor(false);
@@ -501,6 +728,46 @@ export default function MapPage({
     }
 
     onSetPendingCashPayment(currentStop.id, paid);
+  }
+
+  async function handleMarkOutstandingPaid() {
+    if (!selectedCustomerOutstanding || isMarkingOutstandingPaid) {
+      return;
+    }
+
+    if (!canMarkOutstandingPaid) {
+      setOutstandingPaymentStatus(
+        "Monthly payment tracking is not ready yet. Check the payments setup first."
+      );
+      return;
+    }
+
+    setIsMarkingOutstandingPaid(true);
+    setOutstandingPaymentStatus(null);
+
+    try {
+      const paymentDate = getTodayDateInputValue();
+
+      for (const item of selectedCustomerOutstanding.items) {
+        if (item.kind === "monthly") {
+          await onSaveMonthlyPayment(
+            selectedCustomerOutstanding.customerId,
+            item.paymentMonth,
+            paymentDate
+          );
+        } else {
+          await onSaveVisitPaymentDate(item.visitId, paymentDate);
+        }
+      }
+
+      setOutstandingPaymentStatus("Outstanding payments marked as paid.");
+    } catch {
+      setOutstandingPaymentStatus(
+        "Unable to mark these payments as paid right now."
+      );
+    } finally {
+      setIsMarkingOutstandingPaid(false);
+    }
   }
 
   async function handleSaveRouteComment() {
@@ -797,6 +1064,66 @@ export default function MapPage({
                   </div>
                 </div>
 
+                {selectedCustomerOutstanding ? (
+                  <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div>
+                        <p className="text-sm font-black text-rose-800">
+                          Payment Outstanding
+                        </p>
+                        <p className="mt-1 text-sm text-rose-700">
+                          {formatMoney(selectedCustomerOutstanding.amount)} outstanding
+                          via {selectedCustomerOutstanding.method}.
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleMarkOutstandingPaid}
+                        disabled={
+                          isMarkingOutstandingPaid || !canMarkOutstandingPaid
+                        }
+                        className="rounded-xl bg-rose-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {isMarkingOutstandingPaid ? "Marking..." : "Mark As Paid"}
+                      </button>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {selectedCustomerOutstanding.items.map((item) => (
+                        <span
+                          key={item.key}
+                          className="rounded-full border border-rose-200 bg-white px-3 py-1 text-xs font-semibold text-rose-700"
+                        >
+                          {item.label}
+                        </span>
+                      ))}
+                    </div>
+
+                    {selectedOutstandingHasMonthlyItems && !monthlyPaymentsReady && (
+                      <p className="mt-3 text-xs font-semibold text-rose-700">
+                        Monthly payment tracking is not ready yet.
+                      </p>
+                    )}
+
+                    {outstandingPaymentStatus && (
+                      <p className="mt-3 text-xs font-semibold text-rose-700">
+                        {outstandingPaymentStatus}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                    <p className="text-sm font-black text-emerald-800">
+                      Nothing Outstanding
+                    </p>
+                    <p className="mt-1 text-sm text-emerald-700">
+                      No unpaid cuts or monthly payments are showing for this
+                      customer.
+                    </p>
+                  </div>
+                )}
+
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
                   {routeStarted && currentStop ? (
                     <div className="space-y-4">
@@ -1024,7 +1351,7 @@ export default function MapPage({
                   pendingCashPaymentDates[String(customer.id)]
                 );
                 const paid =
-                  (visit as any)?.paid === true ||
+                  visit?.paid === true ||
                   visit?.paymentStatus === "Paid";
 
                 return (

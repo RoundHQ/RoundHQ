@@ -13802,11 +13802,17 @@ export default function JobsApp({
                       selectedDay={selectedDay}
                       defaultRotationWeeks={defaultRotationWeeks}
                       activeRotationWeeks={activeRotationWeeks}
+                      monthlyPayments={monthlyPayments}
+                      grassCutSeasonStart={appSettings.grassCutSeasonStart}
+                      grassCutSeasonEnd={appSettings.grassCutSeasonEnd}
+                      monthlyPaymentsReady={workflowTablesReady.monthlyPayments}
                       isLocked={isLocked}
                       getCurrentVisit={getCurrentVisit as any}
                       onUpdateCustomer={updateCustomer as any}
                       onMarkVisit={markVisit as any}
                       onSetPaidStatus={setVisitPaidStatus}
+                      onSaveMonthlyPayment={saveMonthlyPaymentDate}
+                      onSaveVisitPaymentDate={saveVisitPaymentDate}
                       pendingCashPaymentDates={pendingCashPaymentDates}
                       onSetPendingCashPayment={setPendingCashPayment}
                       onCompleteRound={completeSelectedRound}
