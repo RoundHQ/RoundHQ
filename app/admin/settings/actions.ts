@@ -20,6 +20,7 @@ import {
 } from "@/lib/support/helpdesk";
 import { normalizeAnnouncementTone } from "@/lib/platform-announcements";
 import { getPlatformStripeSettings } from "@/lib/admin/stripe-settings";
+import { normalizeTrialDurationDays } from "@/lib/admin/trial-settings";
 
 function getText(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -267,6 +268,34 @@ export async function updateAdminStripeSettingsAction(formData: FormData) {
   revalidatePath("/billing");
   revalidatePath("/dashboard");
   redirect("/admin/settings?tab=stripe&saved=1");
+}
+
+export async function updateAdminTrialSettingsAction(formData: FormData) {
+  await requireAdminAccess("/admin/settings?tab=trials");
+
+  const supabase = createServiceRoleClient();
+  const { error } = await supabase.from("platform_trial_settings").upsert(
+    {
+      id: "primary",
+      free_trial_enabled: formData.get("free_trial_enabled") === "on",
+      free_trial_days: normalizeTrialDurationDays(
+        getText(formData, "free_trial_days")
+      ),
+      updated_at: new Date().toISOString(),
+    },
+    {
+      onConflict: "id",
+    }
+  );
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/admin/settings");
+  revalidatePath("/admin");
+  revalidatePath("/dashboard");
+  redirect("/admin/settings?tab=trials&saved=1");
 }
 
 export async function updatePlatformAnnouncementAction(formData: FormData) {

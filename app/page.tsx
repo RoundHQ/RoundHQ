@@ -103,7 +103,7 @@ const testimonials = [
   },
 ];
 
-const trustItems = ["Simple monthly plans", "Cancel anytime", "Starter £30 / Growth £60"];
+const trustItems = ["30-day free trial", "Cancel anytime", "Starter £30 / Growth £60"];
 
 function RoundHQLogo({ compact = false }: { compact?: boolean }) {
   return (
@@ -407,7 +407,7 @@ export default async function HomePage() {
                 href="/signup"
                 className="inline-flex items-center justify-center rounded-md bg-[#19c653] px-6 py-4 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.3)] transition hover:bg-[#22d861]"
               >
-                Choose your plan
+                Start 30-day free trial
               </Link>
               <Link
                 href="/login"
@@ -555,8 +555,9 @@ export default async function HomePage() {
               Start solo, then grow into a small team.
             </h2>
             <p className="mt-5 text-base leading-8 text-slate-600">
-              Two simple plans for managing recurring rounds, customers, quotes,
-              invoices, payments, staff, and daily operational visibility.
+              Start with a 30-day free trial, then choose the simple plan that
+              fits your recurring rounds, customers, quotes, invoices, payments,
+              staff, and daily operational visibility.
             </p>
           </div>
 
@@ -589,6 +590,9 @@ export default async function HomePage() {
                     {plan.billingLabel}
                   </p>
                 </div>
+                <p className="mt-4 inline-flex rounded-full bg-[#e7f9ed] px-3 py-1 text-xs font-extrabold text-[#168b43]">
+                  Includes a 30-day free trial
+                </p>
                 <ul className="mt-7 space-y-3">
                   {plan.includedFeatures.map((item) => (
                     <CheckItem key={item}>{item}</CheckItem>
@@ -602,7 +606,7 @@ export default async function HomePage() {
                       : "border border-slate-200 bg-white text-slate-900 hover:border-[#19c653]/45 hover:bg-[#f1fff6]"
                   }`}
                 >
-                  Choose {plan.name}
+                  Start {plan.name} free trial
                 </Link>
               </article>
             ))}
@@ -611,7 +615,7 @@ export default async function HomePage() {
           <div className="mt-8 flex flex-wrap items-center gap-4 text-sm font-semibold text-slate-600">
             <span className="inline-flex items-center gap-2">
               <ShieldCheck aria-hidden="true" className="size-4 text-[#168b43]" />
-              Simple monthly plans
+              30-day free trial
             </span>
             <span>No setup fees</span>
             <span>Cancel anytime</span>

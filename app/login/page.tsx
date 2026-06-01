@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { ArrowRight, BadgeCheck, ShieldCheck } from "lucide-react";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
 
@@ -12,22 +12,60 @@ const loginBenefits = [
   "Staff access and reports",
 ];
 
+function getSafeNextPath() {
+  const nextPath = new URLSearchParams(window.location.search).get("next");
+
+  if (nextPath?.startsWith("/") && !nextPath.startsWith("//")) {
+    return nextPath;
+  }
+
+  return "/dashboard";
+}
+
+function getInitialConfirmationNotice() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  return new URLSearchParams(window.location.search).get("confirmed") === "1"
+    ? "Account confirmed. Taking you to your dashboard..."
+    : "";
+}
+
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState(getInitialConfirmationNotice);
   const supabaseConfigured = isSupabaseConfigured();
 
-  const getNextPath = () => {
-    const nextPath = new URLSearchParams(window.location.search).get("next");
-
-    if (nextPath?.startsWith("/") && !nextPath.startsWith("//")) {
-      return nextPath;
+  useEffect(() => {
+    if (!supabaseConfigured) {
+      return;
     }
 
-    return "/dashboard";
-  };
+    const params = new URLSearchParams(window.location.search);
+
+    if (params.get("confirmed") !== "1") {
+      return;
+    }
+
+    const supabase = createClient();
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (data.session) {
+          window.location.href = getSafeNextPath();
+          return;
+        }
+
+        setNotice("Account confirmed. Sign in to open your dashboard.");
+      })
+      .catch(() => {
+        setNotice("Account confirmed. Sign in to open your dashboard.");
+      });
+  }, [supabaseConfigured]);
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -55,7 +93,7 @@ export default function LoginPage() {
         return;
       }
 
-      window.location.href = getNextPath();
+      window.location.href = getSafeNextPath();
     } catch (err) {
       console.error(err);
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -129,7 +167,7 @@ export default function LoginPage() {
                   Sign in
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                  Access your workspace and keep today's work moving.
+                  Access your workspace and keep today&apos;s work moving.
                 </p>
               </div>
             </div>
@@ -165,6 +203,12 @@ export default function LoginPage() {
               {error && (
                 <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                   {error}
+                </div>
+              )}
+
+              {notice && (
+                <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                  {notice}
                 </div>
               )}
 

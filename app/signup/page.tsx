@@ -2,12 +2,12 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { ArrowRight, BadgeCheck, ShieldCheck } from "lucide-react";
-import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 
 const signupBenefits = [
-  "Simple monthly plans",
+  "30-day free trial",
   "Choose Starter or Growth",
   "Starter £30 or Growth £60",
 ];
@@ -17,10 +17,19 @@ export default function SignupPage() {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [selectedPlan, setSelectedPlan] = useState("starter");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const supabaseConfigured = isSupabaseConfigured();
+
+  useEffect(() => {
+    const requestedPlan = new URLSearchParams(window.location.search).get("plan");
+
+    if (requestedPlan === "growth") {
+      setSelectedPlan("growth");
+    }
+  }, []);
 
   const handleSignup = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -37,35 +46,35 @@ export default function SignupPage() {
         return;
       }
 
-      const supabase = createClient();
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/dashboard`,
-          data: {
-            company_name: companyName.trim(),
-            full_name: fullName.trim(),
-          },
+      const response = await fetch("/api/signup", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
+        body: JSON.stringify({
+          companyName,
+          fullName,
+          email,
+          password,
+          plan: selectedPlan,
+        }),
       });
+      const payload = (await response.json().catch(() => null)) as {
+        error?: string;
+      } | null;
 
-      if (error) {
-        setError(error.message);
-        setLoading(false);
+      if (!response.ok) {
+        setError(payload?.error || "Unable to create your RoundHQ account.");
         return;
       }
 
-      if (data.session) {
-        window.location.href = "/dashboard";
-        return;
-      }
-
-      setSuccess("Check your email to confirm your RoundHQ account.");
-      setLoading(false);
+      setSuccess(
+        "We have sent your RoundHQ confirmation email. Check your inbox to start your 30-day free trial."
+      );
     } catch (err) {
       console.error(err);
       setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
       setLoading(false);
     }
   };
@@ -106,8 +115,9 @@ export default function SignupPage() {
               Create your RoundHQ workspace.
             </h1>
             <p className="mt-6 max-w-xl text-lg leading-8 text-white/78">
-              Set up your account, then manage customers, schedules, quotes,
-              invoices, payments, and field work from one place.
+              Set up your account and start your 30-day free trial, then manage
+              customers, schedules, quotes, invoices, payments, and field work
+              from one place.
             </p>
 
             <ul className="mt-9 grid gap-4 sm:grid-cols-3">
@@ -136,7 +146,8 @@ export default function SignupPage() {
                   Create account
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                  Your workspace is ready as soon as your account is confirmed.
+                  Your 30-day free trial starts when your RoundHQ workspace is
+                  opened.
                 </p>
               </div>
             </div>
@@ -219,7 +230,7 @@ export default function SignupPage() {
                 disabled={loading || !supabaseConfigured}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-[#19c653] px-4 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.24)] transition hover:bg-[#22d861] disabled:opacity-50"
               >
-                {loading ? "Creating account..." : "Create account"}
+                {loading ? "Creating account..." : "Start 30-day free trial"}
                 {!loading && <ArrowRight aria-hidden="true" className="size-4" />}
               </button>
             </form>

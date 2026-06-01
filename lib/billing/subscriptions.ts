@@ -74,10 +74,15 @@ export function hasDashboardAccess(subscription: SubscriptionRow | null) {
     return true;
   }
 
-  return (
-    subscription.status === "trialing" &&
-    Boolean(subscription.stripe_subscription_id)
-  );
+  if (subscription.status !== "trialing") {
+    return false;
+  }
+
+  if (Boolean(subscription.stripe_subscription_id)) {
+    return true;
+  }
+
+  return isTrialSubscriptionActive(subscription);
 }
 
 export function getSubscriptionStatusLabel(subscription: SubscriptionRow | null) {
@@ -85,7 +90,44 @@ export function getSubscriptionStatusLabel(subscription: SubscriptionRow | null)
     return "No subscription";
   }
 
+  if (subscription.status === "trialing") {
+    return isTrialSubscriptionActive(subscription)
+      ? "free trial"
+      : "free trial ended";
+  }
+
   return subscription.status.replace(/_/g, " ");
+}
+
+export function getTrialDaysRemaining(
+  subscription: Pick<SubscriptionRow, "status" | "trial_ends_at"> | null,
+  now = new Date()
+) {
+  if (subscription?.status !== "trialing" || !subscription.trial_ends_at) {
+    return null;
+  }
+
+  const trialEndsAt = new Date(subscription.trial_ends_at);
+
+  if (Number.isNaN(trialEndsAt.getTime())) {
+    return null;
+  }
+
+  const remainingMilliseconds = trialEndsAt.getTime() - now.getTime();
+
+  return Math.max(
+    0,
+    Math.ceil(remainingMilliseconds / (24 * 60 * 60 * 1000))
+  );
+}
+
+export function isTrialSubscriptionActive(
+  subscription: Pick<SubscriptionRow, "status" | "trial_ends_at"> | null,
+  now = new Date()
+) {
+  const daysRemaining = getTrialDaysRemaining(subscription, now);
+
+  return daysRemaining !== null && daysRemaining > 0;
 }
 
 export async function ensureSubscriptionRow(

@@ -63,6 +63,7 @@ export const DEFAULT_VERIFICATION_MESSAGE_TEMPLATE = [
   "Hi {{customerName}},",
   "",
   "Thanks for signing up to RoundHQ.",
+  "Your 30-day free trial starts when you open your workspace.",
   "",
   "Confirm your account here:",
   "{{verificationLink}}",

@@ -207,16 +207,16 @@ When work changes, RoundHQ keeps the admin close to the job: capture leads, crea
     'Pricing',
     'Simple launch pricing',
     'Choose the plan that matches how your team works.',
-    'Starter is GBP 30 per business / month for solo operators getting organised. Growth is GBP 60 per business / month for teams that need staff permissions, RAMS, commercial workflows, and deeper reporting.',
+    'Start with a 30-day free trial. Starter is GBP 30 per business / month for solo operators getting organised. Growth is GBP 60 per business / month for teams that need staff permissions, RAMS, commercial workflows, and deeper reporting.',
     'Starter gives a solo operator the core workspace: leads, customer CRM, scheduling, recurring rounds, route map, quotes, invoices, payment tracking, visit history, notes, one staff account, up to 250 customers, and the main dashboard.
 
 Growth is built for businesses adding people and complexity. It includes everything in Starter plus up to 5 staff accounts, staff permissions, RAMS generator, advanced dashboard insights, customer profitability, workflow tracking, commercial customer tools, quote conversion workflows, operational reporting, and up to 1,500 customers.
 
-There are no setup fees, and you can change plan as the business grows.',
+Every new workspace starts with a 30-day free trial. There are no setup fees, and you can change plan as the business grows.',
     jsonb_build_array(
       'Starter: GBP 30 per business / month for solo operators',
       'Growth: GBP 60 per business / month for teams and commercial work',
-      'No setup fees, cancel anytime'
+      '30-day free trial, no setup fees, cancel anytime'
     ),
     'Choose a plan',
     '/signup',
@@ -1566,6 +1566,54 @@ alter table public.platform_stripe_settings enable row level security;
 insert into public.platform_stripe_settings (id)
 values ('primary')
 on conflict (id) do nothing;
+
+create table if not exists public.platform_trial_settings (
+  id text primary key default 'primary',
+  free_trial_enabled boolean not null default true,
+  free_trial_days integer not null default 30,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.platform_trial_settings
+  add column if not exists free_trial_enabled boolean not null default true,
+  add column if not exists free_trial_days integer not null default 30,
+  add column if not exists created_at timestamptz not null default now(),
+  add column if not exists updated_at timestamptz not null default now();
+
+alter table public.platform_trial_settings
+  drop constraint if exists platform_trial_settings_days_check;
+
+alter table public.platform_trial_settings
+  add constraint platform_trial_settings_days_check
+  check (free_trial_days between 1 and 365);
+
+alter table public.platform_trial_settings enable row level security;
+
+grant select on public.platform_trial_settings to authenticated;
+
+drop policy if exists "Authenticated users can read platform trial settings"
+on public.platform_trial_settings;
+
+create policy "Authenticated users can read platform trial settings"
+on public.platform_trial_settings
+for select
+to authenticated
+using (true);
+
+insert into public.platform_trial_settings (id)
+values ('primary')
+on conflict (id) do nothing;
+
+update public.platform_trial_settings
+set free_trial_enabled = case
+      when free_trial_enabled = false and free_trial_days = 14 then true
+      else free_trial_enabled
+    end,
+    free_trial_days = 30,
+    updated_at = now()
+where id = 'primary'
+  and free_trial_days = 14;
 
 create table if not exists public.platform_email_settings (
   id text primary key default 'primary',

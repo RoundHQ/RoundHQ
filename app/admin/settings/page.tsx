@@ -28,6 +28,7 @@ import {
   getPlatformStripeSettings,
   isPlatformStripeConfigured,
 } from "@/lib/admin/stripe-settings";
+import { getPlatformTrialSettings } from "@/lib/admin/trial-settings";
 import {
   getSupportDeskSettingsData,
   type SupportCategoryOption,
@@ -43,6 +44,7 @@ import {
   updateAdminHelpdeskSettingsAction,
   updateAdminInvoiceSettingsAction,
   updateAdminStripeSettingsAction,
+  updateAdminTrialSettingsAction,
 } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -415,6 +417,7 @@ export default async function AdminSettingsPage({
   const params = (await searchParams) ?? {};
   const settings = await getPlatformEmailSettings();
   const stripeSettings = await getPlatformStripeSettings();
+  const trialSettings = await getPlatformTrialSettings();
   const supportSettings = await getSupportDeskSettingsData();
   const announcement = await getAdminPlatformAnnouncement();
   const emailReady = isPlatformEmailConfigured(settings);
@@ -427,6 +430,7 @@ export default async function AdminSettingsPage({
     params.tab === "invoices" ||
     params.tab === "send-email" ||
     params.tab === "stripe" ||
+    params.tab === "trials" ||
     params.tab === "helpdesk" ||
     params.tab === "announcements"
       ? params.tab
@@ -440,7 +444,7 @@ export default async function AdminSettingsPage({
         title="RoundHQ owner settings."
         summary="Configure platform email delivery, signup verification emails, automated invoice reminders, Stripe checkout, helpdesk defaults, and dashboard announcements from the owner console."
       >
-        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <SettingStat
             title="Email"
             value={emailReady ? "Ready" : "Setup"}
@@ -463,6 +467,11 @@ export default async function AdminSettingsPage({
                 ? "Checkout and both webhook secrets are saved"
                 : "Add keys, webhook secrets, and price IDs before taking payments"
             }
+          />
+          <SettingStat
+            title="Free Trial"
+            value={trialSettings.enabled ? "On" : "Off"}
+            detail={`${trialSettings.defaultDays} day default for new workspaces`}
           />
           <SettingStat
             title="Announcements"
@@ -504,6 +513,12 @@ export default async function AdminSettingsPage({
               label="Stripe"
             />
             <SettingsTabLink
+              href="/admin/settings?tab=trials"
+              isActive={activeTab === "trials"}
+              icon={<CalendarClock aria-hidden="true" className="size-4" />}
+              label="Free Trial"
+            />
+            <SettingsTabLink
               href="/admin/settings?tab=helpdesk"
               isActive={activeTab === "helpdesk"}
               icon={<LifeBuoy aria-hidden="true" className="size-4" />}
@@ -523,6 +538,8 @@ export default async function AdminSettingsPage({
                 ? "Invoice settings saved."
                 : activeTab === "stripe"
                   ? "Stripe settings saved."
+                : activeTab === "trials"
+                  ? "Free trial settings saved."
                 : activeTab === "helpdesk"
                   ? "Helpdesk settings saved."
                 : activeTab === "announcements"
@@ -557,6 +574,18 @@ export default async function AdminSettingsPage({
               saving Stripe settings.
               <div className="mt-2 text-xs text-amber-800">
                 {stripeSettings.schemaError}
+              </div>
+            </div>
+          )}
+
+          {activeTab === "trials" && trialSettings.schemaError && (
+            <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+              <span className="font-bold">Free trial database setup needed:</span>{" "}
+              Run <code>supabase/platform_trial_settings_schema.sql</code> or
+              the latest <code>supabase/roundhq_tenant_schema.sql</code> before
+              saving free trial settings.
+              <div className="mt-2 text-xs text-amber-800">
+                {trialSettings.schemaError}
               </div>
             </div>
           )}
@@ -969,6 +998,106 @@ export default async function AdminSettingsPage({
                     </div>
                   ) : null}
                 </div>
+              </section>
+            </form>
+          ) : activeTab === "trials" ? (
+            <form
+              action={updateAdminTrialSettingsAction}
+              className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]"
+            >
+              <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
+                <div className="mb-6 flex items-start gap-3">
+                  <div className="flex size-11 shrink-0 items-center justify-center rounded-md bg-[#e7f9ed] text-[#168b43]">
+                    <CalendarClock aria-hidden="true" className="size-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-extrabold tracking-normal text-slate-950">
+                      Free trial defaults
+                    </h2>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                      Control whether new RoundHQ workspaces start on a free
+                      trial and how long the trial runs before the dashboard
+                      requires a paid subscription.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-5">
+                  <label className="flex items-start gap-3 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700">
+                    <input
+                      type="checkbox"
+                      name="free_trial_enabled"
+                      defaultChecked={trialSettings.enabled}
+                      className="mt-1 size-4 accent-[#19c653]"
+                    />
+                    <span>
+                      Enable free trials for new workspaces
+                      <span className="mt-1 block text-xs font-semibold leading-5 text-slate-500">
+                        This applies to new public signups and becomes the
+                        default when you add a customer manually.
+                      </span>
+                    </span>
+                  </label>
+
+                  <TextInput
+                    label="Default free trial length (days)"
+                    name="free_trial_days"
+                    type="number"
+                    defaultValue={trialSettings.defaultDays}
+                    required
+                  />
+                </div>
+              </section>
+
+              <section className="space-y-6">
+                <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
+                  <h2 className="text-xl font-extrabold tracking-normal text-slate-950">
+                    Customer dashboard behaviour
+                  </h2>
+                  <div className="mt-5 grid gap-3">
+                    <div className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                      <span className="font-bold text-slate-700">
+                        Trial status
+                      </span>
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-bold ${
+                          trialSettings.enabled
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-slate-100 text-slate-700"
+                        }`}
+                      >
+                        {trialSettings.enabled ? "Enabled" : "Disabled"}
+                      </span>
+                    </div>
+                    <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+                      New trial workspaces are created with{" "}
+                      <span className="font-bold text-slate-950">
+                        {trialSettings.defaultDays} days
+                      </span>{" "}
+                      of dashboard access. When the expiry time passes, the
+                      dashboard is locked until the customer pays for a Starter
+                      or Growth subscription.
+                    </div>
+                    <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-900">
+                      Customers see a countdown under their plan in the sidebar
+                      while the trial is active.
+                    </div>
+                  </div>
+                  {trialSettings.updatedAt ? (
+                    <p className="mt-4 text-xs font-semibold text-slate-500">
+                      Last saved{" "}
+                      {new Date(trialSettings.updatedAt).toLocaleString("en-GB")}
+                    </p>
+                  ) : null}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={Boolean(trialSettings.schemaError)}
+                  className="inline-flex w-full items-center justify-center rounded-md bg-[#19c653] px-5 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.2)] transition hover:bg-[#22d861] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Save free trial settings
+                </button>
               </section>
             </form>
           ) : activeTab === "stripe" ? (

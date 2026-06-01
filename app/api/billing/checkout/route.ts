@@ -1,10 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { ensureWorkspace } from "@/lib/workspace";
-import {
-  ensureSubscriptionRow,
-  hasDashboardAccess,
-} from "@/lib/billing/subscriptions";
+import { ensureSubscriptionRow } from "@/lib/billing/subscriptions";
 import { getSubscriptionPlan, normalizePlanKey } from "@/lib/billing/plans";
 import {
   getBaseUrl,
@@ -57,7 +54,11 @@ export async function POST(request: NextRequest) {
     const organizationId = await ensureWorkspace(supabase, user);
     const subscription = await ensureSubscriptionRow(supabase, organizationId);
 
-    if (hasDashboardAccess(subscription)) {
+    if (
+      subscription.status === "active" ||
+      (subscription.status === "trialing" &&
+        Boolean(subscription.stripe_subscription_id))
+    ) {
       return NextResponse.json({ url: `${getBaseUrl(request.url)}/dashboard` });
     }
 

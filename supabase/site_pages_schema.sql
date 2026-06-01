@@ -73,16 +73,16 @@ When work changes, RoundHQ keeps the admin close to the job: capture leads, crea
     'Pricing',
     'Simple launch pricing',
     'Choose the plan that matches how your team works.',
-    'Starter is GBP 30 per business / month for solo operators getting organised. Growth is GBP 60 per business / month for teams that need staff permissions, RAMS, commercial workflows, and deeper reporting.',
+    'Start with a 30-day free trial. Starter is GBP 30 per business / month for solo operators getting organised. Growth is GBP 60 per business / month for teams that need staff permissions, RAMS, commercial workflows, and deeper reporting.',
     'Starter gives a solo operator the core workspace: leads, customer CRM, scheduling, recurring rounds, route map, quotes, invoices, payment tracking, visit history, notes, one staff account, up to 250 customers, and the main dashboard.
 
 Growth is built for businesses adding people and complexity. It includes everything in Starter plus up to 5 staff accounts, staff permissions, RAMS generator, advanced dashboard insights, customer profitability, workflow tracking, commercial customer tools, quote conversion workflows, operational reporting, and up to 1,500 customers.
 
-There are no setup fees, and you can change plan as the business grows.',
+Every new workspace starts with a 30-day free trial. There are no setup fees, and you can change plan as the business grows.',
     jsonb_build_array(
       'Starter: GBP 30 per business / month for solo operators',
       'Growth: GBP 60 per business / month for teams and commercial work',
-      'No setup fees, cancel anytime'
+      '30-day free trial, no setup fees, cancel anytime'
     ),
     'Choose a plan',
     '/signup',

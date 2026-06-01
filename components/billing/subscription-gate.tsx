@@ -18,6 +18,7 @@ export default function SubscriptionGate({
   stripeConfiguredByPlan,
 }: SubscriptionGateProps) {
   const stripeConfigured = Object.values(stripeConfiguredByPlan).every(Boolean);
+  const isExpiredTrial = subscriptionStatus === "free trial ended";
 
   return (
     <main className="min-h-screen bg-[#f6f5ef] px-5 py-8 text-slate-950 sm:px-8">
@@ -47,7 +48,9 @@ export default function SubscriptionGate({
                 Activate {workspaceName} to open the dashboard.
               </h1>
               <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600">
-                Choose Starter or Growth to activate your protected workspace.
+                {isExpiredTrial
+                  ? "Your free trial has ended. Choose Starter or Growth to continue using your protected workspace."
+                  : "Choose Starter or Growth to activate your protected workspace."}{" "}
                 Stripe will return you here with dashboard access switched on.
               </p>
 

@@ -1,5 +1,9 @@
 import { randomUUID } from "crypto";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
+import {
+  getPlatformTrialSettingsForClient,
+  getTrialEndIso,
+} from "@/lib/admin/trial-settings";
 
 export const DEFAULT_ROLE_PERMISSIONS = [
   ["Admin", "dashboard", true],
@@ -115,11 +119,20 @@ export async function ensureWorkspace(supabase: SupabaseClient, user: User) {
     throw memberError;
   }
 
+  const trialSettings = await getPlatformTrialSettingsForClient(supabase);
+  const subscriptionPayload = trialSettings.enabled
+    ? {
+        organization_id: organizationId,
+        status: "trialing",
+        trial_ends_at: getTrialEndIso(trialSettings.defaultDays),
+      }
+    : {
+        organization_id: organizationId,
+        status: "incomplete",
+      };
+
   const seedOperations = [
-    supabase.from("subscriptions").insert({
-      organization_id: organizationId,
-      status: "incomplete",
-    }),
+    supabase.from("subscriptions").insert(subscriptionPayload),
     supabase.from("app_state").upsert(
       {
         organization_id: organizationId,

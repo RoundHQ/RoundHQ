@@ -503,6 +503,9 @@ function PlanCard({ plan }: { plan: SubscriptionPlan }) {
           per business / month
         </p>
       </div>
+      <p className="mt-4 inline-flex rounded-full bg-[#e7f9ed] px-3 py-1 text-xs font-extrabold text-[#168b43]">
+        Includes a 30-day free trial
+      </p>
 
       <div className="mt-6 grid gap-3 sm:grid-cols-3">
         {plan.summaryLimits.map((limit) => (
@@ -532,7 +535,7 @@ function PlanCard({ plan }: { plan: SubscriptionPlan }) {
             : "border border-slate-200 bg-white text-slate-900 hover:border-[#19c653]/45 hover:bg-[#f1fff6]"
         }`}
       >
-        Start {plan.name}
+        Start {plan.name} free trial
         <ArrowRight aria-hidden="true" className="size-4" />
       </Link>
     </article>

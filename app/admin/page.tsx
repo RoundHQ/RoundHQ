@@ -6,6 +6,7 @@ import {
   ArrowRight,
   Bell,
   Building2,
+  CalendarClock,
   CreditCard,
   FileText,
   LifeBuoy,
@@ -33,6 +34,7 @@ import { isAdminAccessConfigured, isAdminEmail } from "@/lib/admin/access";
 import { createClient } from "@/lib/supabase/server";
 import { isSupabaseServiceRoleConfigured } from "@/lib/supabase/admin";
 import { getAdminHelpdeskNotificationSummary } from "@/lib/support/helpdesk";
+import { getPlatformTrialSettings } from "@/lib/admin/trial-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +70,10 @@ function formatDate(value: string | null) {
 }
 
 function formatStatus(value: string) {
+  if (value === "trialing") {
+    return "free trial";
+  }
+
   return value.replace(/_/g, " ");
 }
 
@@ -261,9 +267,10 @@ export default async function AdminPage({
   const selectedStatus = STATUS_OPTIONS.some((status) => status === requestedStatus)
     ? requestedStatus
     : "all";
-  const [{ workspaces, stats }, helpdeskSummary] = await Promise.all([
+  const [{ workspaces, stats }, helpdeskSummary, trialSettings] = await Promise.all([
     getAdminCustomerWorkspaces(),
     getAdminHelpdeskNotificationSummary(),
+    getPlatformTrialSettings(),
   ]);
   const filteredWorkspaces = workspaces.filter((workspace) => {
     const statusMatches =
@@ -387,6 +394,12 @@ export default async function AdminPage({
                 value={stats.disabledAccounts}
                 detail="Accounts currently blocked by owner controls"
                 icon={Users}
+              />
+              <StatTile
+                title="Free trial"
+                value={trialSettings.enabled ? "On" : "Off"}
+                detail={`${trialSettings.defaultDays} day default for new workspaces`}
+                icon={CalendarClock}
               />
             </section>
           </div>
@@ -628,12 +641,43 @@ export default async function AdminPage({
                 </span>
                 <select
                   name="subscription_status"
-                  defaultValue="active"
+                  defaultValue={trialSettings.enabled ? "trialing" : "active"}
                   className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
                 >
                   <option value="active">Active manual access</option>
+                  <option value="trialing">Free trial</option>
                   <option value="incomplete">Needs payment</option>
                 </select>
+              </label>
+
+              <label className="flex items-start gap-3 rounded-md border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm font-bold text-slate-700">
+                <input
+                  type="checkbox"
+                  name="free_trial_enabled"
+                  defaultChecked={trialSettings.enabled}
+                  className="mt-1 size-4 accent-[#19c653]"
+                />
+                <span>
+                  Add free trial
+                  <span className="mt-1 block text-xs font-semibold leading-5 text-slate-500">
+                    Uses the owner console default unless you change the length
+                    here.
+                  </span>
+                </span>
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-bold text-slate-700">
+                  Free trial length (days)
+                </span>
+                <input
+                  type="number"
+                  name="free_trial_days"
+                  min={1}
+                  max={365}
+                  defaultValue={trialSettings.defaultDays}
+                  className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
+                />
               </label>
 
               <label className="flex items-start gap-3 rounded-md border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm font-bold text-slate-700 lg:col-span-2">
@@ -782,6 +826,11 @@ export default async function AdminPage({
                           <div className="mt-2 text-xs text-slate-500">
                             Renews: {formatDate(workspace.currentPeriodEnd)}
                           </div>
+                          {workspace.trialEndsAt ? (
+                            <div className="mt-1 text-xs font-semibold text-emerald-700">
+                              Trial ends: {formatDate(workspace.trialEndsAt)}
+                            </div>
+                          ) : null}
                           {workspace.cancelAtPeriodEnd && (
                             <div className="mt-1 text-xs font-semibold text-amber-700">
                               Cancels at period end

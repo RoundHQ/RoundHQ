@@ -19,11 +19,16 @@ import {
   isPlatformEmailConfigured,
   sendPlatformEmail,
 } from "@/lib/admin/email-settings";
+import {
+  getPlatformTrialSettings,
+  getTrialEndIso,
+  normalizeTrialDurationDays,
+} from "@/lib/admin/trial-settings";
 import { getFriendlySmtpErrorMessage } from "@/lib/email/smtp-delivery";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { DEFAULT_ROLE_PERMISSIONS } from "@/lib/workspace";
 
-type ManualSubscriptionStatus = "active" | "incomplete";
+type ManualSubscriptionStatus = "active" | "incomplete" | "trialing";
 type ManualCustomerEmailStatus =
   | "not_requested"
   | "sent"
@@ -43,7 +48,23 @@ function normalizeEmail(value: string) {
 function normalizeManualSubscriptionStatus(
   value: string
 ): ManualSubscriptionStatus {
-  return value === "incomplete" ? "incomplete" : "active";
+  if (value === "incomplete" || value === "trialing") {
+    return value;
+  }
+
+  return "active";
+}
+
+function formatTrialEndDate(value: string | null) {
+  if (!value) {
+    return "Not set";
+  }
+
+  return new Date(value).toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  });
 }
 
 function isMissingOptionalCustomerSettingsSchema(error: { code?: string } | null) {
@@ -77,6 +98,7 @@ function buildManualCustomerWelcomeEmail({
   temporaryPassword,
   plan,
   status,
+  trialEndsAt,
 }: {
   workspaceName: string;
   ownerName: string;
@@ -84,9 +106,16 @@ function buildManualCustomerWelcomeEmail({
   temporaryPassword: string;
   plan: string;
   status: ManualSubscriptionStatus;
+  trialEndsAt: string | null;
 }) {
   const subscriptionPlan = getSubscriptionPlan(plan);
   const loginUrl = getRoundHqLoginUrl();
+  const statusText =
+    status === "active"
+      ? "Active manual access"
+      : status === "trialing"
+        ? "Free trial"
+        : "Needs payment";
 
   return {
     subject: `Your RoundHQ workspace is ready: ${workspaceName}`,
@@ -102,9 +131,10 @@ function buildManualCustomerWelcomeEmail({
       "",
       "Workspace details:",
       `Plan: ${subscriptionPlan.name}`,
-      `Subscription status: ${
-        status === "active" ? "Active manual access" : "Needs payment"
-      }`,
+      `Subscription status: ${statusText}`,
+      ...(status === "trialing"
+        ? [`Free trial ends: ${formatTrialEndDate(trialEndsAt)}`]
+        : []),
       "",
       "Please sign in and change your password from your account settings.",
       "",
@@ -149,11 +179,13 @@ async function insertSubscription({
   organizationId,
   plan,
   status,
+  trialEndsAt,
 }: {
   supabase: SupabaseClient;
   organizationId: string;
   plan: string;
   status: ManualSubscriptionStatus;
+  trialEndsAt: string | null;
 }) {
   const updatedAt = new Date().toISOString();
   const attempts = [
@@ -162,17 +194,20 @@ async function insertSubscription({
       plan,
       staff_addon_quantity: 0,
       status,
+      trial_ends_at: trialEndsAt,
       updated_at: updatedAt,
     },
     {
       organization_id: organizationId,
       plan,
       status,
+      trial_ends_at: trialEndsAt,
       updated_at: updatedAt,
     },
     {
       organization_id: organizationId,
       status,
+      trial_ends_at: trialEndsAt,
       updated_at: updatedAt,
     },
   ];
@@ -210,6 +245,7 @@ async function seedManualCustomerWorkspace({
   ownerName,
   plan,
   status,
+  trialEndsAt,
 }: {
   supabase: SupabaseClient;
   organizationId: string;
@@ -218,6 +254,7 @@ async function seedManualCustomerWorkspace({
   ownerName: string;
   plan: string;
   status: ManualSubscriptionStatus;
+  trialEndsAt: string | null;
 }) {
   const ownerEmail = owner.email ?? "";
 
@@ -253,6 +290,7 @@ async function seedManualCustomerWorkspace({
     organizationId,
     plan,
     status,
+    trialEndsAt,
   });
 
   const seedResults = await Promise.all([
@@ -323,6 +361,17 @@ export async function createManualCustomerAction(formData: FormData) {
   const status = normalizeManualSubscriptionStatus(
     getText(formData, "subscription_status")
   );
+  const trialSettings = await getPlatformTrialSettings();
+  const trialRequested =
+    status === "trialing" || formData.get("free_trial_enabled") === "on";
+  const trialDays = normalizeTrialDurationDays(
+    getText(formData, "free_trial_days"),
+    trialSettings.defaultDays
+  );
+  const effectiveStatus: ManualSubscriptionStatus = trialRequested
+    ? "trialing"
+    : status;
+  const trialEndsAt = trialRequested ? getTrialEndIso(trialDays) : null;
   const shouldEmailOwner = formData.get("send_owner_email") === "on";
 
   if (!workspaceName) {
@@ -408,7 +457,8 @@ export async function createManualCustomerAction(formData: FormData) {
       owner: authData.user,
       ownerName,
       plan,
-      status,
+      status: effectiveStatus,
+      trialEndsAt,
     });
   } catch (error) {
     await supabase.from("organizations").delete().eq("id", organizationId);
@@ -433,7 +483,8 @@ export async function createManualCustomerAction(formData: FormData) {
         ownerEmail,
         temporaryPassword,
         plan,
-        status,
+        status: effectiveStatus,
+        trialEndsAt,
       });
 
       try {

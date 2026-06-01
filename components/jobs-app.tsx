@@ -5021,6 +5021,8 @@ type JobsAppProps = {
   } | null;
   subscriptionPlan?: SubscriptionPlanKey;
   subscriptionStaffAddonQuantity?: number;
+  subscriptionStatus?: string;
+  subscriptionTrialEndsAt?: string | null;
 };
 
 type HeaderWeatherState = {
@@ -5035,6 +5037,21 @@ const HEADER_WEATHER_FALLBACK_COORDINATES = {
 };
 
 const HEADER_WEATHER_LOCATION_LABEL = "East Kilbride";
+const TRIAL_DAY_MS = 24 * 60 * 60 * 1000;
+
+function getTrialDaysLeft(status?: string, trialEndsAt?: string | null) {
+  if (status !== "trialing" || !trialEndsAt) {
+    return null;
+  }
+
+  const trialEndDate = new Date(trialEndsAt);
+
+  if (Number.isNaN(trialEndDate.getTime())) {
+    return null;
+  }
+
+  return Math.max(0, Math.ceil((trialEndDate.getTime() - Date.now()) / TRIAL_DAY_MS));
+}
 
 function getCompactWeatherLabel(weatherCode: number | null) {
   if (weatherCode === null) return "Forecast";
@@ -5138,6 +5155,8 @@ export default function JobsApp({
   supportAccess,
   subscriptionPlan,
   subscriptionStaffAddonQuantity,
+  subscriptionStatus,
+  subscriptionTrialEndsAt,
 }: JobsAppProps = {}) {
   const supportOrganizationId = supportAccess?.organizationId ?? null;
   const isSupportAccess = Boolean(supportOrganizationId);
@@ -5152,6 +5171,10 @@ export default function JobsApp({
   const activeSubscriptionPlan = useMemo(
       () => getSubscriptionPlan(subscriptionPlan),
       [subscriptionPlan]
+  );
+  const trialDaysLeft = getTrialDaysLeft(
+      subscriptionStatus,
+      subscriptionTrialEndsAt
   );
   const planFeatureAccess = useMemo(
       () =>
@@ -5169,6 +5192,35 @@ export default function JobsApp({
       () => getSubscriptionStaffLimit(subscriptionPlan, staffAddonQuantity),
       [staffAddonQuantity, subscriptionPlan]
   );
+  useEffect(() => {
+    if (
+        isSupportAccess ||
+        subscriptionStatus !== "trialing" ||
+        !subscriptionTrialEndsAt
+    ) {
+      return;
+    }
+
+    const trialEndTime = new Date(subscriptionTrialEndsAt).getTime();
+
+    if (Number.isNaN(trialEndTime)) {
+      return;
+    }
+
+    const millisecondsUntilExpiry = trialEndTime - Date.now();
+
+    if (millisecondsUntilExpiry <= 0) {
+      window.location.reload();
+      return;
+    }
+
+    const timeout = window.setTimeout(
+        () => window.location.reload(),
+        Math.min(millisecondsUntilExpiry + 1000, 2_147_483_647)
+    );
+
+    return () => window.clearTimeout(timeout);
+  }, [isSupportAccess, subscriptionStatus, subscriptionTrialEndsAt]);
   const initialWorkspaceRouteRef = useRef<WorkspaceRouteState | null>(null);
   if (initialWorkspaceRouteRef.current === null) {
     initialWorkspaceRouteRef.current = getWorkspaceRouteFromLocation();
@@ -12891,6 +12943,19 @@ export default function JobsApp({
               <span className="mt-1 block text-sm font-semibold text-white/78">
                 {activeSubscriptionPlan.priceLabel} per business / month
               </span>
+              {trialDaysLeft !== null ? (
+                  <span
+                      className={`mt-3 block rounded-xl border px-3 py-2 text-xs font-black ${
+                          trialDaysLeft > 0
+                              ? "border-[#20c766]/25 bg-[#20c766]/10 text-[#b9ffd0]"
+                              : "border-amber-300/35 bg-amber-300/10 text-amber-100"
+                      }`}
+                  >
+                    {trialDaysLeft > 0
+                        ? `${trialDaysLeft} day${trialDaysLeft === 1 ? "" : "s"} left on free trial`
+                        : "Free trial ends today"}
+                  </span>
+              ) : null}
               {activeSubscriptionPlan.key === "starter" ? (
                   <a
                       href="/billing"

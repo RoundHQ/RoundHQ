@@ -228,6 +228,8 @@ export default async function DashboardPage({
       supportAccess={supportAccess}
       subscriptionPlan={subscription.plan}
       subscriptionStaffAddonQuantity={subscription.staff_addon_quantity}
+      subscriptionStatus={subscription.status}
+      subscriptionTrialEndsAt={subscription.trial_ends_at}
     />
   );
 }
