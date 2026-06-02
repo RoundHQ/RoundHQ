@@ -40,15 +40,18 @@ export const RAMS_WORK_TYPE_OPTIONS = [
 export type RamsWorkType = (typeof RAMS_WORK_TYPE_OPTIONS)[number];
 export type RamsYesNo = "Yes" | "No";
 
-export type NotCutReason =
-  | "Too Wet"
-  | "Access Blocked"
-  | "Customer Request"
-  | "Overgrown - Requires Quote"
-  | "Unsafe"
-  | "Dog in Garden"
-  | "Gate Locked"
-  | "Other";
+export const DEFAULT_NOT_CUT_REASONS = [
+  "Too Wet",
+  "Access Blocked",
+  "Customer Request",
+  "Overgrown - Requires Quote",
+  "Unsafe",
+  "Dog in Garden",
+  "Gate Locked",
+  "Other",
+] as const;
+
+export type NotCutReason = string;
 
 export type Staff = {
   id: number;
@@ -153,7 +156,7 @@ export const QUOTE_STATUS_OPTIONS = [
 
 export type QuoteStatus = (typeof QUOTE_STATUS_OPTIONS)[number];
 
-export const QUOTE_WORK_TYPE_OPTIONS = [
+export const DEFAULT_QUOTE_WORK_TYPE_OPTIONS = [
   "Hedge cutting",
   "Grass cutting",
   "Pressure washing",
@@ -161,7 +164,9 @@ export const QUOTE_WORK_TYPE_OPTIONS = [
   "Other",
 ] as const;
 
-export type QuoteWorkType = (typeof QUOTE_WORK_TYPE_OPTIONS)[number];
+export const QUOTE_WORK_TYPE_OPTIONS = DEFAULT_QUOTE_WORK_TYPE_OPTIONS;
+
+export type QuoteWorkType = string;
 export type QuoteAutoSchedulingPreference =
   | "default"
   | "disabled"

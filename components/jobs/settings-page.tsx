@@ -81,6 +81,7 @@ import type {
     StaffMember,
     VisitLog,
 } from "./types";
+import { DEFAULT_NOT_CUT_REASONS } from "./types";
 
 type PaymentMethod = "cash" | "bank_transfer" | "direct_debit" | "invoice";
 type CutType = "front_only" | "front_back" | "full_garden";
@@ -140,6 +141,7 @@ export type SettingsData = {
     editInactiveAction: EditInactiveAction;
     helpEnabled: boolean;
     autoScheduling: AutoSchedulingSettings;
+    notCutReasons: string[];
 
     defaultGrassCutPrice: number;
     defaultHedgeCutPrice: number;
@@ -356,6 +358,7 @@ const defaultSettings: SettingsData = {
     editInactiveAction: "notify",
     helpEnabled: true,
     autoScheduling: DEFAULT_AUTO_SCHEDULING_SETTINGS,
+    notCutReasons: [...DEFAULT_NOT_CUT_REASONS],
 
     defaultGrassCutPrice: 15,
     defaultHedgeCutPrice: 40,
@@ -582,6 +585,20 @@ function normalizeQuoteServices(value: unknown): QuoteService[] {
     });
 
     return normalized;
+}
+
+function normalizeTextOptions(value: unknown, fallback: readonly string[]) {
+    const source = Array.isArray(value) ? value : fallback;
+    const normalized = Array.from(
+        new Map(
+            source
+                .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+                .filter(Boolean)
+                .map((entry) => [entry.toLowerCase(), entry])
+        ).values()
+    );
+
+    return normalized.length ? normalized : [...fallback];
 }
 
 function normalizePdfHeaderStyle(value: unknown): PdfHeaderStyle {
@@ -1072,6 +1089,10 @@ function safeMergeSettings(source?: Partial<SettingsData> | null): SettingsData 
         editInactiveAction: normalizeEditInactiveAction(source?.editInactiveAction),
         helpEnabled: source?.helpEnabled !== false,
         autoScheduling: normalizeAutoSchedulingSettings(source?.autoScheduling),
+        notCutReasons: normalizeTextOptions(
+            source?.notCutReasons,
+            defaultSettings.notCutReasons
+        ),
         stripeConnectedAccountId:
             typeof source?.stripeConnectedAccountId === "string"
                 ? source.stripeConnectedAccountId
@@ -1298,6 +1319,8 @@ export default function SettingsPage({
     const [newQuoteServiceIsProduct, setNewQuoteServiceIsProduct] = useState(false);
     const [newQuoteServicePrice, setNewQuoteServicePrice] = useState("0");
     const [newQuoteServiceBuyPrice, setNewQuoteServiceBuyPrice] = useState("0");
+    const [newSchedulingCategory, setNewSchedulingCategory] = useState("");
+    const [newNotCutReason, setNewNotCutReason] = useState("");
     const [testEmailRecipient, setTestEmailRecipient] = useState("");
     const [isSendingTestEmail, setIsSendingTestEmail] = useState(false);
     const [documentPreviewType, setDocumentPreviewType] =
@@ -1463,6 +1486,64 @@ export default function SettingsPage({
                 (window) => window.id !== id
             ),
         });
+    }
+
+    function addSchedulingCategory() {
+        const nextCategory = newSchedulingCategory.trim();
+
+        if (!nextCategory) {
+            return;
+        }
+
+        updateAutoScheduling({
+            workCategories: normalizeTextOptions(
+                [...settings.autoScheduling.workCategories, nextCategory],
+                settings.autoScheduling.workCategories
+            ),
+        });
+        setNewSchedulingCategory("");
+    }
+
+    function removeSchedulingCategory(categoryToRemove: string) {
+        if (settings.autoScheduling.workCategories.length <= 1) {
+            return;
+        }
+
+        updateAutoScheduling({
+            workCategories: settings.autoScheduling.workCategories.filter(
+                (category) =>
+                    category.trim().toLowerCase() !==
+                    categoryToRemove.trim().toLowerCase()
+            ),
+        });
+    }
+
+    function addNotCutReason() {
+        const nextReason = newNotCutReason.trim();
+
+        if (!nextReason) {
+            return;
+        }
+
+        update(
+            "notCutReasons",
+            normalizeTextOptions([...settings.notCutReasons, nextReason], settings.notCutReasons)
+        );
+        setNewNotCutReason("");
+    }
+
+    function removeNotCutReason(reasonToRemove: string) {
+        if (settings.notCutReasons.length <= 1) {
+            return;
+        }
+
+        update(
+            "notCutReasons",
+            settings.notCutReasons.filter(
+                (reason) =>
+                    reason.trim().toLowerCase() !== reasonToRemove.trim().toLowerCase()
+            )
+        );
     }
 
     function addQuoteService() {
@@ -2826,6 +2907,57 @@ export default function SettingsPage({
                         </Card>
 
                         <Card
+                            title="Not Cut reasons"
+                            description="Customise the reasons shown when a round visit is marked not completed."
+                            icon={Scissors}
+                        >
+                            <div className="space-y-4">
+                                <div className="flex flex-col gap-2 sm:flex-row">
+                                    <Input
+                                        value={newNotCutReason}
+                                        onChange={(event) =>
+                                            setNewNotCutReason(event.target.value)
+                                        }
+                                        onKeyDown={(event) => {
+                                            if (event.key === "Enter") {
+                                                event.preventDefault();
+                                                addNotCutReason();
+                                            }
+                                        }}
+                                        placeholder="e.g. Customer asked to skip"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={addNotCutReason}
+                                        className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
+                                    >
+                                        Add reason
+                                    </button>
+                                </div>
+
+                                <div className="flex flex-wrap gap-2">
+                                    {settings.notCutReasons.map((reason) => (
+                                        <span
+                                            key={reason}
+                                            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700"
+                                        >
+                                            {reason}
+                                            <button
+                                                type="button"
+                                                onClick={() => removeNotCutReason(reason)}
+                                                disabled={settings.notCutReasons.length <= 1}
+                                                className="text-rose-500 transition hover:text-rose-700 disabled:cursor-not-allowed disabled:text-slate-300"
+                                                aria-label={`Remove ${reason}`}
+                                            >
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                            </button>
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                        </Card>
+
+                        <Card
                             title="Automatic scheduling"
                             description="Suggest or book accepted quotes into your working calendar."
                             icon={CalendarIcon}
@@ -2863,6 +2995,62 @@ export default function SettingsPage({
                                         <option value="auto">Auto-schedule after quote acceptance</option>
                                     </Select>
                                 </Field>
+
+                                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                                    <div className="flex flex-col gap-1">
+                                        <p className="text-sm font-semibold text-slate-900">
+                                            Work categories
+                                        </p>
+                                        <p className="text-xs leading-5 text-slate-500">
+                                            These appear on quotes as work types and are used to group automatic scheduling.
+                                        </p>
+                                    </div>
+
+                                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                                        <Input
+                                            value={newSchedulingCategory}
+                                            onChange={(event) =>
+                                                setNewSchedulingCategory(event.target.value)
+                                            }
+                                            onKeyDown={(event) => {
+                                                if (event.key === "Enter") {
+                                                    event.preventDefault();
+                                                    addSchedulingCategory();
+                                                }
+                                            }}
+                                            placeholder="e.g. Tree work"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={addSchedulingCategory}
+                                            className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
+                                        >
+                                            Add category
+                                        </button>
+                                    </div>
+
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                        {settings.autoScheduling.workCategories.map((category) => (
+                                            <span
+                                                key={category}
+                                                className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700"
+                                            >
+                                                {category}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => removeSchedulingCategory(category)}
+                                                    disabled={
+                                                        settings.autoScheduling.workCategories.length <= 1
+                                                    }
+                                                    className="text-rose-500 transition hover:text-rose-700 disabled:cursor-not-allowed disabled:text-slate-300"
+                                                    aria-label={`Remove ${category}`}
+                                                >
+                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                </button>
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
 
                                 <div>
                                     <p className="text-sm font-semibold text-slate-900">

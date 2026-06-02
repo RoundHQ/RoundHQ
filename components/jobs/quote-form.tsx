@@ -97,6 +97,7 @@ type Props = DocumentCustomerFields & {
     initialNotes?: string;
     initialItems?: LineItem[];
     savedServices?: QuoteService[];
+    workTypeOptions?: string[];
     pressureWashRatePerSquareMetre?: number;
     defaultRotationWeeks?: RotationWeeks;
     allowCommercialTools?: boolean;
@@ -268,6 +269,7 @@ export default function QuoteForm({
     initialNotes,
     initialItems,
     savedServices,
+    workTypeOptions,
     pressureWashRatePerSquareMetre,
     defaultRotationWeeks,
     allowCommercialTools = true,
@@ -321,6 +323,18 @@ export default function QuoteForm({
             ? normalizeQuoteWorkType(existingQuote.workType)
             : "Other"
     );
+    const resolvedWorkTypeOptions = useMemo(() => {
+        const options = Array.from(
+            new Map(
+                [...(workTypeOptions ?? QUOTE_WORK_TYPE_OPTIONS), workType]
+                    .map((option) => option.trim())
+                    .filter(Boolean)
+                    .map((option) => [option.toLowerCase(), option])
+            ).values()
+        );
+
+        return options.length ? options : ["Other"];
+    }, [workType, workTypeOptions]);
     const [autoSchedulingPreference, setAutoSchedulingPreference] =
         useState<QuoteAutoSchedulingPreference>(
             normalizeQuoteAutoSchedulingPreference(
@@ -879,6 +893,7 @@ export default function QuoteForm({
             {isAddingCustomer && onCreateCustomer ? (
                 <DocumentCustomerCreateDialog
                     customerName={pendingCustomerName || quoteCustomerName}
+                    customers={customers}
                     defaultRotationWeeks={defaultRotationWeeks}
                     allowCommercialTools={allowCommercialTools}
                     onCreateCustomer={onCreateCustomer}
@@ -1015,7 +1030,7 @@ export default function QuoteForm({
                             }
                             className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-emerald-400"
                         >
-                            {QUOTE_WORK_TYPE_OPTIONS.map((option) => (
+                            {resolvedWorkTypeOptions.map((option) => (
                                 <option key={option} value={option}>
                                     {option}
                                 </option>

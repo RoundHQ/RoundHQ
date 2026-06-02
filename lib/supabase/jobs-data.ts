@@ -141,17 +141,6 @@ const CUT_FREQUENCIES: CutFrequency[] = [
   "Monthly",
 ];
 const PAYMENT_METHODS: PaymentMethod[] = ["Monthly", "On Day Transfer", "Cash"];
-const NOT_CUT_REASONS: NotCutReason[] = [
-  "Too Wet",
-  "Access Blocked",
-  "Customer Request",
-  "Overgrown - Requires Quote",
-  "Unsafe",
-  "Dog in Garden",
-  "Gate Locked",
-  "Other",
-];
-
 function normalizeWeek(value: string | number | null | undefined): WeekNumber {
   return normalizeWeekNumber(value, 4);
 }
@@ -202,9 +191,8 @@ function normalizePaymentMethod(
 function normalizeNotCutReason(
     value: string | null | undefined
 ): NotCutReason | undefined {
-  return NOT_CUT_REASONS.includes(value as NotCutReason)
-      ? (value as NotCutReason)
-      : undefined;
+  const trimmed = value?.trim();
+  return trimmed || undefined;
 }
 
 export function mapCustomerRowToCustomer(row: CustomerRow): Customer {

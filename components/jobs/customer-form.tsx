@@ -31,6 +31,7 @@ import type { EditFormCollaboration } from "./edit-collaboration";
 type Props = {
     existing?: Customer;
     initialName?: string;
+    customers?: Customer[];
     defaultRotationWeeks?: RotationWeeks;
     allowCommercialTools?: boolean;
     staffMembers?: StaffMember[];
@@ -39,6 +40,16 @@ type Props = {
     onSave: (customer: Customer) => void | Promise<void>;
     onCancel: () => void;
 };
+
+const ROUND_DAY_OPTIONS: DayName[] = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+];
 
 function buildInitialCustomer(
     existing: Customer | undefined,
@@ -112,9 +123,235 @@ function normalizeContactEmails(emails: string[] | undefined) {
     );
 }
 
+function normalizeLocationText(value: string | null | undefined) {
+    return (value ?? "").trim().toLowerCase();
+}
+
+function normalizePostcode(value: string | null | undefined) {
+    return (value ?? "").toUpperCase().replace(/\s+/g, " ").trim();
+}
+
+function getPostcodeParts(value: string | null | undefined) {
+    const normalized = normalizePostcode(value);
+    const [outward = "", inward = ""] = normalized.split(" ");
+    const sectorDigit = inward.match(/^\d/)?.[0] ?? "";
+
+    return {
+        normalized,
+        outward,
+        sector: outward && sectorDigit ? `${outward} ${sectorDigit}` : "",
+    };
+}
+
+function getDistanceKm(
+    leftLatitude?: number | null,
+    leftLongitude?: number | null,
+    rightLatitude?: number | null,
+    rightLongitude?: number | null
+) {
+    if (
+        typeof leftLatitude !== "number" ||
+        typeof leftLongitude !== "number" ||
+        typeof rightLatitude !== "number" ||
+        typeof rightLongitude !== "number"
+    ) {
+        return null;
+    }
+
+    const earthRadiusKm = 6371;
+    const toRadians = (value: number) => (value * Math.PI) / 180;
+    const latitudeDelta = toRadians(rightLatitude - leftLatitude);
+    const longitudeDelta = toRadians(rightLongitude - leftLongitude);
+    const leftLat = toRadians(leftLatitude);
+    const rightLat = toRadians(rightLatitude);
+    const haversine =
+        Math.sin(latitudeDelta / 2) ** 2 +
+        Math.cos(leftLat) * Math.cos(rightLat) * Math.sin(longitudeDelta / 2) ** 2;
+
+    return earthRadiusKm * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+function getRoundPlacementFromCustomers(
+    customers: Customer[],
+    effectiveRotationWeeks: RotationWeeks
+) {
+    const counts = new Map<string, { week: WeekNumber; day: DayName; count: number }>();
+
+    customers.forEach((customer) => {
+        if (!customer.isGrassCuttingCustomer) {
+            return;
+        }
+
+        const week = normalizeWeekNumber(customer.week, effectiveRotationWeeks);
+        const day = customer.day;
+        const key = `${week}|${day}`;
+        const current = counts.get(key);
+
+        counts.set(key, {
+            week,
+            day,
+            count: (current?.count ?? 0) + 1,
+        });
+    });
+
+    return Array.from(counts.values()).sort((left, right) => {
+        if (right.count !== left.count) {
+            return right.count - left.count;
+        }
+
+        if (left.week !== right.week) {
+            return left.week.localeCompare(right.week);
+        }
+
+        return ROUND_DAY_OPTIONS.indexOf(left.day) - ROUND_DAY_OPTIONS.indexOf(right.day);
+    })[0] ?? null;
+}
+
+function getLightestRoundPlacement(
+    customers: Customer[],
+    weekOptions: WeekNumber[],
+    effectiveRotationWeeks: RotationWeeks
+) {
+    const counts = new Map<string, number>();
+
+    customers.forEach((customer) => {
+        if (!customer.isGrassCuttingCustomer) {
+            return;
+        }
+
+        const week = normalizeWeekNumber(customer.week, effectiveRotationWeeks);
+        const key = `${week}|${customer.day}`;
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+    });
+
+    return weekOptions
+        .flatMap((week) =>
+            ROUND_DAY_OPTIONS.map((day) => ({
+                week,
+                day,
+                count: counts.get(`${week}|${day}`) ?? 0,
+            }))
+        )
+        .sort((left, right) => {
+            if (left.count !== right.count) {
+                return left.count - right.count;
+            }
+
+            if (left.week !== right.week) {
+                return left.week.localeCompare(right.week);
+            }
+
+            return ROUND_DAY_OPTIONS.indexOf(left.day) - ROUND_DAY_OPTIONS.indexOf(right.day);
+        })[0];
+}
+
+function getRoundPlacementSuggestion({
+    form,
+    customers,
+    existingCustomerId,
+    weekOptions,
+    effectiveRotationWeeks,
+}: {
+    form: Customer;
+    customers: Customer[];
+    existingCustomerId?: number;
+    weekOptions: WeekNumber[];
+    effectiveRotationWeeks: RotationWeeks;
+}) {
+    if (!form.isGrassCuttingCustomer) {
+        return null;
+    }
+
+    const comparableCustomers = customers.filter(
+        (customer) =>
+            customer.id !== existingCustomerId && customer.isGrassCuttingCustomer
+    );
+    const targetPostcode = getPostcodeParts(form.postcode);
+    const targetTown = normalizeLocationText(form.town);
+    const mappedMatches = comparableCustomers
+        .map((customer) => ({
+            customer,
+            distanceKm: getDistanceKm(
+                form.latitude,
+                form.longitude,
+                customer.latitude,
+                customer.longitude
+            ),
+        }))
+        .filter((entry): entry is { customer: Customer; distanceKm: number } =>
+            typeof entry.distanceKm === "number"
+        )
+        .sort((left, right) => left.distanceKm - right.distanceKm);
+    const nearbyMappedMatches = mappedMatches
+        .filter((entry) => entry.distanceKm <= 5)
+        .slice(0, 8)
+        .map((entry) => entry.customer);
+
+    const postcodeSectorMatches = targetPostcode.sector
+        ? comparableCustomers.filter(
+              (customer) => getPostcodeParts(customer.postcode).sector === targetPostcode.sector
+          )
+        : [];
+    const postcodeOutwardMatches =
+        targetPostcode.outward && postcodeSectorMatches.length === 0
+            ? comparableCustomers.filter(
+                  (customer) =>
+                      getPostcodeParts(customer.postcode).outward === targetPostcode.outward
+              )
+            : [];
+    const townMatches =
+        targetTown && postcodeSectorMatches.length === 0 && postcodeOutwardMatches.length === 0
+            ? comparableCustomers.filter(
+                  (customer) => normalizeLocationText(customer.town) === targetTown
+              )
+            : [];
+
+    const matchGroups = [
+        { customers: nearbyMappedMatches, basis: "nearby mapped customers" },
+        { customers: postcodeSectorMatches, basis: `postcode sector ${targetPostcode.sector}` },
+        { customers: postcodeOutwardMatches, basis: `postcode area ${targetPostcode.outward}` },
+        { customers: townMatches, basis: `${form.town} customers` },
+    ];
+    const matchedGroup = matchGroups.find((group) => group.customers.length > 0);
+
+    if (matchedGroup) {
+        const placement = getRoundPlacementFromCustomers(
+            matchedGroup.customers,
+            effectiveRotationWeeks
+        );
+
+        if (placement) {
+            return {
+                week: placement.week,
+                day: placement.day,
+                basis: matchedGroup.basis,
+                matchCount: matchedGroup.customers.length,
+                isFallback: false,
+            };
+        }
+    }
+
+    const fallbackPlacement = getLightestRoundPlacement(
+        comparableCustomers,
+        weekOptions,
+        effectiveRotationWeeks
+    );
+
+    return fallbackPlacement
+        ? {
+              week: fallbackPlacement.week,
+              day: fallbackPlacement.day,
+              basis: "current round workload",
+              matchCount: comparableCustomers.length,
+              isFallback: true,
+          }
+        : null;
+}
+
 export default function CustomerForm({
     existing,
     initialName = "",
+    customers = [],
     defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
     allowCommercialTools = true,
     staffMembers = [],
@@ -133,6 +370,7 @@ export default function CustomerForm({
             defaultAssignedStaffId
         )
     );
+    const [isGrassCutAmountFocused, setIsGrassCutAmountFocused] = useState(false);
     const initialDraftRef = useRef("");
     const handledSaveRequestRef = useRef(0);
     const handledDiscardRequestRef = useRef(0);
@@ -206,6 +444,33 @@ export default function CustomerForm({
     const commercialEmailInputs =
         form.contactEmails && form.contactEmails.length > 0 ? form.contactEmails : [""];
     const activeStaffMembers = staffMembers.filter((staffMember) => staffMember.isActive);
+    const roundPlacementSuggestion = useMemo(
+        () =>
+            getRoundPlacementSuggestion({
+                form,
+                customers,
+                existingCustomerId: existing?.id,
+                weekOptions,
+                effectiveRotationWeeks,
+            }),
+        [customers, effectiveRotationWeeks, existing?.id, form, weekOptions]
+    );
+    const isUsingRoundPlacementSuggestion =
+        roundPlacementSuggestion != null &&
+        form.week === roundPlacementSuggestion.week &&
+        form.day === roundPlacementSuggestion.day;
+
+    function applyRoundPlacementSuggestion() {
+        if (!roundPlacementSuggestion) {
+            return;
+        }
+
+        setForm((prev) => ({
+            ...prev,
+            week: roundPlacementSuggestion.week,
+            day: roundPlacementSuggestion.day,
+        }));
+    }
 
     const getCleanCustomerDraft = useCallback((): Customer => {
         const draftEffectiveRotationWeeks = getEffectiveRotationWeeks(
@@ -680,6 +945,45 @@ export default function CustomerForm({
                             Service Setup
                         </h3>
 
+                        {roundPlacementSuggestion ? (
+                            <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                    <div>
+                                        <p className="text-sm font-semibold text-emerald-900">
+                                            Suggested round:{" "}
+                                            {getRotationCycleLabel(
+                                                roundPlacementSuggestion.week,
+                                                effectiveRotationWeeks
+                                            )}
+                                            , {roundPlacementSuggestion.day}
+                                        </p>
+                                        <p className="mt-1 text-xs leading-5 text-emerald-800/80">
+                                            Based on {roundPlacementSuggestion.basis}
+                                            {roundPlacementSuggestion.matchCount > 0
+                                                ? ` (${roundPlacementSuggestion.matchCount} customer${
+                                                      roundPlacementSuggestion.matchCount === 1
+                                                          ? ""
+                                                          : "s"
+                                                  })`
+                                                : ""}
+                                            .
+                                        </p>
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        onClick={applyRoundPlacementSuggestion}
+                                        disabled={isUsingRoundPlacementSuggestion}
+                                        className="inline-flex items-center justify-center rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-emerald-100 disabled:text-emerald-700"
+                                    >
+                                        {isUsingRoundPlacementSuggestion
+                                            ? "Suggestion applied"
+                                            : "Use suggestion"}
+                                    </button>
+                                </div>
+                            </div>
+                        ) : null}
+
                         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                             <div>
                                 <label className="mb-2 block text-sm font-medium text-slate-700">
@@ -719,7 +1023,14 @@ export default function CustomerForm({
                                     type="number"
                                     className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
                                     placeholder="Price per visit"
-                                    value={form.grassCutAmount ?? ""}
+                                    value={
+                                        isGrassCutAmountFocused &&
+                                        Number(form.grassCutAmount ?? 0) === 0
+                                            ? ""
+                                            : form.grassCutAmount ?? ""
+                                    }
+                                    onFocus={() => setIsGrassCutAmountFocused(true)}
+                                    onBlur={() => setIsGrassCutAmountFocused(false)}
                                     onChange={(e) =>
                                         update(
                                             "grassCutAmount",

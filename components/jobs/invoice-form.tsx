@@ -21,6 +21,15 @@ type LineItem = {
     price: number;
 };
 
+type QuoteService = {
+    id: string;
+    title: string;
+    category: string;
+    itemType: "service" | "product";
+    price: number;
+    buyPrice: number;
+};
+
 type DocumentCustomerFields = {
     customerType?: CustomerType;
     customerAddress?: string;
@@ -65,6 +74,7 @@ type Props = DocumentCustomerFields & {
     invoiceNumberPreview?: string;
     initialNotes?: string;
     initialTerms?: string;
+    savedServices?: QuoteService[];
     defaultPaymentTermsDays: number;
     defaultVatRegistered: boolean;
     defaultVatRate: number;
@@ -78,6 +88,34 @@ type Props = DocumentCustomerFields & {
 
 function formatMoney(value: number | null | undefined) {
     return `£${Number(value ?? 0).toFixed(2)}`;
+}
+
+function getQuoteServiceKey(service: QuoteService) {
+    return `${service.category.trim().toLowerCase()}|${service.itemType}|${service.title
+        .trim()
+        .toLowerCase()}`;
+}
+
+function getQuoteServiceProfit(service: QuoteService) {
+    if (service.itemType !== "product") {
+        return 0;
+    }
+
+    return Number(service.price ?? 0) - Number(service.buyPrice ?? 0);
+}
+
+function getQuoteServiceLabel(service: QuoteService) {
+    const itemLabel = service.category
+        ? `${service.category} / ${service.title}`
+        : service.title;
+
+    if (service.itemType === "product") {
+        return `${itemLabel} (Product, ${formatMoney(service.price)}, ${formatMoney(
+            getQuoteServiceProfit(service)
+        )} profit)`;
+    }
+
+    return `${itemLabel} (${formatMoney(service.price)})`;
 }
 
 function formatDateInput(date: Date) {
@@ -210,6 +248,7 @@ export default function InvoiceForm({
     invoiceNumberPreview,
     initialNotes,
     initialTerms,
+    savedServices,
     defaultPaymentTermsDays,
     defaultVatRegistered,
     defaultVatRate,
@@ -288,6 +327,34 @@ export default function InvoiceForm({
     const handledSaveRequestRef = useRef(0);
     const handledDiscardRequestRef = useRef(0);
     const editCollaborationRef = useRef(editCollaboration);
+    const reusableServices = useMemo(() => {
+        const seenServices = new Set<string>();
+
+        return (savedServices ?? []).filter((service) => {
+            const title = service.title.trim();
+            const key = getQuoteServiceKey(service);
+
+            if (!title || seenServices.has(key)) {
+                return false;
+            }
+
+            seenServices.add(key);
+            return true;
+        });
+    }, [savedServices]);
+    const quoteCategories = useMemo(
+        () =>
+            Array.from(
+                new Set(
+                    reusableServices
+                        .map((service) => service.category.trim())
+                        .filter(Boolean)
+                )
+            ).sort((left, right) => left.localeCompare(right)),
+        [reusableServices]
+    );
+    const [selectedCategory, setSelectedCategory] = useState("all");
+    const [selectedServiceKey, setSelectedServiceKey] = useState("");
     const selectedCustomer = useMemo(
         () =>
             selectedCustomerId == null
@@ -309,13 +376,26 @@ export default function InvoiceForm({
     const showCommercialTools =
         allowCommercialTools && activeCustomerType === "Commercial";
 
-    useEffect(() => {
-        if (dueDateTouched) {
-            return;
-        }
-
-        setDueDate(addDaysToIsoDate(invoiceDate, defaultPaymentTermsDays));
-    }, [defaultPaymentTermsDays, dueDateTouched, invoiceDate]);
+    const selectedCategoryValue =
+        selectedCategory === "all" || quoteCategories.includes(selectedCategory)
+            ? selectedCategory
+            : "all";
+    const filteredServices = useMemo(
+        () =>
+            selectedCategoryValue === "all"
+                ? reusableServices
+                : reusableServices.filter(
+                      (service) => service.category.trim() === selectedCategoryValue
+                  ),
+        [reusableServices, selectedCategoryValue]
+    );
+    const selectedServiceKeyValue =
+        selectedServiceKey &&
+        filteredServices.some((service) => getQuoteServiceKey(service) === selectedServiceKey)
+            ? selectedServiceKey
+            : filteredServices[0]
+              ? getQuoteServiceKey(filteredServices[0])
+              : "";
 
     function addItem() {
         setItems((prev) => [
@@ -343,6 +423,51 @@ export default function InvoiceForm({
                 item.id === id ? { ...item, [field]: value } : item
             )
         );
+    }
+
+    function addSavedService(serviceKey: string) {
+        const nextService = reusableServices.find(
+            (service) => getQuoteServiceKey(service) === serviceKey
+        );
+        const nextTitle = nextService?.title.trim() ?? "";
+        const nextPrice =
+            nextService && Number.isFinite(nextService.price)
+                ? nextService.price
+                : 0;
+
+        if (!nextTitle) {
+            return;
+        }
+
+        setItems((prev) => {
+            const emptyItemIndex = prev.findIndex(
+                (item) =>
+                    item.description.trim() === "" && Number(item.price || 0) === 0
+            );
+
+            if (emptyItemIndex >= 0) {
+                return prev.map((item, index) =>
+                    index === emptyItemIndex
+                        ? {
+                              ...item,
+                              description: nextTitle,
+                              quantity: Number(item.quantity || 0) > 0 ? item.quantity : 1,
+                              price: nextPrice,
+                          }
+                        : item
+                );
+            }
+
+            return [
+                ...prev,
+                {
+                    id: crypto.randomUUID(),
+                    description: nextTitle,
+                    quantity: 1,
+                    price: nextPrice,
+                },
+            ];
+        });
     }
 
     const subtotal = useMemo(() => {
@@ -592,6 +717,7 @@ export default function InvoiceForm({
             {isAddingCustomer && onCreateCustomer ? (
                 <DocumentCustomerCreateDialog
                     customerName={pendingCustomerName || invoiceCustomerName}
+                    customers={customers}
                     defaultRotationWeeks={defaultRotationWeeks}
                     allowCommercialTools={allowCommercialTools}
                     onCreateCustomer={onCreateCustomer}
@@ -688,7 +814,13 @@ export default function InvoiceForm({
                         <input
                             type="date"
                             value={invoiceDate}
-                            onChange={(e) => setInvoiceDate(e.target.value)}
+                            onChange={(e) => {
+                                const nextDate = e.target.value;
+                                setInvoiceDate(nextDate);
+                                if (!dueDateTouched) {
+                                    setDueDate(addDaysToIsoDate(nextDate, defaultPaymentTermsDays));
+                                }
+                            }}
                             className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
                         />
                     </div>
@@ -776,6 +908,61 @@ export default function InvoiceForm({
                         Add Item
                     </button>
                 </div>
+
+                {reusableServices.length > 0 && (
+                    <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4">
+                        <div className="grid gap-3 md:grid-cols-[0.9fr_1.4fr_auto] md:items-end">
+                            <div>
+                                <label className="mb-2 block text-sm font-medium text-slate-700">
+                                    Category
+                                </label>
+                                <select
+                                    value={selectedCategoryValue}
+                                    onChange={(e) => setSelectedCategory(e.target.value)}
+                                    className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-emerald-400"
+                                >
+                                    <option value="all">All categories</option>
+                                    {quoteCategories.map((category) => (
+                                        <option key={category} value={category}>
+                                            {category}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="mb-2 block text-sm font-medium text-slate-700">
+                                    Reusable quote item
+                                </label>
+                                <select
+                                    value={selectedServiceKeyValue}
+                                    onChange={(e) => setSelectedServiceKey(e.target.value)}
+                                    className="w-full rounded-xl border border-emerald-100 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-emerald-400"
+                                >
+                                    {filteredServices.map((service) => {
+                                        const key = getQuoteServiceKey(service);
+
+                                        return (
+                                            <option key={key} value={key}>
+                                                {getQuoteServiceLabel(service)}
+                                            </option>
+                                        );
+                                    })}
+                                </select>
+                            </div>
+
+                            <button
+                                type="button"
+                                onClick={() => addSavedService(selectedServiceKeyValue)}
+                                disabled={!selectedServiceKeyValue}
+                                className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                <Plus size={16} />
+                                Add Saved Item
+                            </button>
+                        </div>
+                    </div>
+                )}
 
                 <div className="mt-4 space-y-4">
                     {items.map((item, index) => {

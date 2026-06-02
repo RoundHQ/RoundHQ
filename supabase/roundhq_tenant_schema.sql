@@ -710,24 +710,16 @@ create table if not exists public.visits (
   paid_at timestamptz null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  reason text null check (
-    reason is null or reason in (
-      'Too Wet',
-      'Access Blocked',
-      'Customer Request',
-      'Overgrown - Requires Quote',
-      'Unsafe',
-      'Dog in Garden',
-      'Gate Locked',
-      'Other'
-    )
-  ),
+  reason text null,
   round_key text null,
   customer_type text null check (
     customer_type is null or customer_type in ('Residential', 'Commercial')
   ),
   price_at_visit numeric(10, 2) null
 );
+
+alter table public.visits
+  drop constraint if exists visits_reason_check;
 
 alter table public.visits
 drop constraint if exists visits_week_check;

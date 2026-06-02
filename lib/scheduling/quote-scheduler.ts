@@ -10,7 +10,7 @@ export const SCHEDULING_DAY_NAMES = [
 
 export type SchedulingDayName = (typeof SCHEDULING_DAY_NAMES)[number];
 
-export const QUOTE_WORK_TYPE_OPTIONS = [
+export const DEFAULT_QUOTE_WORK_TYPE_OPTIONS = [
   "Hedge cutting",
   "Grass cutting",
   "Pressure washing",
@@ -18,7 +18,9 @@ export const QUOTE_WORK_TYPE_OPTIONS = [
   "Other",
 ] as const;
 
-export type QuoteWorkType = (typeof QUOTE_WORK_TYPE_OPTIONS)[number];
+export const QUOTE_WORK_TYPE_OPTIONS = DEFAULT_QUOTE_WORK_TYPE_OPTIONS;
+
+export type QuoteWorkType = string;
 export type SchedulingMode = "off" | "suggest" | "auto";
 export type QuoteAutoSchedulingPreference =
   | "default"
@@ -50,6 +52,7 @@ export type SchedulingUnavailableWindow = SchedulingTimeWindow & {
 export type AutoSchedulingSettings = {
   enabled: boolean;
   mode: SchedulingMode;
+  workCategories: string[];
   workingDays: SchedulingDayName[];
   workingHours: Record<SchedulingDayName, SchedulingDayHours>;
   unavailableWindows: SchedulingUnavailableWindow[];
@@ -163,6 +166,7 @@ const DEFAULT_DISABLED_DAY_HOURS: SchedulingDayHours = {
 export const DEFAULT_AUTO_SCHEDULING_SETTINGS: AutoSchedulingSettings = {
   enabled: false,
   mode: "off",
+  workCategories: [...DEFAULT_QUOTE_WORK_TYPE_OPTIONS],
   workingDays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
   workingHours: {
     Monday: DEFAULT_DAY_HOURS,
@@ -222,9 +226,8 @@ function normalizeSchedulingDayName(value: unknown): SchedulingDayName | null {
 }
 
 export function normalizeQuoteWorkType(value: unknown): QuoteWorkType {
-  return QUOTE_WORK_TYPE_OPTIONS.includes(value as QuoteWorkType)
-    ? (value as QuoteWorkType)
-    : "Other";
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return trimmed || "Other";
 }
 
 export function normalizeSchedulingMode(value: unknown): SchedulingMode {
@@ -263,6 +266,20 @@ export function normalizePostcodeGroupingPreference(
   }
 
   return "outward";
+}
+
+function normalizeStringOptions(value: unknown, fallback: readonly string[]) {
+  const source = Array.isArray(value) ? value : fallback;
+  const normalized = Array.from(
+    new Map(
+      source
+        .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+        .filter(Boolean)
+        .map((entry) => [entry.toLowerCase(), entry])
+    ).values()
+  );
+
+  return normalized.length ? normalized : ["Other"];
 }
 
 function normalizeDayHours(
@@ -348,6 +365,10 @@ export function normalizeAutoSchedulingSettings(
   return {
     enabled: source.enabled === true,
     mode: normalizeSchedulingMode(source.mode),
+    workCategories: normalizeStringOptions(
+      source.workCategories,
+      DEFAULT_AUTO_SCHEDULING_SETTINGS.workCategories
+    ),
     workingDays: workingDays.length
       ? workingDays
       : DEFAULT_AUTO_SCHEDULING_SETTINGS.workingDays,

@@ -28,6 +28,7 @@ import type {
   NotCutReason,
   RotationWeeks,
 } from "./types";
+import { DEFAULT_NOT_CUT_REASONS } from "./types";
 
 type Props = {
   customers: Customer[];
@@ -40,6 +41,7 @@ type Props = {
   grassCutSeasonStart: string;
   grassCutSeasonEnd: string;
   monthlyPaymentsReady: boolean;
+  notCutReasons?: NotCutReason[];
   isLocked: boolean;
   getCurrentVisit: (customerId: number) => VisitLog | null;
   onUpdateCustomer: (customer: Customer) => Promise<unknown>;
@@ -119,17 +121,6 @@ type GoogleDirectionsService = {
     callback: (result: unknown, status: string) => void
   ) => void;
 };
-
-const NOT_CUT_REASONS: NotCutReason[] = [
-  "Too Wet",
-  "Access Blocked",
-  "Customer Request",
-  "Overgrown - Requires Quote",
-  "Unsafe",
-  "Dog in Garden",
-  "Gate Locked",
-  "Other",
-];
 
 const PAY_ON_DAY_PAYMENT_METHODS = new Set(["Cash", "On Day Transfer"]);
 
@@ -319,6 +310,7 @@ export default function MapPage({
   grassCutSeasonStart,
   grassCutSeasonEnd,
   monthlyPaymentsReady,
+  notCutReasons,
   isLocked,
   getCurrentVisit,
   onUpdateCustomer,
@@ -337,7 +329,21 @@ export default function MapPage({
   const [currentStopIndex, setCurrentStopIndex] = useState(0);
 
   const [showNotCutModal, setShowNotCutModal] = useState(false);
-  const [notCutReason, setNotCutReason] = useState<NotCutReason>("Too Wet");
+  const resolvedNotCutReasons = useMemo(
+    () =>
+      Array.from(
+        new Map(
+          (notCutReasons?.length ? notCutReasons : DEFAULT_NOT_CUT_REASONS)
+            .map((reason) => reason.trim())
+            .filter(Boolean)
+            .map((reason) => [reason.toLowerCase(), reason])
+        ).values()
+      ),
+    [notCutReasons]
+  );
+  const [notCutReason, setNotCutReason] = useState<NotCutReason>(
+    resolvedNotCutReasons[0] ?? "Other"
+  );
   const [notCutComment, setNotCutComment] = useState("");
   const [routeComment, setRouteComment] = useState("");
   const [isSavingRouteComment, setIsSavingRouteComment] = useState(false);
@@ -352,6 +358,12 @@ export default function MapPage({
     activeRotationWeeks ?? normalizedDefaultRotationWeeks
   );
   const selectedCycleLabel = getRotationCycleLabel(selectedWeek, routeRotationWeeks);
+
+  useEffect(() => {
+    if (!resolvedNotCutReasons.includes(notCutReason)) {
+      setNotCutReason(resolvedNotCutReasons[0] ?? "Other");
+    }
+  }, [notCutReason, resolvedNotCutReasons]);
 
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<GoogleMapInstance | null>(null);
@@ -655,7 +667,7 @@ export default function MapPage({
   }
 
   function handleOpenNotCut() {
-    setNotCutReason("Too Wet");
+    setNotCutReason(resolvedNotCutReasons[0] ?? "Other");
     setNotCutComment("");
     setShowNotCutModal(true);
   }
@@ -1445,7 +1457,7 @@ export default function MapPage({
                   }
                   className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
                 >
-                  {NOT_CUT_REASONS.map((reason) => (
+                  {resolvedNotCutReasons.map((reason) => (
                     <option key={reason} value={reason}>
                       {reason}
                     </option>

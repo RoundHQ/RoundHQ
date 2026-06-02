@@ -32,11 +32,21 @@ function getInitialConfirmationNotice() {
     : "";
 }
 
+function getInitialConfirmationError() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  return new URLSearchParams(window.location.search).get("confirmation_error")
+    ? "That confirmation link has expired or could not be verified. Please request a new account confirmation email."
+    : "";
+}
+
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(getInitialConfirmationError);
   const [notice, setNotice] = useState(getInitialConfirmationNotice);
   const supabaseConfigured = isSupabaseConfigured();
 

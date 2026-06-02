@@ -726,6 +726,7 @@ function downloadCustomerImportTemplate() {
 
 function CustomerModal({
                          existingCustomer,
+                         customers,
                          defaultRotationWeeks,
                          allowCommercialTools,
                          staffMembers,
@@ -735,6 +736,7 @@ function CustomerModal({
                          onSave,
                        }: {
   existingCustomer?: Customer;
+  customers: Customer[];
   defaultRotationWeeks: RotationWeeks;
   allowCommercialTools: boolean;
   staffMembers: StaffMember[];
@@ -743,12 +745,19 @@ function CustomerModal({
   onClose: () => void;
   onSave: (customer: Customer) => void;
 }) {
+  function isUsingAddressAutocompleteSuggestion() {
+    return Boolean(window.__roundhqAddressAutocompleteInteracting);
+  }
+
   return (
       <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
           role="presentation"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
+            if (
+              event.target === event.currentTarget &&
+              !isUsingAddressAutocompleteSuggestion()
+            ) {
               onClose();
             }
           }}
@@ -756,6 +765,7 @@ function CustomerModal({
         <div className="max-h-[90vh] w-full max-w-4xl overflow-auto rounded-[24px] bg-white shadow-2xl">
           <CustomerForm
               existing={existingCustomer}
+              customers={customers}
               defaultRotationWeeks={defaultRotationWeeks}
               allowCommercialTools={allowCommercialTools}
               staffMembers={staffMembers}
@@ -1442,6 +1452,7 @@ export default function CustomersPage({
         {isCustomerModalOpen && (
                 <CustomerModal
                     existingCustomer={editingCustomer ?? undefined}
+                    customers={customers}
                     defaultRotationWeeks={normalizedDefaultRotationWeeks}
                     allowCommercialTools={allowCommercialTools}
                     staffMembers={staffMembers}

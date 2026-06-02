@@ -187,6 +187,7 @@ import {
   type DocumentDeliveryMethod,
   INVOICE_STATUS_OPTIONS,
   QUOTE_STATUS_OPTIONS,
+  DEFAULT_NOT_CUT_REASONS,
   type Customer,
   type InvoiceReminderState,
   type InvoiceStatus,
@@ -253,6 +254,7 @@ type AppSettings = {
   editInactiveAction: EditInactiveAction;
   helpEnabled: boolean;
   autoScheduling: AutoSchedulingSettings;
+  notCutReasons: string[];
 
   defaultGrassCutPrice: number;
   defaultHedgeCutPrice: number;
@@ -1001,6 +1003,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   editInactiveAction: "notify",
   helpEnabled: true,
   autoScheduling: DEFAULT_AUTO_SCHEDULING_SETTINGS,
+  notCutReasons: [...DEFAULT_NOT_CUT_REASONS],
 
   defaultGrassCutPrice: 15,
   defaultHedgeCutPrice: 40,
@@ -1279,6 +1282,10 @@ function mergeAppSettings(value?: Partial<AppSettings> | null): AppSettings {
     editInactiveAction: normalizeEditInactiveAction(value?.editInactiveAction),
     helpEnabled: value?.helpEnabled !== false,
     autoScheduling: normalizeAutoSchedulingSettings(value?.autoScheduling),
+    notCutReasons: normalizeTextOptions(
+        value?.notCutReasons,
+        DEFAULT_APP_SETTINGS.notCutReasons
+    ),
     stripeConnectedAccountId:
         typeof value?.stripeConnectedAccountId === "string"
             ? value.stripeConnectedAccountId
@@ -1471,6 +1478,20 @@ function normalizeQuoteServices(value: unknown): QuoteService[] {
   });
 
   return normalized;
+}
+
+function normalizeTextOptions(value: unknown, fallback: readonly string[]) {
+  const source = Array.isArray(value) ? value : fallback;
+  const normalized = Array.from(
+      new Map(
+          source
+              .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+              .filter(Boolean)
+              .map((entry) => [entry.toLowerCase(), entry])
+      ).values()
+  );
+
+  return normalized.length ? normalized : [...fallback];
 }
 
 function mapCatalogItemRowToQuoteService(row: CatalogItemRow): QuoteService {
@@ -13871,6 +13892,7 @@ export default function JobsApp({
                       grassCutSeasonStart={appSettings.grassCutSeasonStart}
                       grassCutSeasonEnd={appSettings.grassCutSeasonEnd}
                       monthlyPaymentsReady={workflowTablesReady.monthlyPayments}
+                      notCutReasons={appSettings.notCutReasons}
                       isLocked={isLocked}
                       getCurrentVisit={getCurrentVisit as any}
                       onUpdateCustomer={updateCustomer as any}
@@ -13992,6 +14014,7 @@ export default function JobsApp({
                       }
                       initialItems={pendingLeadQuoteDraft?.initialItems}
                       savedServices={appSettings.quoteServices}
+                      workTypeOptions={appSettings.autoScheduling.workCategories}
                       pressureWashRatePerSquareMetre={appSettings.defaultPressureWashRate}
                       defaultRotationWeeks={defaultRotationWeeks}
                       allowCommercialTools={hasGrowthPlan}
@@ -14108,6 +14131,7 @@ export default function JobsApp({
                       initialTerms={
                           selectedInvoice?.terms ?? appSettings.defaultInvoiceTerms
                       }
+                      savedServices={appSettings.quoteServices}
                       defaultPaymentTermsDays={appSettings.paymentTermsDays}
                       defaultVatRegistered={appSettings.vatRegistered}
                       defaultVatRate={appSettings.vatRate}

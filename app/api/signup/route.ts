@@ -12,9 +12,10 @@ import {
   isSupabaseServiceRoleConfigured,
 } from "@/lib/supabase/admin";
 import { getSubscriptionPlan, normalizePlanKey } from "@/lib/billing/plans";
-import { getBaseUrl } from "@/lib/stripe/server";
 
 export const runtime = "nodejs";
+
+const PUBLIC_SIGNUP_BASE_URL = "https://roundhq.co.uk";
 
 type SignupRequestBody = {
   companyName?: unknown;
@@ -36,6 +37,67 @@ function getSignupErrorMessage(error: unknown, fallback: string) {
 
 function normalizeSignupEmail(value: unknown) {
   return getText(value).toLowerCase();
+}
+
+function isLocalBaseUrl(value: string) {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+
+    return hostname === "localhost" || hostname === "127.0.0.1";
+  } catch {
+    return value.includes("localhost") || value.includes("127.0.0.1");
+  }
+}
+
+function getSignupBaseUrl(requestUrl: string) {
+  const configuredUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
+
+  if (configuredUrl) {
+    const normalizedUrl = configuredUrl.replace(/\/$/, "");
+
+    if (!isLocalBaseUrl(normalizedUrl)) {
+      return normalizedUrl;
+    }
+  }
+
+  try {
+    const origin = new URL(requestUrl).origin;
+
+    return origin.includes("localhost") || origin.includes("127.0.0.1")
+      ? PUBLIC_SIGNUP_BASE_URL
+      : origin;
+  } catch {
+    return PUBLIC_SIGNUP_BASE_URL;
+  }
+}
+
+function buildRoundHqConfirmationLink({
+  baseUrl,
+  actionLink,
+  hashedToken,
+}: {
+  baseUrl: string;
+  actionLink: string;
+  hashedToken?: string;
+}) {
+  if (!actionLink) {
+    return `${baseUrl}/login?confirmed=1&next=%2Fdashboard`;
+  }
+
+  const actionUrl = new URL(actionLink);
+  const tokenHash = actionUrl.searchParams.get("token_hash") ?? hashedToken;
+  const type = actionUrl.searchParams.get("type") ?? "signup";
+
+  if (!tokenHash) {
+    return actionLink;
+  }
+
+  const confirmationUrl = new URL("/auth/confirm", baseUrl);
+  confirmationUrl.searchParams.set("token_hash", tokenHash);
+  confirmationUrl.searchParams.set("type", type);
+  confirmationUrl.searchParams.set("next", "/dashboard");
+
+  return confirmationUrl.toString();
 }
 
 function buildAdminSignupMessage({
@@ -141,7 +203,7 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = createServiceRoleClient();
-  const baseUrl = getBaseUrl(request.url);
+  const baseUrl = getSignupBaseUrl(request.url);
   const { data, error } = await supabase.auth.admin.generateLink({
     type: "signup",
     email,
@@ -160,7 +222,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
-  const verificationLink = data.properties.action_link;
+  const linkProperties = data.properties as {
+    action_link?: string;
+    hashed_token?: string;
+  };
+  const supabaseActionLink = linkProperties.action_link ?? "";
+  const verificationLink = buildRoundHqConfirmationLink({
+    baseUrl,
+    actionLink: supabaseActionLink,
+    hashedToken: linkProperties.hashed_token,
+  });
   const userId = data.user.id;
 
   try {

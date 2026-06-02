@@ -6,6 +6,7 @@ import type { Customer, RotationWeeks } from "./types";
 
 type Props = {
     customerName: string;
+    customers?: Customer[];
     defaultRotationWeeks?: RotationWeeks;
     allowCommercialTools?: boolean;
     onCreateCustomer: (customer: Customer) => Promise<Customer | null | undefined>;
@@ -19,6 +20,7 @@ function getErrorMessage(error: unknown) {
 
 export default function DocumentCustomerCreateDialog({
     customerName,
+    customers = [],
     defaultRotationWeeks,
     allowCommercialTools = true,
     onCreateCustomer,
@@ -56,6 +58,7 @@ export default function DocumentCustomerCreateDialog({
                 <CustomerForm
                     key={customerName}
                     initialName={customerName}
+                    customers={customers}
                     defaultRotationWeeks={defaultRotationWeeks}
                     allowCommercialTools={allowCommercialTools}
                     onSave={handleSave}
