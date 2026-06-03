@@ -128,6 +128,7 @@ type Props = {
   quotes: Quote[];
   customers: Customer[];
   documentHistory: Record<string, DocumentHistoryEntry[]>;
+  showOwnerHistory?: boolean;
   recurringInvoiceTemplates: RecurringInvoiceTemplate[];
   defaultPaymentTermsDays: number;
   businessDetails: BusinessDetails;
@@ -139,6 +140,10 @@ type Props = {
     status: InvoiceStatus
   ) => Promise<void> | void;
   onMarkSent: (
+    invoiceId: string,
+    metadata?: DocumentSendMetadata
+  ) => Promise<void> | void;
+  onMarkRead?: (
     invoiceId: string,
     metadata?: DocumentSendMetadata
   ) => Promise<void> | void;
@@ -229,6 +234,8 @@ function getInvoiceStatusClasses(status: InvoiceStatus) {
 
 function getHistoryTypeClasses(type: DocumentHistoryEntry["type"]) {
   switch (type) {
+    case "read":
+      return "bg-violet-100 text-violet-700";
     case "sent":
       return "bg-sky-100 text-sky-700";
     case "updated":
@@ -240,6 +247,8 @@ function getHistoryTypeClasses(type: DocumentHistoryEntry["type"]) {
 
 function getHistoryTypeLabel(type: DocumentHistoryEntry["type"]) {
   switch (type) {
+    case "read":
+      return "Read";
     case "sent":
       return "Sent";
     case "updated":
@@ -430,6 +439,7 @@ export default function InvoicesPage({
   quotes,
   customers,
   documentHistory,
+  showOwnerHistory = false,
   recurringInvoiceTemplates,
   defaultPaymentTermsDays,
   businessDetails,
@@ -1227,6 +1237,7 @@ export default function InvoicesPage({
         );
       })() : null}
 
+      {showOwnerHistory ? (
       <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
@@ -1286,6 +1297,7 @@ export default function InvoicesPage({
           )}
         </div>
       </section>
+      ) : null}
 
       {sendTarget && activeInvoice ? (
         <DocumentSendDialog

@@ -2108,7 +2108,10 @@ function normalizeDocumentHistoryEntry(
 ): DocumentHistoryEntry | null {
   const entry = isRecord(value) ? value : {};
   const type =
-      entry.type === "created" || entry.type === "updated" || entry.type === "sent"
+      entry.type === "created" ||
+      entry.type === "updated" ||
+      entry.type === "sent" ||
+      entry.type === "read"
           ? entry.type
           : null;
   const occurredAt =
@@ -5444,6 +5447,7 @@ export default function JobsApp({
 
     return Boolean(currentStaffMember.isSystemAdmin) || currentStaffMember.role === "Admin";
   }, [currentStaffMember, staffSystemReady]);
+  const canViewOwnerDocumentHistory = currentUserIsAdmin || isSupportAccess;
   const activeStaffMembers = useMemo(
       () => staffMembers.filter((staffMember) => staffMember.isActive),
       [staffMembers]
@@ -8984,6 +8988,28 @@ export default function JobsApp({
     );
   }
 
+  async function markQuoteRead(
+      quoteId: string,
+      metadata: DocumentSendMetadata = {}
+  ) {
+    const existingQuote = quotes.find((quote) => quote.id === quoteId) ?? null;
+
+    if (!existingQuote || quoteHistory[quoteId]?.some((entry) => entry.type === "read")) {
+      return;
+    }
+
+    appendQuoteHistory(
+        quoteId,
+        createDocumentHistoryEntry(
+            "read",
+            `Customer read quote ${existingQuote.quoteNumber}${
+                metadata.recipient ? ` from ${metadata.recipient.trim()}` : ""
+            }.`,
+            metadata
+        )
+    );
+  }
+
   async function updateQuoteStatusFromList(
       quoteId: string,
       status: QuoteStatus
@@ -9064,6 +9090,32 @@ export default function JobsApp({
             "sent",
             `Sent by email${
                 metadata.recipient ? ` to ${metadata.recipient.trim()}` : ""
+            }.`,
+            metadata
+        )
+    );
+  }
+
+  async function markInvoiceRead(
+      invoiceId: string,
+      metadata: DocumentSendMetadata = {}
+  ) {
+    const existingInvoice =
+        invoices.find((invoice) => invoice.id === invoiceId) ?? null;
+
+    if (
+        !existingInvoice ||
+        invoiceHistory[invoiceId]?.some((entry) => entry.type === "read")
+    ) {
+      return;
+    }
+
+    appendInvoiceHistory(
+        invoiceId,
+        createDocumentHistoryEntry(
+            "read",
+            `Customer read invoice ${existingInvoice.invoiceNumber}${
+                metadata.recipient ? ` from ${metadata.recipient.trim()}` : ""
             }.`,
             metadata
         )
@@ -13781,6 +13833,7 @@ export default function JobsApp({
                       )}
                       invoices={invoices as any}
                       invoiceHistory={invoiceHistory}
+                      showOwnerHistory={canViewOwnerDocumentHistory}
                       businessDetails={{
                         businessName: appSettings.businessName,
                         tradingName: appSettings.tradingName,
@@ -13843,6 +13896,7 @@ export default function JobsApp({
                       }
                       onOpenInvoice={openEditInvoiceForm}
                       onMarkInvoiceSent={markInvoiceSent}
+                      onMarkInvoiceRead={markInvoiceRead}
                   />
               )}
 
@@ -13911,6 +13965,7 @@ export default function JobsApp({
                       quotes={quotes as any}
                       customers={customers}
                       documentHistory={quoteHistory}
+                      showOwnerHistory={canViewOwnerDocumentHistory}
                       businessDetails={{
                         businessName: appSettings.businessName,
                         tradingName: appSettings.tradingName,
@@ -13953,6 +14008,7 @@ export default function JobsApp({
                       onConvertToInvoice={convertQuoteToInvoice}
                       allowQuoteConversionWorkflows={hasGrowthPlan}
                       onMarkSent={markQuoteSent}
+                      onMarkRead={markQuoteRead}
                   />
                 )}
 
@@ -13967,6 +14023,10 @@ export default function JobsApp({
                       }
                       customers={customers}
                       existingQuote={selectedQuote ?? undefined}
+                      documentHistory={
+                          selectedQuote?.id ? quoteHistory[selectedQuote.id] ?? [] : []
+                      }
+                      showOwnerHistory={canViewOwnerDocumentHistory}
                       customerType={
                           selectedQuote?.customerType ??
                           selectedCustomer?.customerType ??
@@ -14028,6 +14088,7 @@ export default function JobsApp({
                       onConvertToInvoice={
                           selectedQuote ? convertQuoteToInvoice : undefined
                       }
+                      onMarkRead={markQuoteRead}
                       onBack={() => {
                         setPendingLeadQuoteDraft(null);
                         navigateToPage("quotes");
@@ -14041,6 +14102,7 @@ export default function JobsApp({
                       quotes={quotes as any}
                       customers={customers}
                       documentHistory={invoiceHistory}
+                      showOwnerHistory={canViewOwnerDocumentHistory}
                       recurringInvoiceTemplates={recurringInvoiceTemplates}
                       defaultPaymentTermsDays={appSettings.paymentTermsDays}
                       businessDetails={{
@@ -14089,6 +14151,7 @@ export default function JobsApp({
                       onDelete={deleteInvoiceRecord}
                       onUpdateStatus={updateInvoiceStatusFromList}
                       onMarkSent={markInvoiceSent}
+                      onMarkRead={markInvoiceRead}
                       onCreatePaymentLink={createInvoicePaymentLink}
                       onSaveRecurringTemplate={saveRecurringInvoiceTemplate}
                       onDeleteRecurringTemplate={deleteRecurringInvoiceTemplate}
@@ -14104,6 +14167,12 @@ export default function JobsApp({
                       }
                       customers={customers}
                       existingInvoice={selectedInvoice ?? undefined}
+                      documentHistory={
+                          selectedInvoice?.id
+                              ? invoiceHistory[selectedInvoice.id] ?? []
+                              : []
+                      }
+                      showOwnerHistory={canViewOwnerDocumentHistory}
                       customerType={
                           selectedInvoice?.customerType ?? selectedCustomer?.customerType
                       }
@@ -14144,6 +14213,7 @@ export default function JobsApp({
                       })}
                       onSave={addInvoice as any}
                       onCreateCustomer={addCustomer}
+                      onMarkRead={markInvoiceRead}
                       onBack={() => navigateToPage("invoices")}
                   />
               )}

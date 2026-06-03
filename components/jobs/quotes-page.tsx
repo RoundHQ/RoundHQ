@@ -74,6 +74,7 @@ type Props = {
   quotes: Quote[];
   customers: Customer[];
   documentHistory: Record<string, DocumentHistoryEntry[]>;
+  showOwnerHistory?: boolean;
   businessDetails: {
     businessName?: string;
     tradingName?: string;
@@ -119,6 +120,10 @@ type Props = {
   onConvertToInvoice: (quoteId: string) => void;
   allowQuoteConversionWorkflows?: boolean;
   onMarkSent: (
+    quoteId: string,
+    metadata?: DocumentSendMetadata
+  ) => Promise<void> | void;
+  onMarkRead?: (
     quoteId: string,
     metadata?: DocumentSendMetadata
   ) => Promise<void> | void;
@@ -193,6 +198,8 @@ function getQuoteStatusClasses(status: QuoteStatus) {
 
 function getHistoryTypeClasses(type: DocumentHistoryEntry["type"]) {
   switch (type) {
+    case "read":
+      return "bg-violet-100 text-violet-700";
     case "sent":
       return "bg-sky-100 text-sky-700";
     case "updated":
@@ -204,6 +211,8 @@ function getHistoryTypeClasses(type: DocumentHistoryEntry["type"]) {
 
 function getHistoryTypeLabel(type: DocumentHistoryEntry["type"]) {
   switch (type) {
+    case "read":
+      return "Read";
     case "sent":
       return "Sent";
     case "updated":
@@ -317,6 +326,7 @@ export default function QuotesPage({
   quotes,
   customers,
   documentHistory,
+  showOwnerHistory = false,
   businessDetails,
   onCreate,
   onEdit,
@@ -859,6 +869,7 @@ export default function QuotesPage({
         );
       })() : null}
 
+      {showOwnerHistory ? (
       <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
@@ -918,6 +929,7 @@ export default function QuotesPage({
           )}
         </div>
       </section>
+      ) : null}
 
       {sendTarget && activeQuote ? (
         <DocumentSendDialog

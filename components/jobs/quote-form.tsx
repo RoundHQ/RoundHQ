@@ -2,11 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Plus, ReceiptText, Trash2 } from "lucide-react";
+import DocumentHistoryPanel from "./document-history-panel";
 import DocumentCustomerCreateDialog from "./document-customer-create-dialog";
 import DocumentCustomerPicker from "./document-customer-picker";
 import {
     QUOTE_STATUS_OPTIONS,
     type Customer,
+    type DocumentDeliveryMethod,
+    type DocumentHistoryEntry,
     type QuoteStatus,
     type RotationWeeks,
 } from "./types";
@@ -94,6 +97,8 @@ type Props = DocumentCustomerFields & {
     customerName?: string;
     customers?: Customer[];
     existingQuote?: Quote;
+    documentHistory?: DocumentHistoryEntry[];
+    showOwnerHistory?: boolean;
     initialNotes?: string;
     initialItems?: LineItem[];
     savedServices?: QuoteService[];
@@ -105,6 +110,10 @@ type Props = DocumentCustomerFields & {
     onSave: (quote: Quote) => void | boolean | Promise<void | boolean>;
     onCreateCustomer?: (customer: Customer) => Promise<Customer | null | undefined>;
     onConvertToInvoice?: (quoteId: string) => void | Promise<void>;
+    onMarkRead?: (
+        quoteId: string,
+        metadata?: { method?: DocumentDeliveryMethod; recipient?: string }
+    ) => Promise<void> | void;
     onBack: () => void;
 };
 
@@ -258,6 +267,8 @@ export default function QuoteForm({
     customerName,
     customers = [],
     existingQuote,
+    documentHistory = [],
+    showOwnerHistory = false,
     customerType,
     customerAddress,
     customerTown,
@@ -277,6 +288,7 @@ export default function QuoteForm({
     onSave,
     onCreateCustomer,
     onConvertToInvoice,
+    onMarkRead,
     onBack,
 }: Props) {
     const isEditingQuote = Boolean(existingQuote);
@@ -1528,6 +1540,16 @@ export default function QuoteForm({
                     />
                 </div>
             </section>
+
+            {showOwnerHistory && existingQuote?.id ? (
+                <DocumentHistoryPanel
+                    documentId={existingQuote.id}
+                    documentLabel={existingQuote.quoteNumber || "This quote"}
+                    documentKind="quote"
+                    entries={documentHistory}
+                    onMarkRead={onMarkRead}
+                />
+            ) : null}
 
             <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">

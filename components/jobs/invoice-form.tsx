@@ -2,11 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import DocumentHistoryPanel from "./document-history-panel";
 import DocumentCustomerCreateDialog from "./document-customer-create-dialog";
 import DocumentCustomerPicker from "./document-customer-picker";
 import {
     INVOICE_STATUS_OPTIONS,
     type Customer,
+    type DocumentDeliveryMethod,
+    type DocumentHistoryEntry,
     type InvoiceStatus,
     type RotationWeeks,
 } from "./types";
@@ -71,6 +74,8 @@ type Props = DocumentCustomerFields & {
     customerName?: string;
     customers?: Customer[];
     existingInvoice?: Invoice;
+    documentHistory?: DocumentHistoryEntry[];
+    showOwnerHistory?: boolean;
     invoiceNumberPreview?: string;
     initialNotes?: string;
     initialTerms?: string;
@@ -83,6 +88,10 @@ type Props = DocumentCustomerFields & {
     editCollaboration?: EditFormCollaboration<Invoice>;
     onSave: (invoice: Invoice) => void | boolean | Promise<void | boolean>;
     onCreateCustomer?: (customer: Customer) => Promise<Customer | null | undefined>;
+    onMarkRead?: (
+        invoiceId: string,
+        metadata?: { method?: DocumentDeliveryMethod; recipient?: string }
+    ) => Promise<void> | void;
     onBack: () => void;
 };
 
@@ -237,6 +246,8 @@ export default function InvoiceForm({
     customerName,
     customers = [],
     existingInvoice,
+    documentHistory = [],
+    showOwnerHistory = false,
     customerType,
     customerAddress,
     customerTown,
@@ -257,6 +268,7 @@ export default function InvoiceForm({
     editCollaboration,
     onSave,
     onCreateCustomer,
+    onMarkRead,
     onBack,
 }: Props) {
     const isEditingInvoice = Boolean(existingInvoice);
@@ -1086,6 +1098,16 @@ export default function InvoiceForm({
                     </div>
                 </div>
             </section>
+
+            {showOwnerHistory && existingInvoice?.id ? (
+                <DocumentHistoryPanel
+                    documentId={existingInvoice.id}
+                    documentLabel={existingInvoice.invoiceNumber || "This invoice"}
+                    documentKind="invoice"
+                    entries={documentHistory}
+                    onMarkRead={onMarkRead}
+                />
+            ) : null}
 
             <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">

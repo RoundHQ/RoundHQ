@@ -111,9 +111,9 @@ export default function HistoryPage({
 
                     const statusLabel =
                         visit.status === "completed"
-                            ? "Completed"
+                            ? "Work completed"
                             : visit.status === "not_cut"
-                                ? `Not Completed${visit.notCutReason ? ` - ${visit.notCutReason}` : ""}`
+                                ? "Work not completed"
                                 : visit.status;
 
                     return (
@@ -142,6 +142,11 @@ export default function HistoryPage({
                         >
                           {statusLabel}
                         </span>
+                            {visit.status === "not_cut" ? (
+                              <p className="mt-1 text-xs font-semibold text-rose-700">
+                                Reason: {visit.notCutReason || "Not recorded"}
+                              </p>
+                            ) : null}
                           </td>
 
                           <td className="px-4 py-4">

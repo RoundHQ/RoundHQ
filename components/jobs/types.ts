@@ -283,7 +283,7 @@ export type InvoiceReminderState = {
 
 export type DocumentHistoryEntry = {
   id: string;
-  type: "created" | "updated" | "sent";
+  type: "created" | "updated" | "sent" | "read";
   occurredAt: string;
   summary: string;
   method?: DocumentDeliveryMethod;

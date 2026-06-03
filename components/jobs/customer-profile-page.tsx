@@ -104,6 +104,7 @@ type Props = {
   commercialRamsDocuments: CommercialRamsDocument[];
   invoices: Invoice[];
   invoiceHistory: Record<string, DocumentHistoryEntry[]>;
+  showOwnerHistory?: boolean;
   businessDetails: BusinessDetails;
   lastVisit: Date | null;
   totalSpent: number;
@@ -125,6 +126,10 @@ type Props = {
   onCreateInvoice: (customerId: number) => void;
   onOpenInvoice: (invoiceId: string) => void;
   onMarkInvoiceSent: (
+    invoiceId: string,
+    metadata?: DocumentSendMetadata
+  ) => Promise<void> | void;
+  onMarkInvoiceRead?: (
     invoiceId: string,
     metadata?: DocumentSendMetadata
   ) => Promise<void> | void;
@@ -184,6 +189,8 @@ function getInvoiceStatusClasses(status: InvoiceStatus) {
 
 function getHistoryTypeClasses(type: DocumentHistoryEntry["type"]) {
   switch (type) {
+    case "read":
+      return "bg-violet-100 text-violet-700";
     case "sent":
       return "bg-sky-100 text-sky-700";
     case "updated":
@@ -195,6 +202,8 @@ function getHistoryTypeClasses(type: DocumentHistoryEntry["type"]) {
 
 function getHistoryTypeLabel(type: DocumentHistoryEntry["type"]) {
   switch (type) {
+    case "read":
+      return "Read";
     case "sent":
       return "Sent";
     case "updated":
@@ -267,6 +276,7 @@ export default function CustomerProfilePage({
                                               commercialRamsDocuments,
                                               invoices,
                                               invoiceHistory,
+                                              showOwnerHistory = false,
                                               businessDetails,
                                               lastVisit,
   totalSpent,
@@ -286,6 +296,7 @@ export default function CustomerProfilePage({
                                               onCreateInvoice,
                                               onOpenInvoice,
                                               onMarkInvoiceSent,
+                                              onMarkInvoiceRead,
 }: Props)  {
   const [isEditing, setIsEditing] = useState(false);
   const [sendInvoiceTargetId, setSendInvoiceTargetId] = useState<string | null>(
@@ -771,6 +782,7 @@ export default function CustomerProfilePage({
               </div>
             </section>
 
+            {showOwnerHistory ? (
             <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-2">
@@ -786,42 +798,68 @@ export default function CustomerProfilePage({
 
               {invoiceHistoryItems.length > 0 ? (
                 <div className="mt-4 space-y-3">
-                  {invoiceHistoryItems.slice(0, 8).map(({ invoice, entry }) => (
-                    <div
-                      key={`${invoice.id}-${entry.id}`}
-                      className="flex flex-col gap-3 rounded-2xl border border-slate-200 p-4 md:flex-row md:items-center md:justify-between"
-                    >
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span
-                            className={`rounded-full px-2 py-1 text-xs font-bold ${getHistoryTypeClasses(
-                              entry.type
-                            )}`}
-                          >
-                            {getHistoryTypeLabel(entry.type)}
-                          </span>
-                          <p className="text-sm font-black text-slate-900">
-                            {invoice.invoiceNumber}
+                  {invoiceHistoryItems.slice(0, 8).map(({ invoice, entry }) => {
+                    const invoiceReadRecorded = (invoiceHistory[invoice.id] ?? []).some(
+                      (historyEntry) => historyEntry.type === "read"
+                    );
+                    const canRecordRead =
+                      entry.type === "sent" &&
+                      !invoiceReadRecorded &&
+                      Boolean(onMarkInvoiceRead);
+
+                    return (
+                      <div
+                        key={`${invoice.id}-${entry.id}`}
+                        className="flex flex-col gap-3 rounded-2xl border border-slate-200 p-4 md:flex-row md:items-center md:justify-between"
+                      >
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={`rounded-full px-2 py-1 text-xs font-bold ${getHistoryTypeClasses(
+                                entry.type
+                              )}`}
+                            >
+                              {getHistoryTypeLabel(entry.type)}
+                            </span>
+                            <p className="text-sm font-black text-slate-900">
+                              {invoice.invoiceNumber}
+                            </p>
+                          </div>
+                          <p className="mt-2 text-sm text-slate-600">
+                            {entry.summary}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {formatHistoryDate(entry.occurredAt)}
+                            {entry.recipient ? ` to ${entry.recipient}` : ""}
                           </p>
                         </div>
-                        <p className="mt-2 text-sm text-slate-600">
-                          {entry.summary}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {formatHistoryDate(entry.occurredAt)}
-                          {entry.recipient ? ` to ${entry.recipient}` : ""}
-                        </p>
-                      </div>
 
-                      <button
-                        onClick={() => setSendInvoiceTargetId(invoice.id)}
-                        className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                      >
-                        <Send size={16} />
-                        Resend
-                      </button>
-                    </div>
-                  ))}
+                        <div className="flex flex-wrap gap-2">
+                          {canRecordRead ? (
+                            <button
+                              onClick={() =>
+                                void onMarkInvoiceRead?.(invoice.id, {
+                                  method: entry.method ?? "email",
+                                  recipient: entry.recipient,
+                                })
+                              }
+                              className="inline-flex items-center justify-center rounded-xl bg-[#0f2343] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#153c3f]"
+                            >
+                              Record read
+                            </button>
+                          ) : null}
+
+                          <button
+                            onClick={() => setSendInvoiceTargetId(invoice.id)}
+                            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                          >
+                            <Send size={16} />
+                            Resend
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <p className="mt-4 text-sm text-slate-500">
@@ -830,6 +868,7 @@ export default function CustomerProfilePage({
                 </p>
               )}
             </section>
+            ) : null}
 
             <section className="rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="text-lg font-black tracking-tight text-slate-900">
@@ -858,11 +897,16 @@ export default function CustomerProfilePage({
                               </p>
                               <p className="mt-1 text-sm text-slate-500">
                                 {visit.status === "completed"
-                                    ? "Completed"
+                                    ? "Work completed"
                                     : visit.status === "not_cut"
-                                        ? `Not Completed${notCutReason ? ` - ${notCutReason}` : ""}`
+                                        ? "Work not completed"
                                         : visit.status}
                               </p>
+                              {visit.status === "not_cut" ? (
+                                  <p className="mt-1 text-sm font-semibold text-rose-700">
+                                    Reason: {notCutReason || "Not recorded"}
+                                  </p>
+                              ) : null}
                               <p className="mt-1 text-sm text-slate-500">
                                 {customer.paymentMethod === "Monthly"
                                     ? "Payment tracked from the Payments page"
