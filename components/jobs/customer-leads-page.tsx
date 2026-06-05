@@ -21,6 +21,11 @@ import {
   Trash2,
   UserPlus,
 } from "lucide-react";
+import {
+  formatAiReceptionistCallDuration,
+  getAiReceptionistCallMetadata,
+} from "@/lib/ai-receptionist-leads";
+import { SHOW_AI_RECEPTIONIST_UI } from "@/lib/ai-receptionist/ui-visibility";
 import { buildCustomerDraftFromLead } from "@/lib/customer-leads";
 import type {
   CustomerLead,
@@ -123,6 +128,7 @@ type LeadTimelineItem = {
   type: CustomerLeadActivity["type"];
   title: string;
   detail?: string;
+  metadata?: CustomerLeadActivity["metadata"];
 };
 
 function getLeadDisplayName(lead: CustomerLead) {
@@ -347,7 +353,7 @@ function getStatusLabel(status: CustomerLeadStatus) {
   return STATUS_META[status].label;
 }
 
-function getSourceLabel(source: CustomerLead["source"]) {
+export function getSourceLabel(source: CustomerLead["source"]) {
   switch (source) {
     case "facebook":
       return "Facebook";
@@ -355,6 +361,8 @@ function getSourceLabel(source: CustomerLead["source"]) {
       return "WhatsApp";
     case "email":
       return "Email";
+    case "ai_receptionist":
+      return SHOW_AI_RECEPTIONIST_UI ? "AI Receptionist" : "Phone enquiry";
     case "manual":
       return "Manual";
     default:
@@ -387,6 +395,7 @@ function getLeadTimeline(lead: CustomerLead): LeadTimelineItem[] {
     type: entry.type,
     title: entry.title,
     detail: entry.detail,
+    metadata: entry.metadata,
   }));
   const replyActivityIds = new Set(
     lead.activityHistory
@@ -414,6 +423,24 @@ function getLeadTimeline(lead: CustomerLead): LeadTimelineItem[] {
       detail: `${getSourceLabel(lead.source)} enquiry submitted.`,
     },
   ].sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
+}
+
+function getAiReceptionistLeadAlert(lead: CustomerLead) {
+  const metadata = lead.activityHistory
+    .map((entry) => getAiReceptionistCallMetadata(entry))
+    .find(
+      (entry) =>
+        entry?.emergency_detected || entry?.priority?.toLowerCase() === "high"
+    );
+
+  if (!metadata) {
+    return null;
+  }
+
+  return {
+    keywords: metadata.emergency_keywords ?? [],
+    outcome: metadata.call_outcome,
+  };
 }
 
 function getDefaultReplySubject(lead: CustomerLead, businessName: string) {
@@ -465,6 +492,222 @@ function DetailTile({
       </p>
       <div className="mt-1.5 text-sm font-semibold text-slate-900">{children}</div>
     </div>
+  );
+}
+
+function ExpandableActivityText({
+  text,
+  maxLength = 1600,
+  className = "",
+}: {
+  text: string;
+  maxLength?: number;
+  className?: string;
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const isLongText = text.length > maxLength;
+  const visibleText =
+    isLongText && !isExpanded
+      ? `${text.slice(0, maxLength).trimEnd()}...`
+      : text;
+
+  return (
+    <div>
+      <p className={`whitespace-pre-wrap break-words ${className}`}>
+        {visibleText}
+      </p>
+      {isLongText ? (
+        <button
+          type="button"
+          onClick={() => setIsExpanded((current) => !current)}
+          className="mt-2 text-xs font-bold text-slate-900 underline decoration-slate-300 underline-offset-2 transition hover:text-slate-600"
+        >
+          {isExpanded ? "Show Less" : "Show More"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function AiReceptionistActivityField({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div>
+      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+        {label}:
+      </p>
+      <div className="mt-1 text-sm leading-5 text-slate-700">{children}</div>
+    </div>
+  );
+}
+
+function AiReceptionistActivityContent({
+  entry,
+}: {
+  entry: LeadTimelineItem;
+}) {
+  const metadata = getAiReceptionistCallMetadata(entry);
+
+  if (!metadata) {
+    return entry.detail ? (
+      <ExpandableActivityText
+        text={entry.detail}
+        className="text-sm leading-5 text-slate-600"
+      />
+    ) : null;
+  }
+
+  const recordingPlaybackUrl = metadata.recording_id
+    ? `/api/ai-receptionist/recordings/${encodeURIComponent(
+        metadata.recording_id
+      )}`
+    : metadata.recording_url;
+
+  return (
+    <div className="mt-2 space-y-3">
+      {metadata.ai_summary ? (
+        <AiReceptionistActivityField label="Summary">
+          <ExpandableActivityText
+            text={metadata.ai_summary}
+            maxLength={900}
+            className="text-sm leading-5 text-slate-700"
+          />
+        </AiReceptionistActivityField>
+      ) : null}
+
+      {metadata.ai_summary_short ? (
+        <AiReceptionistActivityField label="Short Summary">
+          {metadata.ai_summary_short}
+        </AiReceptionistActivityField>
+      ) : null}
+
+      {metadata.ai_summary_detailed ? (
+        <AiReceptionistActivityField label="Detailed Summary">
+          <ExpandableActivityText
+            text={metadata.ai_summary_detailed}
+            maxLength={1200}
+            className="text-sm leading-5 text-slate-700"
+          />
+        </AiReceptionistActivityField>
+      ) : null}
+
+      {metadata.call_duration_seconds !== undefined ? (
+        <AiReceptionistActivityField label="Call Duration">
+          {formatAiReceptionistCallDuration(metadata.call_duration_seconds)}
+        </AiReceptionistActivityField>
+      ) : null}
+
+      {metadata.priority?.toLowerCase() === "high" ||
+      metadata.emergency_detected ? (
+        <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-800">
+          High priority
+          {metadata.emergency_keywords?.length
+            ? ` - ${metadata.emergency_keywords.join(", ")}`
+            : ""}
+        </div>
+      ) : null}
+
+      {metadata.call_outcome ? (
+        <AiReceptionistActivityField label="Outcome">
+          {metadata.call_outcome}
+        </AiReceptionistActivityField>
+      ) : null}
+
+      {metadata.caller_phone ? (
+        <AiReceptionistActivityField label="Phone">
+          {metadata.caller_phone}
+        </AiReceptionistActivityField>
+      ) : null}
+
+      {metadata.transcript ? (
+        <AiReceptionistActivityField label="Transcript">
+          <ExpandableActivityText
+            text={metadata.transcript}
+            maxLength={1800}
+            className="text-sm leading-5 text-slate-700"
+          />
+        </AiReceptionistActivityField>
+      ) : null}
+
+      {metadata.recording_status?.toLowerCase() === "failed" ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
+          Transcription failed or is not available yet.
+        </div>
+      ) : null}
+
+      {recordingPlaybackUrl ? (
+        <AiReceptionistActivityField label="Recording">
+          <div className="space-y-2">
+            <audio
+              controls
+              preload="none"
+              src={recordingPlaybackUrl}
+              className="w-full max-w-md"
+            >
+              <a href={recordingPlaybackUrl}>Play Recording</a>
+            </audio>
+            <a
+              href={recordingPlaybackUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex text-xs font-bold text-slate-900 underline decoration-slate-300 underline-offset-2 transition hover:text-slate-600"
+            >
+              Play Recording
+            </a>
+          </div>
+        </AiReceptionistActivityField>
+      ) : null}
+
+      <AiReceptionistActivityField label="Created By">
+        {SHOW_AI_RECEPTIONIST_UI ? metadata.created_by : "Phone intake"}
+      </AiReceptionistActivityField>
+    </div>
+  );
+}
+
+function ActivityTimelineEntry({ entry }: { entry: LeadTimelineItem }) {
+  const isAiReceptionistCall = entry.type === "ai_receptionist_call";
+  const activityTitle =
+    isAiReceptionistCall && !SHOW_AI_RECEPTIONIST_UI
+      ? "Phone call"
+      : entry.title;
+
+  return (
+    <article className="flex gap-3">
+      <span
+        className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${
+          isAiReceptionistCall ? "bg-emerald-500" : "bg-slate-300"
+        }`}
+      />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-sm font-bold text-slate-900">{activityTitle}</p>
+          {isAiReceptionistCall && SHOW_AI_RECEPTIONIST_UI ? (
+            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-200">
+              [AI Receptionist]
+            </span>
+          ) : null}
+          <time className="text-[11px] font-semibold text-slate-400">
+            {formatLeadDate(entry.occurredAt)}
+          </time>
+        </div>
+        {isAiReceptionistCall ? (
+          <AiReceptionistActivityContent entry={entry} />
+        ) : entry.detail ? (
+          <div className="mt-1">
+            <ExpandableActivityText
+              text={entry.detail}
+              className="text-sm leading-5 text-slate-600"
+            />
+          </div>
+        ) : null}
+      </div>
+    </article>
   );
 }
 
@@ -579,6 +822,10 @@ export default function CustomerLeadsPage({
     : [];
   const selectedLeadTimeline = useMemo(
     () => (selectedLead ? getLeadTimeline(selectedLead) : []),
+    [selectedLead]
+  );
+  const selectedLeadAiAlert = useMemo(
+    () => (selectedLead ? getAiReceptionistLeadAlert(selectedLead) : null),
     [selectedLead]
   );
   const inboxStats = useMemo(
@@ -917,6 +1164,7 @@ export default function CustomerLeadsPage({
                               <Clock size={13} />
                               {formatLeadDate(lead.submittedAt)}
                             </span>
+                            <span>{getSourceLabel(lead.source)}</span>
                             <span>{getLeadContactLine(lead)}</span>
                             {duplicateMatches.length > 0 ? (
                               <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 font-semibold text-amber-700 ring-1 ring-amber-200">
@@ -954,7 +1202,7 @@ export default function CustomerLeadsPage({
                           {getLeadService(selectedLead)}
                         </p>
                         <p className="mt-1 text-xs text-slate-400">
-                          {formatLeadDate(selectedLead.submittedAt)} |{" "}
+                          {formatLeadDate(selectedLead.submittedAt)} | Source:{" "}
                           {getSourceLabel(selectedLead.source)}
                         </p>
                       </div>
@@ -1027,6 +1275,30 @@ export default function CustomerLeadsPage({
                       <span className="truncate">{getLeadAddressLine(selectedLead)}</span>
                     </div>
                   </div>
+
+                  {selectedLeadAiAlert ? (
+                    <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3">
+                      <div className="flex items-start gap-3">
+                        <AlertTriangle
+                          size={18}
+                          className="mt-0.5 shrink-0 text-rose-600"
+                        />
+                        <div>
+                          <p className="text-sm font-bold text-rose-900">
+                            High priority call
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-rose-800">
+                            {selectedLeadAiAlert.keywords.length > 0
+                              ? `Matched: ${selectedLeadAiAlert.keywords.join(", ")}`
+                              : "This lead was flagged during the call."}
+                            {selectedLeadAiAlert.outcome
+                              ? ` Outcome: ${selectedLeadAiAlert.outcome}.`
+                              : ""}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
 
                   {selectedLeadDuplicateMatches.length > 0 ? (
                     <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
@@ -1152,24 +1424,7 @@ export default function CustomerLeadsPage({
 
                       <div className="mt-5 space-y-3 border-t border-slate-100 pt-4">
                         {selectedLeadTimeline.map((entry) => (
-                          <article key={entry.id} className="flex gap-3">
-                            <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-slate-300" />
-                            <div className="min-w-0">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <p className="text-sm font-bold text-slate-900">
-                                  {entry.title}
-                                </p>
-                                <time className="text-[11px] font-semibold text-slate-400">
-                                  {formatLeadDate(entry.occurredAt)}
-                                </time>
-                              </div>
-                              {entry.detail ? (
-                                <p className="mt-1 whitespace-pre-wrap text-sm leading-5 text-slate-600">
-                                  {entry.detail}
-                                </p>
-                              ) : null}
-                            </div>
-                          </article>
+                          <ActivityTimelineEntry key={entry.id} entry={entry} />
                         ))}
                       </div>
                     </section>

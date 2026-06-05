@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+    Bot,
     Building2,
     Phone,
     Mail,
@@ -28,7 +29,12 @@ import {
     HelpCircle,
     Calendar as CalendarIcon,
 } from "lucide-react";
+import AiReceptionistSettingsForm from "@/components/ai-receptionist/ai-receptionist-settings-form";
+import AiReceptionistCallHistory from "@/components/ai-receptionist/ai-receptionist-call-history";
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
+import type { AiReceptionistSettings } from "@/lib/ai-receptionist-settings";
+import type { AiReceptionistCallHistoryItem } from "@/lib/ai-receptionist/call-logs";
+import { SHOW_AI_RECEPTIONIST_UI } from "@/lib/ai-receptionist/ui-visibility";
 import {
     DEFAULT_GRASS_CUT_SEASON_END,
     DEFAULT_GRASS_CUT_SEASON_START,
@@ -109,6 +115,7 @@ type SettingsTab =
     | "invoices"
     | "email"
     | "dashboard"
+    | "ai-receptionist"
     | "data";
 
 export type SettingsData = {
@@ -221,6 +228,14 @@ type Props = {
     exportData?: RoundHqDataExportRecords;
     onImportData?: (payload: RoundHqFullDataExport) => Promise<void> | void;
     onSave?: (settings: SettingsData) => Promise<void> | void;
+    workspaceName?: string;
+    aiReceptionistSettings?: AiReceptionistSettings | null;
+    aiReceptionistCallHistory?: {
+        items: AiReceptionistCallHistoryItem[];
+        schemaReady: boolean;
+        schemaError?: string;
+    } | null;
+    canManageAiReceptionistSettings?: boolean;
 };
 
 export type RoundHqDataExportRecords = {
@@ -1066,6 +1081,30 @@ function TabButton({
     );
 }
 
+const settingsTabs: SettingsTab[] = [
+    "account",
+    "business",
+    "documents",
+    "pricing",
+    "jobs",
+    "quotes",
+    "invoices",
+    "email",
+    "dashboard",
+    "ai-receptionist",
+    "data",
+];
+
+function normalizeSettingsTab(value: string | null, allowAiReceptionist: boolean): SettingsTab {
+    if (value === "ai-receptionist" && !allowAiReceptionist) {
+        return "business";
+    }
+
+    return settingsTabs.includes(value as SettingsTab)
+        ? (value as SettingsTab)
+        : "business";
+}
+
 function safeMergeSettings(source?: Partial<SettingsData> | null): SettingsData {
     const quoteFollowUpMethod = "email";
     const invoiceReminderMethod = "email";
@@ -1296,6 +1335,10 @@ export default function SettingsPage({
                                          exportData,
                                          onImportData,
                                          onSave,
+                                         workspaceName,
+                                         aiReceptionistSettings,
+                                         aiReceptionistCallHistory,
+                                         canManageAiReceptionistSettings = false,
                                      }: Props) {
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -1354,6 +1397,8 @@ export default function SettingsPage({
         () => getFullDataExportCounts(resolvedExportData),
         [resolvedExportData]
     );
+    const showAiReceptionistSettings =
+        SHOW_AI_RECEPTIONIST_UI && canManageAiReceptionistSettings;
 
     useEffect(() => {
         const root = document.documentElement;
@@ -1364,6 +1409,20 @@ export default function SettingsPage({
     useEffect(() => {
         setSettings(mergedSettings);
     }, [mergedSettings]);
+
+    useEffect(() => {
+        if (typeof window === "undefined") {
+            return;
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        setActiveTab(
+            normalizeSettingsTab(
+                params.get("tab"),
+                showAiReceptionistSettings
+            )
+        );
+    }, [showAiReceptionistSettings]);
 
     useEffect(() => {
         setAccountEmailDraft(accountEmail ?? "");
@@ -1423,6 +1482,24 @@ export default function SettingsPage({
             ...prev,
             [key]: value,
         }));
+    }
+
+    function handleSettingsTabChange(nextTab: SettingsTab) {
+        setActiveTab(nextTab);
+
+        if (typeof window === "undefined") {
+            return;
+        }
+
+        const url = new URL(window.location.href);
+
+        if (nextTab === "business") {
+            url.searchParams.delete("tab");
+        } else {
+            url.searchParams.set("tab", nextTab);
+        }
+
+        window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
     }
 
     function updateAutoScheduling(
@@ -2114,29 +2191,31 @@ export default function SettingsPage({
                             </p>
                         </div>
 
-                        <div className="flex flex-wrap gap-3">
-                            <button
-                                type="button"
-                                onClick={handleResetChanges}
-                                data-tour="settings-reset-button"
-                                className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-white/20"
-                            >
-                                <RotateCcw className="h-4 w-4" />
-                                Reset changes
-                            </button>
+                        {activeTab !== "ai-receptionist" ? (
+                            <div className="flex flex-wrap gap-3">
+                                <button
+                                    type="button"
+                                    onClick={handleResetChanges}
+                                    data-tour="settings-reset-button"
+                                    className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-white/20"
+                                >
+                                    <RotateCcw className="h-4 w-4" />
+                                    Reset changes
+                                </button>
 
-                            <button
-                                type="button"
-                                onClick={handleSave}
-                                disabled={isSaving}
-                                data-tour="settings-save-button"
-                                className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                style={{ color: settings.primaryColor }}
-                            >
-                                <Save className="h-4 w-4" />
-                                {isSaving ? "Saving..." : "Save settings"}
-                            </button>
-                        </div>
+                                <button
+                                    type="button"
+                                    onClick={handleSave}
+                                    disabled={isSaving}
+                                    data-tour="settings-save-button"
+                                    className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                    style={{ color: settings.primaryColor }}
+                                >
+                                    <Save className="h-4 w-4" />
+                                    {isSaving ? "Saving..." : "Save settings"}
+                                </button>
+                            </div>
+                        ) : null}
                     </div>
                 </div>
 
@@ -2157,34 +2236,42 @@ export default function SettingsPage({
                 ) : null}
 
                 <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-slate-100 p-2">
-                    <TabButton active={activeTab === "account"} onClick={() => setActiveTab("account")} dataTour="settings-tab-account">
+                    <TabButton active={activeTab === "account"} onClick={() => handleSettingsTabChange("account")} dataTour="settings-tab-account">
                         Account
                     </TabButton>
-                    <TabButton active={activeTab === "business"} onClick={() => setActiveTab("business")} dataTour="settings-tab-business">
+                    <TabButton active={activeTab === "business"} onClick={() => handleSettingsTabChange("business")} dataTour="settings-tab-business">
                         Business
                     </TabButton>
-                    <TabButton active={activeTab === "documents"} onClick={() => setActiveTab("documents")} dataTour="settings-tab-documents">
+                    <TabButton active={activeTab === "documents"} onClick={() => handleSettingsTabChange("documents")} dataTour="settings-tab-documents">
                         PDFs
                     </TabButton>
-                    <TabButton active={activeTab === "pricing"} onClick={() => setActiveTab("pricing")} dataTour="settings-tab-pricing">
+                    <TabButton active={activeTab === "pricing"} onClick={() => handleSettingsTabChange("pricing")} dataTour="settings-tab-pricing">
                         Pricing
                     </TabButton>
-                    <TabButton active={activeTab === "jobs"} onClick={() => setActiveTab("jobs")} dataTour="settings-tab-jobs">
+                    <TabButton active={activeTab === "jobs"} onClick={() => handleSettingsTabChange("jobs")} dataTour="settings-tab-jobs">
                         Jobs
                     </TabButton>
-                    <TabButton active={activeTab === "quotes"} onClick={() => setActiveTab("quotes")} dataTour="settings-tab-quotes">
+                    <TabButton active={activeTab === "quotes"} onClick={() => handleSettingsTabChange("quotes")} dataTour="settings-tab-quotes">
                         Quotes
                     </TabButton>
-                    <TabButton active={activeTab === "invoices"} onClick={() => setActiveTab("invoices")} dataTour="settings-tab-invoices">
+                    <TabButton active={activeTab === "invoices"} onClick={() => handleSettingsTabChange("invoices")} dataTour="settings-tab-invoices">
                         Invoices
                     </TabButton>
-                    <TabButton active={activeTab === "email"} onClick={() => setActiveTab("email")} dataTour="settings-tab-email">
+                    <TabButton active={activeTab === "email"} onClick={() => handleSettingsTabChange("email")} dataTour="settings-tab-email">
                         Email
                     </TabButton>
-                    <TabButton active={activeTab === "dashboard"} onClick={() => setActiveTab("dashboard")} dataTour="settings-tab-dashboard">
+                    <TabButton active={activeTab === "dashboard"} onClick={() => handleSettingsTabChange("dashboard")} dataTour="settings-tab-dashboard">
                         Dashboard
                     </TabButton>
-                    <TabButton active={activeTab === "data"} onClick={() => setActiveTab("data")} dataTour="settings-tab-data">
+                    {showAiReceptionistSettings ? (
+                        <TabButton active={activeTab === "ai-receptionist"} onClick={() => handleSettingsTabChange("ai-receptionist")} dataTour="settings-tab-ai-receptionist">
+                            <span className="inline-flex items-center gap-2">
+                                <Bot className="h-4 w-4" />
+                                AI Receptionist
+                            </span>
+                        </TabButton>
+                    ) : null}
+                    <TabButton active={activeTab === "data"} onClick={() => handleSettingsTabChange("data")} dataTour="settings-tab-data">
                         Data
                     </TabButton>
                 </div>
@@ -4168,6 +4255,51 @@ export default function SettingsPage({
                             </Card>
                         </div>
                         ) : null}
+                    </div>
+                )}
+
+                {activeTab === "ai-receptionist" && showAiReceptionistSettings && (
+                    <div className="space-y-6">
+                        {!aiReceptionistSettings ? (
+                            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                                AI Receptionist settings are not available yet. Refresh the page
+                                once the database setup has been applied.
+                            </div>
+                        ) : (
+                            <>
+                                {!aiReceptionistSettings.schemaReady ? (
+                                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+                                        <span className="font-bold">Database setup needed:</span>{" "}
+                                        Run <code>supabase/ai_receptionist_settings.sql</code> or
+                                        the latest <code>supabase/roundhq_tenant_schema.sql</code>{" "}
+                                        before saving AI Receptionist settings.
+                                        {aiReceptionistSettings.schemaError ? (
+                                            <div className="mt-2 text-xs text-amber-800">
+                                                {aiReceptionistSettings.schemaError}
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                ) : null}
+
+                                <AiReceptionistSettingsForm
+                                    initialSettings={aiReceptionistSettings}
+                                    workspaceName={
+                                        workspaceName?.trim() ||
+                                        settings.tradingName.trim() ||
+                                        settings.businessName.trim() ||
+                                        "RoundHQ Workspace"
+                                    }
+                                />
+                                <AiReceptionistCallHistory
+                                    calls={aiReceptionistCallHistory?.items ?? []}
+                                    schemaReady={
+                                        aiReceptionistCallHistory?.schemaReady ??
+                                        aiReceptionistSettings.schemaReady
+                                    }
+                                    schemaError={aiReceptionistCallHistory?.schemaError}
+                                />
+                            </>
+                        )}
                     </div>
                 )}
 

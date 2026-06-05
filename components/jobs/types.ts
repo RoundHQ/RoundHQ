@@ -295,6 +295,7 @@ export type CustomerLeadSource =
   | "email"
   | "facebook"
   | "whatsapp"
+  | "ai_receptionist"
   | "manual";
 
 export type CustomerLeadStatus =
@@ -320,6 +321,8 @@ export type CustomerLeadExtractedData = {
   notes?: string;
   mediaUrls?: string[];
   confidence?: number;
+  priority?: "normal" | "high";
+  urgency?: string;
 };
 
 export type CustomerLeadReply = {
@@ -334,9 +337,12 @@ export type CustomerLeadActivityType =
   | "received"
   | "status"
   | "note"
+  | "ai_receptionist_call"
   | "reply"
   | "quote"
   | "converted";
+
+export type CustomerLeadActivityMetadata = Record<string, unknown>;
 
 export type CustomerLeadActivity = {
   id: string;
@@ -345,6 +351,7 @@ export type CustomerLeadActivity = {
   title: string;
   detail?: string;
   relatedId?: string;
+  metadata?: CustomerLeadActivityMetadata;
 };
 
 export type CustomerLead = {

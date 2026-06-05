@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronLeft,
@@ -24,8 +24,9 @@ import {
   DEFAULT_ROTATION_WEEKS,
   getEffectiveRotationWeeks,
   getRotationCycleLabel,
+  getSelectedCycleDate,
   getWeekOptions,
-  isCustomerDueInSelectedWeek,
+  isCustomerDueOnDate,
   normalizeRotationWeeks,
 } from "./rotation";
 import type {
@@ -268,9 +269,14 @@ export default function PaymentsPage({
         .filter(
           (customer) =>
             weekFilter === "all" ||
-            isCustomerDueInSelectedWeek(
+            isCustomerDueOnDate(
               customer,
-              weekFilter,
+              getSelectedCycleDate(
+                weekFilter,
+                dayFilter === "all" ? customer.day : dayFilter,
+                normalizedDefaultRotationWeeks
+              ),
+              dayFilter === "all" ? customer.day : dayFilter,
               normalizedDefaultRotationWeeks
             )
         )
@@ -312,11 +318,13 @@ export default function PaymentsPage({
       : `${weekFilter === "all" ? "all weeks" : getRotationCycleLabel(weekFilter, routeRotationWeeks)}, ${
           dayFilter === "all" ? "all days" : dayFilter
         }`;
-  const getCustomerRouteLabel = (customer: Customer) =>
-    `${getRotationCycleLabel(
-      customer.week,
-      getEffectiveRotationWeeks(customer, normalizedDefaultRotationWeeks)
-    )} ${customer.day}`;
+  const getCustomerRouteLabel = useCallback(
+    (customer: Customer) =>
+      `${getRotationCycleLabel(customer.week, normalizedDefaultRotationWeeks)} ${
+        customer.day
+      }`,
+    [normalizedDefaultRotationWeeks]
+  );
 
   const seasonVisitsByCustomer = useMemo(() => {
     const byCustomer = new Map<number, VisitLog[]>();
@@ -475,10 +483,10 @@ export default function PaymentsPage({
   }, [
     monthlyCustomers,
     monthlyPaymentLookup,
-    normalizedDefaultRotationWeeks,
     paymentYearMonths,
     payOnDayCustomers,
     seasonVisitsByCustomer,
+    getCustomerRouteLabel,
   ]);
 
   const totalOutstandingAmount = useMemo(

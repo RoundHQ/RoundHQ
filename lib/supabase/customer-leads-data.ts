@@ -186,6 +186,14 @@ function normalizeReplyHistory(value: CustomerLeadReply[] | null | undefined) {
     .sort((left, right) => right.sentAt.localeCompare(left.sentAt));
 }
 
+function normalizeActivityMetadata(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  return { ...(value as Record<string, unknown>) };
+}
+
 function normalizeActivityHistory(
   value: CustomerLeadActivity[] | null | undefined
 ) {
@@ -217,6 +225,7 @@ function normalizeActivityHistory(
         typeof entry.relatedId === "string" && entry.relatedId.trim()
           ? entry.relatedId.trim()
           : undefined,
+      metadata: normalizeActivityMetadata(entry.metadata),
     }))
     .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
 }

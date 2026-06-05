@@ -16,7 +16,8 @@ import {
 import {
   DEFAULT_ROTATION_WEEKS,
   getRotationCycleLabel,
-  isCustomerDueInSelectedWeek,
+  getSelectedCycleDate,
+  isCustomerDueOnDate,
   normalizeRotationWeeks,
 } from "./rotation";
 import type {
@@ -358,6 +359,10 @@ export default function MapPage({
     activeRotationWeeks ?? normalizedDefaultRotationWeeks
   );
   const selectedCycleLabel = getRotationCycleLabel(selectedWeek, routeRotationWeeks);
+  const selectedRouteDate = useMemo(
+    () => getSelectedCycleDate(selectedWeek, selectedDay, routeRotationWeeks),
+    [routeRotationWeeks, selectedDay, selectedWeek]
+  );
 
   useEffect(() => {
     if (!resolvedNotCutReasons.includes(notCutReason)) {
@@ -374,16 +379,21 @@ export default function MapPage({
     const filtered = customers.filter(
         (customer) =>
             customer.isGrassCuttingCustomer &&
-            isCustomerDueInSelectedWeek(
+            isCustomerDueOnDate(
               customer,
-              selectedWeek,
+              selectedRouteDate,
+              selectedDay,
               normalizedDefaultRotationWeeks
-            ) &&
-            customer.day === selectedDay
+            )
     );
 
     return nearestNeighbourSort(filtered);
-  }, [customers, normalizedDefaultRotationWeeks, selectedWeek, selectedDay]);
+  }, [
+    customers,
+    normalizedDefaultRotationWeeks,
+    selectedDay,
+    selectedRouteDate,
+  ]);
 
   const selectedCustomer =
     dayStops.find((c) => c.id === selectedCustomerId) ?? dayStops[0] ?? null;

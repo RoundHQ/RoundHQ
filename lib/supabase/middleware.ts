@@ -12,6 +12,7 @@ export async function middleware(request: NextRequest) {
     request.nextUrl.pathname.startsWith("/admin") ||
     request.nextUrl.pathname.startsWith("/dashboard") ||
     request.nextUrl.pathname.startsWith("/billing") ||
+    request.nextUrl.pathname.startsWith("/settings") ||
     request.nextUrl.pathname.startsWith("/customers") ||
     request.nextUrl.pathname.startsWith("/routes") ||
     request.nextUrl.pathname.startsWith("/reports") ||

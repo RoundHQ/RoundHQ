@@ -1,10 +1,10 @@
 import { APPROX_SPEED_MPH, getCustomerDisplayAddress } from "./helpers";
 import {
   DEFAULT_ROTATION_WEEKS,
-  getActiveRotationWeeks,
   getRotationCycleLabel,
+  getSelectedCycleDate,
   getWeekOptions,
-  isCustomerDueInSelectedWeek,
+  isCustomerDueOnDate,
   normalizeRotationWeeks,
 } from "./rotation";
 import type { Customer, DayName, RotationWeeks, WeekNumber } from "./types";
@@ -273,24 +273,23 @@ export function buildRouteSummaries(
   const weeks =
     routeWeeks?.length
       ? routeWeeks
-      : getWeekOptions(
-          getActiveRotationWeeks(customers, normalizedDefaultRotationWeeks)
-        );
+      : getWeekOptions(normalizedDefaultRotationWeeks);
   const routeRotationWeeks = normalizeRotationWeeks(
     weeks.length || normalizedDefaultRotationWeeks
   );
 
   return weeks.flatMap((week) =>
     ROUTE_DAYS.map<RouteSummary>((day) => {
+      const routeDate = getSelectedCycleDate(week, day, routeRotationWeeks);
       const routeCustomers = customers.filter(
         (customer) =>
           customer.isGrassCuttingCustomer &&
-          isCustomerDueInSelectedWeek(
+          isCustomerDueOnDate(
             customer,
-            week,
+            routeDate,
+            day,
             normalizedDefaultRotationWeeks
-          ) &&
-          customer.day === day
+          )
       );
       const orderedCustomers = sortByRouteOrder(routeCustomers);
       const optimizedCustomers = nearestNeighbourRoute(orderedCustomers);

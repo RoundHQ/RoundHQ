@@ -4,7 +4,8 @@ import { getCustomerDisplayAddress } from "@/components/jobs/helpers";
 import {
   DEFAULT_ROTATION_WEEKS,
   getRotationCycleLabel,
-  isCustomerDueInSelectedWeek,
+  getSelectedCycleDate,
+  isCustomerDueOnDate,
   normalizeRotationWeeks,
 } from "@/components/jobs/rotation";
 import type { Customer, RotationWeeks, VisitLog } from "@/components/jobs/types";
@@ -55,16 +56,21 @@ export default function RoundsPage({
       selectedWeek,
       roundRotationWeeks
   );
+  const selectedRoundDate = getSelectedCycleDate(
+      selectedWeek,
+      selectedDay,
+      roundRotationWeeks
+  );
   const roundCustomers = customers
       .filter(
           (customer) =>
               customer.isGrassCuttingCustomer &&
-              isCustomerDueInSelectedWeek(
+              isCustomerDueOnDate(
                   customer,
-                  selectedWeek,
+                  selectedRoundDate,
+                  selectedDay,
                   normalizedDefaultRotationWeeks
-              ) &&
-              customer.day === selectedDay
+              )
       )
       .sort((left, right) => {
         const leftOrder = Number.isFinite(left.routeOrder)

@@ -33,6 +33,8 @@ import {
   Bell,
   HelpCircle,
   CloudSun,
+  PanelLeftClose,
+  PanelLeftOpen,
   X,
 } from "lucide-react";
 
@@ -93,12 +95,12 @@ import {
 } from "@/components/jobs/helpers";
 import {
   DEFAULT_ROTATION_WEEKS,
-  getActiveRotationWeeks,
   getCutFrequencyFromRotationWeeks,
   getCycleWeek,
   getEffectiveRotationWeeks,
   getRotationCycleLabel,
   getWeekOptions,
+  isCustomerDueOnDate,
   isCustomerDueInSelectedWeek,
   normalizeRotationWeeks,
   normalizeWeekNumber,
@@ -174,6 +176,12 @@ import {
   type PlatformAnnouncement,
   type PlatformAnnouncementRow,
 } from "@/lib/platform-announcements";
+import type { AiReceptionistSettings } from "@/lib/ai-receptionist-settings";
+import type {
+  AiReceptionistCallHistoryItem,
+  AiReceptionistDashboardStats,
+} from "@/lib/ai-receptionist/call-logs";
+import { SHOW_AI_RECEPTIONIST_UI } from "@/lib/ai-receptionist/ui-visibility";
 
 import {
   type CommercialRamsDocument,
@@ -5047,6 +5055,15 @@ type JobsAppProps = {
   subscriptionStaffAddonQuantity?: number;
   subscriptionStatus?: string;
   subscriptionTrialEndsAt?: string | null;
+  workspaceName?: string;
+  aiReceptionistSettings?: AiReceptionistSettings | null;
+  canManageAiReceptionistSettings?: boolean;
+  aiReceptionistStats?: AiReceptionistDashboardStats | null;
+  aiReceptionistCallHistory?: {
+    items: AiReceptionistCallHistoryItem[];
+    schemaReady: boolean;
+    schemaError?: string;
+  } | null;
 };
 
 type HeaderWeatherState = {
@@ -5181,6 +5198,11 @@ export default function JobsApp({
   subscriptionStaffAddonQuantity,
   subscriptionStatus,
   subscriptionTrialEndsAt,
+  workspaceName,
+  aiReceptionistSettings,
+  canManageAiReceptionistSettings = false,
+  aiReceptionistStats,
+  aiReceptionistCallHistory,
 }: JobsAppProps = {}) {
   const supportOrganizationId = supportAccess?.organizationId ?? null;
   const isSupportAccess = Boolean(supportOrganizationId);
@@ -5421,6 +5443,7 @@ export default function JobsApp({
       [getWritableOrganizationId]
   );
   const [headerWeatherLoading, setHeaderWeatherLoading] = useState(true);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isHelpLauncherOpen, setIsHelpLauncherOpen] = useState(false);
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(() =>
@@ -5548,10 +5571,7 @@ export default function JobsApp({
   );
 
   const defaultRotationWeeks = appSettings.defaultRotationWeeks;
-  const activeRotationWeeks = useMemo(
-      () => getActiveRotationWeeks(customers, defaultRotationWeeks),
-      [customers, defaultRotationWeeks]
-  );
+  const activeRotationWeeks = defaultRotationWeeks;
   const activeWeekOptions = useMemo(
       () => getWeekOptions(activeRotationWeeks),
       [activeRotationWeeks]
@@ -10793,10 +10813,10 @@ export default function JobsApp({
       const hasRoundCustomers = customers.some(
           (customer) =>
               customer.isGrassCuttingCustomer &&
-              customer.day === panelState.selectedDay &&
-              isCustomerDueInSelectedWeek(
+              isCustomerDueOnDate(
                   customer,
-                  panelState.week,
+                  date,
+                  panelState.selectedDay,
                   defaultRotationWeeks
               )
       );
@@ -11918,7 +11938,7 @@ export default function JobsApp({
       isGrassCuttingCustomer: true,
       week: normalizeWeekNumber(
           customer.week as WeekName | string | number | null | undefined,
-          getEffectiveRotationWeeks(customer as Partial<Customer> as Customer, defaultRotationWeeks)
+          defaultRotationWeeks
       ),
       day: normaliseDayName(customer.day),
     });
@@ -11941,7 +11961,7 @@ export default function JobsApp({
     );
     nextCustomer.week = normalizeWeekNumber(
         nextCustomer.week as WeekName | string | number | null | undefined,
-        effectiveRotationWeeks
+        defaultRotationWeeks
     );
     nextCustomer.cutFrequency = getCutFrequencyFromRotationWeeks(effectiveRotationWeeks);
 
@@ -11991,7 +12011,7 @@ export default function JobsApp({
     );
     nextCustomer.week = normalizeWeekNumber(
         nextCustomer.week as WeekName | string | number | null | undefined,
-        effectiveRotationWeeks
+        defaultRotationWeeks
     );
     nextCustomer.cutFrequency = getCutFrequencyFromRotationWeeks(effectiveRotationWeeks);
 
@@ -12902,6 +12922,13 @@ export default function JobsApp({
           ? "border-rose-200 bg-rose-50 text-rose-700"
           : "border-emerald-200 bg-emerald-50 text-emerald-700"
       : "border-slate-200 bg-slate-50 text-slate-600";
+  const sidebarWidthClassName = isSidebarCollapsed ? "w-[88px]" : "w-[280px]";
+  const sidebarLogoSrc = isSidebarCollapsed
+      ? "/roundhq-logo-icon-white.png"
+      : "/roundhq-logo-long-white.png";
+  const sidebarLogoClassName = isSidebarCollapsed
+      ? "h-9 w-9 object-contain"
+      : "h-auto max-h-12 w-[178px] object-contain";
   const notificationCount = dashboardAttentionItems.length + newLeadsCount;
   const weatherTemperatureLabel =
       headerWeather?.temperature !== null && headerWeather?.temperature !== undefined
@@ -12993,60 +13020,89 @@ export default function JobsApp({
       >
       <div className="min-h-screen bg-[#f7faf9] text-[#071426]">
         <div className="flex min-h-screen">
-          <aside className="hidden w-[280px] shrink-0 flex-col bg-[#003c35] px-4 py-6 text-white shadow-[20px_0_60px_rgba(0,60,53,0.18)] lg:flex">
-            <div className="px-2">
+          <aside
+              className={`hidden ${sidebarWidthClassName} shrink-0 flex-col bg-[#003c35] py-6 text-white shadow-[20px_0_60px_rgba(0,60,53,0.18)] transition-[width,padding] duration-200 lg:flex ${
+                  isSidebarCollapsed ? "px-3" : "px-4"
+              }`}
+          >
+            <div
+                className={`flex items-center gap-2 px-2 ${
+                    isSidebarCollapsed ? "flex-col justify-center" : "justify-between"
+                }`}
+            >
               <button
                   type="button"
                   onClick={() => navigateToPage("dashboard")}
                   aria-label="Go to dashboard"
-                  className="rounded-xl p-1 transition hover:bg-white/[0.07] focus:outline-none focus:ring-2 focus:ring-[#20c766]"
+                  className={`min-w-0 rounded-xl p-1 transition hover:bg-white/[0.07] focus:outline-none focus:ring-2 focus:ring-[#20c766] ${
+                      isSidebarCollapsed ? "w-11 overflow-hidden" : ""
+                  }`}
               >
                 <img
-                    src="/roundhq-logo-long-white.png"
+                    src={sidebarLogoSrc}
                     alt="RoundHQ"
-                    className="h-auto max-h-12 w-[178px] object-contain"
+                    className={sidebarLogoClassName}
                 />
+              </button>
+              <button
+                  type="button"
+                  onClick={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
+                  aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                  title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/[0.07] text-white/70 transition hover:bg-white/[0.12] hover:text-white focus:outline-none focus:ring-2 focus:ring-[#20c766]"
+              >
+                {isSidebarCollapsed ? (
+                    <PanelLeftOpen size={18} />
+                ) : (
+                    <PanelLeftClose size={18} />
+                )}
               </button>
             </div>
 
-            <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-left">
-              <span className="block text-xs font-black uppercase tracking-[0.16em] text-[#20c766]">
-                {activeSubscriptionPlan.name} plan
-              </span>
-              <span className="mt-1 block text-sm font-semibold text-white/78">
-                {activeSubscriptionPlan.priceLabel} per business / month
-              </span>
-              {trialDaysLeft !== null ? (
-                  <span
-                      className={`mt-3 block rounded-xl border px-3 py-2 text-xs font-black ${
-                          trialDaysLeft > 0
-                              ? "border-[#20c766]/25 bg-[#20c766]/10 text-[#b9ffd0]"
-                              : "border-amber-300/35 bg-amber-300/10 text-amber-100"
-                      }`}
-                  >
-                    {trialDaysLeft > 0
-                        ? `${trialDaysLeft} day${trialDaysLeft === 1 ? "" : "s"} left on free trial`
-                        : "Free trial ends today"}
+            {!isSidebarCollapsed ? (
+                <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-left">
+                  <span className="block text-xs font-black uppercase tracking-[0.16em] text-[#20c766]">
+                    {activeSubscriptionPlan.name} plan
                   </span>
-              ) : null}
-              {activeSubscriptionPlan.key === "starter" ? (
-                  <a
-                      href="/billing"
-                      className="mt-3 inline-flex w-full items-center justify-center rounded-xl bg-[#20c766] px-3 py-2 text-xs font-black text-[#003c35] shadow-[0_12px_28px_rgba(32,199,102,0.24)] transition hover:bg-[#2ee074]"
-                  >
-                    Upgrade to Growth
-                  </a>
-              ) : (
-                  <a
-                      href="/billing"
-                      className="mt-3 inline-flex w-full items-center justify-center rounded-xl border border-white/10 bg-white/[0.07] px-3 py-2 text-xs font-black text-white/80 transition hover:bg-white/[0.12] hover:text-white"
-                  >
-                    Manage billing
-                  </a>
-              )}
-            </div>
+                  <span className="mt-1 block text-sm font-semibold text-white/78">
+                    {activeSubscriptionPlan.priceLabel} per business / month
+                  </span>
+                  {trialDaysLeft !== null ? (
+                      <span
+                          className={`mt-3 block rounded-xl border px-3 py-2 text-xs font-black ${
+                              trialDaysLeft > 0
+                                  ? "border-[#20c766]/25 bg-[#20c766]/10 text-[#b9ffd0]"
+                                  : "border-amber-300/35 bg-amber-300/10 text-amber-100"
+                          }`}
+                      >
+                        {trialDaysLeft > 0
+                            ? `${trialDaysLeft} day${trialDaysLeft === 1 ? "" : "s"} left on free trial`
+                            : "Free trial ends today"}
+                      </span>
+                  ) : null}
+                  {activeSubscriptionPlan.key === "starter" ? (
+                      <a
+                          href="/billing"
+                          className="mt-3 inline-flex w-full items-center justify-center rounded-xl bg-[#20c766] px-3 py-2 text-xs font-black text-[#003c35] shadow-[0_12px_28px_rgba(32,199,102,0.24)] transition hover:bg-[#2ee074]"
+                      >
+                        Upgrade to Growth
+                      </a>
+                  ) : (
+                      <a
+                          href="/billing"
+                          className="mt-3 inline-flex w-full items-center justify-center rounded-xl border border-white/10 bg-white/[0.07] px-3 py-2 text-xs font-black text-white/80 transition hover:bg-white/[0.12] hover:text-white"
+                      >
+                        Manage billing
+                      </a>
+                  )}
+                </div>
+            ) : null}
 
-            <nav className="mt-8 flex-1 space-y-3 overflow-y-auto pr-1">
+            <nav
+                className={`flex-1 space-y-3 overflow-y-auto ${
+                    isSidebarCollapsed ? "mt-6 pr-0" : "mt-8 pr-1"
+                }`}
+            >
               {accessibleNavSections.map((section) => {
                 const activeSection = getNavSectionTitle(page) === section.title;
                 const sectionIsSingleItem = section.items.length === 1;
@@ -13065,13 +13121,20 @@ export default function JobsApp({
                       <button
                           type="button"
                           data-tour={sectionTourTarget}
+                          title={isSidebarCollapsed ? section.title : undefined}
                           onClick={() =>
-                              sectionIsSingleItem
+                              sectionIsSingleItem || isSidebarCollapsed
                                   ? handleSidebarNavigation(section.items[0].key)
                                   : toggleNavSection(section.title)
                           }
-                          aria-expanded={sectionIsSingleItem ? undefined : sectionIsExpanded}
-                          className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm transition ${
+                          aria-expanded={
+                              sectionIsSingleItem || isSidebarCollapsed
+                                  ? undefined
+                                  : sectionIsExpanded
+                          }
+                          className={`group relative flex w-full items-center gap-3 rounded-2xl py-3 text-left text-sm transition ${
+                              isSidebarCollapsed ? "justify-center px-2" : "px-3"
+                          } ${
                               activeSection
                                   ? "bg-[#20c766]/15 text-white shadow-[inset_0_0_0_1px_rgba(32,199,102,0.2)]"
                                   : "text-white/72 hover:bg-white/[0.07] hover:text-white"
@@ -13086,13 +13149,19 @@ export default function JobsApp({
                         >
                           <SectionIcon size={18} />
                         </span>
-                        <span className="min-w-0 flex-1 font-bold">{section.title}</span>
-                        {sectionBadgeCount > 0 ? (
-                            <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-black leading-none text-white shadow-sm">
-                              {sectionBadgeCount}
-                            </span>
+                        {!isSidebarCollapsed ? (
+                            <span className="min-w-0 flex-1 font-bold">{section.title}</span>
                         ) : null}
-                        {sectionIsSingleItem ? null : (
+                        {sectionBadgeCount > 0 ? (
+                            isSidebarCollapsed ? (
+                                <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-[#003c35]" />
+                            ) : (
+                                <span className="rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-black leading-none text-white shadow-sm">
+                                  {sectionBadgeCount}
+                                </span>
+                            )
+                        ) : null}
+                        {sectionIsSingleItem || isSidebarCollapsed ? null : (
                             <SectionChevron
                                 size={16}
                                 className={`shrink-0 transition ${
@@ -13102,7 +13171,7 @@ export default function JobsApp({
                         )}
                       </button>
 
-                      {!sectionIsSingleItem && sectionIsExpanded ? (
+                      {!isSidebarCollapsed && !sectionIsSingleItem && sectionIsExpanded ? (
                           <div className="space-y-1 pl-3">
                             {section.items.map(({ key, label, icon: Icon }) => {
                               const active = page === key;
@@ -13144,7 +13213,7 @@ export default function JobsApp({
                 );
               })}
 
-              {accessibleNavSections.length === 0 ? (
+              {!isSidebarCollapsed && accessibleNavSections.length === 0 ? (
                   <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-3 py-3 text-sm text-white/65">
                     No pages are enabled for this account yet.
                   </div>
@@ -13616,6 +13685,11 @@ export default function JobsApp({
                       showJobsWidget={appSettings.showJobsWidget}
                       showUnpaidWidget={appSettings.showUnpaidWidget}
                       showRecentActivityWidget={appSettings.showRecentActivityWidget}
+                      aiReceptionistStats={
+                        SHOW_AI_RECEPTIONIST_UI && canManageAiReceptionistSettings
+                          ? aiReceptionistStats
+                          : null
+                      }
                       showAdvancedInsights={hasGrowthPlan}
                       announcement={platformAnnouncement}
                       attentionItems={dashboardAttentionItems}
@@ -14252,6 +14326,16 @@ export default function JobsApp({
                       initialSettings={appSettings}
                       accountEmail={currentUserEmail}
                       showGrowthSettings={hasGrowthPlan}
+                      workspaceName={supportAccess?.workspaceName ?? workspaceName}
+                      aiReceptionistSettings={
+                          SHOW_AI_RECEPTIONIST_UI ? aiReceptionistSettings : null
+                      }
+                      canManageAiReceptionistSettings={
+                          SHOW_AI_RECEPTIONIST_UI && canManageAiReceptionistSettings
+                      }
+                      aiReceptionistCallHistory={
+                          SHOW_AI_RECEPTIONIST_UI ? aiReceptionistCallHistory : null
+                      }
                       exportData={{
                         customers,
                         quotes,

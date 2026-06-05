@@ -153,7 +153,7 @@ drop constraint if exists customer_leads_source_check;
 
 alter table public.customer_leads
 add constraint customer_leads_source_check
-check (source in ('website', 'email', 'facebook', 'whatsapp', 'manual'));
+check (source in ('website', 'email', 'facebook', 'whatsapp', 'ai_receptionist', 'manual'));
 
 alter table public.customer_leads
 drop constraint if exists customer_leads_status_check;

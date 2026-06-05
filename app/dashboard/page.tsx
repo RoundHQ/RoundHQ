@@ -10,9 +10,16 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { getCustomerAccountSettings } from "@/lib/customer-account";
+import { getOrCreateAiReceptionistSettings } from "@/lib/ai-receptionist-settings";
+import {
+  getAiReceptionistCallHistory,
+  getAiReceptionistDashboardStats,
+} from "@/lib/ai-receptionist/call-logs";
+import { SHOW_AI_RECEPTIONIST_UI } from "@/lib/ai-receptionist/ui-visibility";
 import type { SubscriptionPlanKey } from "@/lib/billing/plans";
 import { isStripeConfigured } from "@/lib/stripe/server";
 import { ensureWorkspace } from "@/lib/workspace";
+import { getWorkspaceAdminAccess } from "@/lib/workspace-admin";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -193,6 +200,18 @@ export default async function DashboardPage({
       ? organizations[0].name.trim()
       : "RoundHQ Workspace";
   const accountSettings = await getCustomerAccountSettings(supabase, organizationId);
+  const canManageAiReceptionistSettings = SHOW_AI_RECEPTIONIST_UI
+    ? await getWorkspaceAdminAccess(supabase, organizationId, user)
+    : false;
+  const aiReceptionistSettings = canManageAiReceptionistSettings
+    ? await getOrCreateAiReceptionistSettings(supabase, organizationId)
+    : null;
+  const aiReceptionistStats = canManageAiReceptionistSettings
+    ? await getAiReceptionistDashboardStats(supabase, organizationId)
+    : null;
+  const aiReceptionistCallHistory = canManageAiReceptionistSettings
+    ? await getAiReceptionistCallHistory(supabase, organizationId)
+    : null;
 
   if (!supportAccess && accountSettings.accountStatus === "disabled") {
     return (
@@ -230,6 +249,11 @@ export default async function DashboardPage({
       subscriptionStaffAddonQuantity={subscription.staff_addon_quantity}
       subscriptionStatus={subscription.status}
       subscriptionTrialEndsAt={subscription.trial_ends_at}
+      workspaceName={workspaceName}
+      aiReceptionistSettings={aiReceptionistSettings}
+      canManageAiReceptionistSettings={canManageAiReceptionistSettings}
+      aiReceptionistStats={aiReceptionistStats}
+      aiReceptionistCallHistory={aiReceptionistCallHistory}
     />
   );
 }

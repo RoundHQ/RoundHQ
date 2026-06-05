@@ -149,6 +149,90 @@ insert into public.customer_account_settings (organization_id)
 select id from public.organizations
 on conflict (organization_id) do nothing;
 
+create table if not exists public.ai_receptionist_settings (
+  organization_id uuid primary key default public.current_organization_id()
+    references public.organizations(id) on delete cascade,
+  enabled boolean not null default false,
+  business_name text not null default '',
+  greeting_message text not null default 'Hello, thanks for calling {{business_name}}. I can take your details and ask someone to get back to you.',
+  fallback_phone_number text not null default '',
+  notification_email text not null default '',
+  telephony_provider text not null default 'telnyx',
+  telnyx_api_key text not null default '',
+  telnyx_connection_id text not null default '',
+  telnyx_messaging_profile_id text not null default '',
+  telnyx_public_key text not null default '',
+  telnyx_phone_number text not null default '',
+  twilio_account_sid text not null default '',
+  twilio_auth_token text not null default '',
+  twilio_phone_number text not null default '',
+  realtime_enabled boolean not null default false,
+  transfer_to_number text not null default '',
+  new_lead_sms_enabled boolean not null default false,
+  new_lead_sms_phone_number text not null default '',
+  business_hours_enabled boolean not null default false,
+  business_hours jsonb not null default '{
+    "monday": { "enabled": true, "start": "08:00", "end": "17:00" },
+    "tuesday": { "enabled": true, "start": "08:00", "end": "17:00" },
+    "wednesday": { "enabled": true, "start": "08:00", "end": "17:00" },
+    "thursday": { "enabled": true, "start": "08:00", "end": "17:00" },
+    "friday": { "enabled": true, "start": "08:00", "end": "17:00" },
+    "saturday": { "enabled": false, "start": "09:00", "end": "13:00" },
+    "sunday": { "enabled": false, "start": "09:00", "end": "13:00" }
+  }'::jsonb,
+  questions_to_ask jsonb not null default '[
+    "Can I take your name?",
+    "What is the best phone number to reach you on?",
+    "What service do you need?",
+    "What is the property address?",
+    "Can you briefly describe the job?"
+  ]'::jsonb,
+  emergency_keywords jsonb not null default '[
+    "urgent",
+    "emergency",
+    "today",
+    "as soon as possible"
+  ]'::jsonb,
+  consent_message text not null default 'This call may be recorded and transcribed to help us handle your enquiry.',
+  lead_source_label text not null default 'AI Receptionist',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check (char_length(greeting_message) <= 1000),
+  check (char_length(consent_message) <= 1000),
+  check (jsonb_typeof(business_hours) = 'object'),
+  check (jsonb_typeof(questions_to_ask) = 'array'),
+  check (jsonb_typeof(emergency_keywords) = 'array'),
+  check (telephony_provider in ('telnyx', 'twilio'))
+);
+
+alter table public.ai_receptionist_settings
+  add column if not exists enabled boolean not null default false,
+  add column if not exists business_name text not null default '',
+  add column if not exists greeting_message text not null default 'Hello, thanks for calling {{business_name}}. I can take your details and ask someone to get back to you.',
+  add column if not exists fallback_phone_number text not null default '',
+  add column if not exists notification_email text not null default '',
+  add column if not exists telephony_provider text not null default 'telnyx',
+  add column if not exists telnyx_api_key text not null default '',
+  add column if not exists telnyx_connection_id text not null default '',
+  add column if not exists telnyx_messaging_profile_id text not null default '',
+  add column if not exists telnyx_public_key text not null default '',
+  add column if not exists telnyx_phone_number text not null default '',
+  add column if not exists twilio_account_sid text not null default '',
+  add column if not exists twilio_auth_token text not null default '',
+  add column if not exists twilio_phone_number text not null default '',
+  add column if not exists realtime_enabled boolean not null default false,
+  add column if not exists transfer_to_number text not null default '',
+  add column if not exists new_lead_sms_enabled boolean not null default false,
+  add column if not exists new_lead_sms_phone_number text not null default '',
+  add column if not exists business_hours_enabled boolean not null default false,
+  add column if not exists business_hours jsonb not null default '{}'::jsonb,
+  add column if not exists questions_to_ask jsonb not null default '[]'::jsonb,
+  add column if not exists emergency_keywords jsonb not null default '[]'::jsonb,
+  add column if not exists consent_message text not null default 'This call may be recorded and transcribed to help us handle your enquiry.',
+  add column if not exists lead_source_label text not null default 'AI Receptionist',
+  add column if not exists created_at timestamptz not null default now(),
+  add column if not exists updated_at timestamptz not null default now();
+
 create table if not exists public.site_pages (
   slug text primary key check (
     slug in ('features', 'pricing', 'about', 'resources', 'contact')
@@ -751,7 +835,7 @@ create table if not exists public.customer_leads (
   organization_id uuid not null default public.current_organization_id()
     references public.organizations(id) on delete cascade,
   source text not null default 'website' check (
-    source in ('website', 'email', 'facebook', 'whatsapp', 'manual')
+    source in ('website', 'email', 'facebook', 'whatsapp', 'ai_receptionist', 'manual')
   ),
   status text not null default 'new' check (
     status in ('new', 'reviewing', 'replied', 'converted', 'archived')
@@ -785,11 +869,135 @@ create table if not exists public.customer_leads (
   check (jsonb_typeof(activity_history) = 'array')
 );
 
+alter table public.customer_leads
+drop constraint if exists customer_leads_source_check;
+
+alter table public.customer_leads
+add constraint customer_leads_source_check
+check (source in ('website', 'email', 'facebook', 'whatsapp', 'ai_receptionist', 'manual'));
+
 create index if not exists customer_leads_org_status_idx
 on public.customer_leads (organization_id, status);
 
 create index if not exists customer_leads_org_submitted_at_idx
 on public.customer_leads (organization_id, submitted_at desc);
+
+create table if not exists public.ai_receptionist_call_logs (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  provider text not null default 'twilio',
+  provider_event_id text null,
+  call_sid text not null,
+  account_sid text null,
+  caller_number text null,
+  twilio_phone_number text null,
+  call_type text not null default 'voicemail',
+  session_id text null,
+  recording_url text null,
+  duration_seconds integer null check (duration_seconds is null or duration_seconds >= 0),
+  transcript text null,
+  transcript_entries jsonb not null default '[]'::jsonb,
+  structured_data jsonb not null default '{}'::jsonb,
+  ai_summaries jsonb not null default '{}'::jsonb,
+  lead_id uuid null references public.customer_leads(id) on delete set null,
+  call_status text null,
+  outcome text null,
+  priority text not null default 'normal',
+  emergency_detected boolean not null default false,
+  emergency_keywords jsonb not null default '[]'::jsonb,
+  answered_at timestamptz null,
+  ended_at timestamptz null,
+  drop_off boolean not null default false,
+  escalated boolean not null default false,
+  ai_success boolean not null default false,
+  notification_status text null,
+  notification_error text null,
+  raw_payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (organization_id, call_sid),
+  check (btrim(call_sid) <> ''),
+  check (provider in ('telnyx', 'twilio')),
+  check (call_type in ('voicemail', 'realtime')),
+  check (priority in ('normal', 'high')),
+  check (jsonb_typeof(transcript_entries) = 'array'),
+  check (jsonb_typeof(structured_data) = 'object'),
+  check (jsonb_typeof(ai_summaries) = 'object'),
+  check (jsonb_typeof(emergency_keywords) = 'array'),
+  check (jsonb_typeof(raw_payload) = 'object')
+);
+
+alter table public.ai_receptionist_call_logs
+  add column if not exists provider text not null default 'twilio',
+  add column if not exists provider_event_id text null,
+  add column if not exists account_sid text null,
+  add column if not exists caller_number text null,
+  add column if not exists twilio_phone_number text null,
+  add column if not exists call_type text not null default 'voicemail',
+  add column if not exists session_id text null,
+  add column if not exists recording_url text null,
+  add column if not exists duration_seconds integer null,
+  add column if not exists transcript text null,
+  add column if not exists transcript_entries jsonb not null default '[]'::jsonb,
+  add column if not exists structured_data jsonb not null default '{}'::jsonb,
+  add column if not exists ai_summaries jsonb not null default '{}'::jsonb,
+  add column if not exists lead_id uuid null references public.customer_leads(id) on delete set null,
+  add column if not exists call_status text null,
+  add column if not exists outcome text null,
+  add column if not exists priority text not null default 'normal',
+  add column if not exists emergency_detected boolean not null default false,
+  add column if not exists emergency_keywords jsonb not null default '[]'::jsonb,
+  add column if not exists answered_at timestamptz null,
+  add column if not exists ended_at timestamptz null,
+  add column if not exists drop_off boolean not null default false,
+  add column if not exists escalated boolean not null default false,
+  add column if not exists ai_success boolean not null default false,
+  add column if not exists notification_status text null,
+  add column if not exists notification_error text null,
+  add column if not exists raw_payload jsonb not null default '{}'::jsonb,
+  add column if not exists created_at timestamptz not null default now(),
+  add column if not exists updated_at timestamptz not null default now();
+
+create index if not exists ai_receptionist_settings_twilio_account_sid_idx
+on public.ai_receptionist_settings (twilio_account_sid)
+where btrim(twilio_account_sid) <> '';
+
+create index if not exists ai_receptionist_settings_twilio_phone_number_idx
+on public.ai_receptionist_settings (twilio_phone_number)
+where btrim(twilio_phone_number) <> '';
+
+create index if not exists ai_receptionist_settings_telnyx_phone_number_idx
+on public.ai_receptionist_settings (telnyx_phone_number)
+where btrim(telnyx_phone_number) <> '';
+
+create unique index if not exists ai_receptionist_settings_telnyx_phone_number_unique_idx
+on public.ai_receptionist_settings (
+  (regexp_replace(telnyx_phone_number, '[^0-9+]', '', 'g'))
+)
+where btrim(telnyx_phone_number) <> '';
+
+create unique index if not exists ai_receptionist_settings_twilio_phone_number_unique_idx
+on public.ai_receptionist_settings (
+  (regexp_replace(twilio_phone_number, '[^0-9+]', '', 'g'))
+)
+where btrim(twilio_phone_number) <> '';
+
+create index if not exists ai_receptionist_call_logs_org_created_at_idx
+on public.ai_receptionist_call_logs (organization_id, created_at desc);
+
+create index if not exists ai_receptionist_call_logs_org_provider_event_idx
+on public.ai_receptionist_call_logs (organization_id, provider, provider_event_id)
+where provider_event_id is not null;
+
+create index if not exists ai_receptionist_call_logs_org_lead_id_idx
+on public.ai_receptionist_call_logs (organization_id, lead_id);
+
+create index if not exists ai_receptionist_call_logs_org_outcome_idx
+on public.ai_receptionist_call_logs (organization_id, outcome);
+
+create index if not exists ai_receptionist_call_logs_org_emergency_idx
+on public.ai_receptionist_call_logs (organization_id, emergency_detected)
+where emergency_detected = true;
 
 create table if not exists public.monthly_payments (
   id bigint generated by default as identity primary key,
@@ -1169,12 +1377,14 @@ alter table public.organizations enable row level security;
 alter table public.organization_members enable row level security;
 alter table public.subscriptions enable row level security;
 alter table public.customer_account_settings enable row level security;
+alter table public.ai_receptionist_settings enable row level security;
 alter table public.app_state enable row level security;
 alter table public.staff_members enable row level security;
 alter table public.role_permissions enable row level security;
 alter table public.customers enable row level security;
 alter table public.visits enable row level security;
 alter table public.customer_leads enable row level security;
+alter table public.ai_receptionist_call_logs enable row level security;
 alter table public.monthly_payments enable row level security;
 alter table public.items enable row level security;
 alter table public.quotes enable row level security;
@@ -1231,6 +1441,146 @@ on public.customer_account_settings
 for select
 to authenticated
 using (public.is_organization_member(organization_id));
+
+drop policy if exists "Admins can read AI Receptionist settings" on public.ai_receptionist_settings;
+create policy "Admins can read AI Receptionist settings"
+on public.ai_receptionist_settings
+for select
+to authenticated
+using (
+  public.is_organization_admin(organization_id)
+  or exists (
+    select 1
+    from public.staff_members
+    where staff_members.organization_id = ai_receptionist_settings.organization_id
+      and staff_members.auth_user_id = auth.uid()
+      and staff_members.is_active = true
+      and (
+        staff_members.is_system_admin = true
+        or staff_members.role = 'Admin'
+      )
+  )
+);
+
+drop policy if exists "Admins can write AI Receptionist settings" on public.ai_receptionist_settings;
+create policy "Admins can write AI Receptionist settings"
+on public.ai_receptionist_settings
+for all
+to authenticated
+using (
+  public.is_organization_admin(organization_id)
+  or exists (
+    select 1
+    from public.staff_members
+    where staff_members.organization_id = ai_receptionist_settings.organization_id
+      and staff_members.auth_user_id = auth.uid()
+      and staff_members.is_active = true
+      and (
+        staff_members.is_system_admin = true
+        or staff_members.role = 'Admin'
+      )
+  )
+)
+with check (
+  public.is_organization_admin(organization_id)
+  or exists (
+    select 1
+    from public.staff_members
+    where staff_members.organization_id = ai_receptionist_settings.organization_id
+      and staff_members.auth_user_id = auth.uid()
+      and staff_members.is_active = true
+      and (
+        staff_members.is_system_admin = true
+        or staff_members.role = 'Admin'
+      )
+  )
+);
+
+create or replace function public.touch_ai_receptionist_settings_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists set_ai_receptionist_settings_updated_at on public.ai_receptionist_settings;
+create trigger set_ai_receptionist_settings_updated_at
+before update on public.ai_receptionist_settings
+for each row
+execute function public.touch_ai_receptionist_settings_updated_at();
+
+drop policy if exists "Admins can read AI Receptionist call logs" on public.ai_receptionist_call_logs;
+create policy "Admins can read AI Receptionist call logs"
+on public.ai_receptionist_call_logs
+for select
+to authenticated
+using (
+  public.is_organization_admin(organization_id)
+  or exists (
+    select 1
+    from public.staff_members
+    where staff_members.organization_id = ai_receptionist_call_logs.organization_id
+      and staff_members.auth_user_id = auth.uid()
+      and staff_members.is_active = true
+      and (
+        staff_members.is_system_admin = true
+        or staff_members.role = 'Admin'
+      )
+  )
+);
+
+drop policy if exists "Admins can write AI Receptionist call logs" on public.ai_receptionist_call_logs;
+create policy "Admins can write AI Receptionist call logs"
+on public.ai_receptionist_call_logs
+for all
+to authenticated
+using (
+  public.is_organization_admin(organization_id)
+  or exists (
+    select 1
+    from public.staff_members
+    where staff_members.organization_id = ai_receptionist_call_logs.organization_id
+      and staff_members.auth_user_id = auth.uid()
+      and staff_members.is_active = true
+      and (
+        staff_members.is_system_admin = true
+        or staff_members.role = 'Admin'
+      )
+  )
+)
+with check (
+  public.is_organization_admin(organization_id)
+  or exists (
+    select 1
+    from public.staff_members
+    where staff_members.organization_id = ai_receptionist_call_logs.organization_id
+      and staff_members.auth_user_id = auth.uid()
+      and staff_members.is_active = true
+      and (
+        staff_members.is_system_admin = true
+        or staff_members.role = 'Admin'
+      )
+  )
+);
+
+create or replace function public.touch_ai_receptionist_call_logs_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists set_ai_receptionist_call_logs_updated_at on public.ai_receptionist_call_logs;
+create trigger set_ai_receptionist_call_logs_updated_at
+before update on public.ai_receptionist_call_logs
+for each row
+execute function public.touch_ai_receptionist_call_logs_updated_at();
 
 drop policy if exists "Members can read organizations" on public.organizations;
 create policy "Members can read organizations"

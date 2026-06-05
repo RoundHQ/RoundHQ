@@ -70,7 +70,7 @@ function buildInitialCustomer(
                 existing.rotationWeeksOverride
             ),
             cutFrequency: getCutFrequencyFromRotationWeeks(effectiveRotationWeeks),
-            week: normalizeWeekNumber(existing.week, effectiveRotationWeeks),
+            week: normalizeWeekNumber(existing.week, defaultRotationWeeks),
             grassCutAreas: normalizeGrassCutAreas(
                 existing.grassCutAreas,
                 existing.isGrassCuttingCustomer
@@ -433,11 +433,7 @@ export default function CustomerForm({
         form.grassCutAreas,
         form.isGrassCuttingCustomer
     );
-    const effectiveRotationWeeks = getEffectiveRotationWeeks(
-        form,
-        normalizedDefaultRotationWeeks
-    );
-    const weekOptions = getWeekOptions(effectiveRotationWeeks);
+    const weekOptions = getWeekOptions(normalizedDefaultRotationWeeks);
     const businessDefaultLabel = getRotationLabel(normalizedDefaultRotationWeeks);
     const rotationSelectValue =
         form.rotationWeeksOverride == null ? "default" : String(form.rotationWeeksOverride);
@@ -451,9 +447,9 @@ export default function CustomerForm({
                 customers,
                 existingCustomerId: existing?.id,
                 weekOptions,
-                effectiveRotationWeeks,
+                effectiveRotationWeeks: normalizedDefaultRotationWeeks,
             }),
-        [customers, effectiveRotationWeeks, existing?.id, form, weekOptions]
+        [customers, existing?.id, form, normalizedDefaultRotationWeeks, weekOptions]
     );
     const isUsingRoundPlacementSuggestion =
         roundPlacementSuggestion != null &&
@@ -497,7 +493,7 @@ export default function CustomerForm({
                 form.rotationWeeksOverride
             ),
             cutFrequency: getCutFrequencyFromRotationWeeks(draftEffectiveRotationWeeks),
-            week: normalizeWeekNumber(form.week, draftEffectiveRotationWeeks),
+            week: normalizeWeekNumber(form.week, normalizedDefaultRotationWeeks),
             grassCutAreas: form.isGrassCuttingCustomer
                 ? normalizeGrassCutAreas(form.grassCutAreas, true)
                 : [],
@@ -603,14 +599,13 @@ export default function CustomerForm({
                 value === "default"
                     ? null
                     : normalizeNullableRotationWeeks(value);
-            const nextRotationWeeks =
-                rotationWeeksOverride ?? normalizedDefaultRotationWeeks;
-
             return {
                 ...prev,
                 rotationWeeksOverride,
-                cutFrequency: getCutFrequencyFromRotationWeeks(nextRotationWeeks),
-                week: normalizeWeekNumber(prev.week, nextRotationWeeks),
+                cutFrequency: getCutFrequencyFromRotationWeeks(
+                    rotationWeeksOverride ?? normalizedDefaultRotationWeeks
+                ),
+                week: normalizeWeekNumber(prev.week, normalizedDefaultRotationWeeks),
             };
         });
     }
@@ -953,7 +948,7 @@ export default function CustomerForm({
                                             Suggested round:{" "}
                                             {getRotationCycleLabel(
                                                 roundPlacementSuggestion.week,
-                                                effectiveRotationWeeks
+                                                normalizedDefaultRotationWeeks
                                             )}
                                             , {roundPlacementSuggestion.day}
                                         </p>
@@ -1053,7 +1048,7 @@ export default function CustomerForm({
                                             "week",
                                             normalizeWeekNumber(
                                                 e.target.value as WeekNumber,
-                                                effectiveRotationWeeks
+                                                normalizedDefaultRotationWeeks
                                             )
                                         )
                                     }
@@ -1062,7 +1057,7 @@ export default function CustomerForm({
                                         <option key={week} value={week}>
                                             {getRotationCycleLabel(
                                                 week,
-                                                effectiveRotationWeeks
+                                                normalizedDefaultRotationWeeks
                                             )}
                                         </option>
                                     ))}

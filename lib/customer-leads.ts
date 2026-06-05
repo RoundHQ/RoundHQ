@@ -19,8 +19,21 @@ const SOURCE_OPTIONS: CustomerLeadSource[] = [
   "email",
   "facebook",
   "whatsapp",
+  "ai_receptionist",
   "manual",
 ];
+
+const SOURCE_ALIASES: Record<string, CustomerLeadSource> = {
+  website: "website",
+  web: "website",
+  email: "email",
+  facebook: "facebook",
+  whatsapp: "whatsapp",
+  ai_receptionist: "ai_receptionist",
+  ai_reception: "ai_receptionist",
+  ai: "ai_receptionist",
+  manual: "manual",
+};
 
 const STATUS_OPTIONS: CustomerLeadStatus[] = [
   "new",
@@ -300,6 +313,15 @@ function normalizeService(value: unknown) {
 export function normalizeCustomerLeadSource(
   value: unknown
 ): CustomerLeadSource {
+  if (typeof value === "string") {
+    const normalizedValue = value
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, "_");
+
+    return SOURCE_ALIASES[normalizedValue] ?? "website";
+  }
+
   return SOURCE_OPTIONS.includes(value as CustomerLeadSource)
     ? (value as CustomerLeadSource)
     : "website";

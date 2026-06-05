@@ -1,8 +1,17 @@
-import type { Customer, CutFrequency, RotationWeeks, WeekNumber } from "./types";
+import type { Customer, CutFrequency, DayName, RotationWeeks, WeekNumber } from "./types";
 
 export const DEFAULT_ROTATION_WEEKS: RotationWeeks = 2;
 export const ROTATION_WEEK_OPTIONS: RotationWeeks[] = [1, 2, 3, 4];
 export const WEEK_OPTIONS: WeekNumber[] = ["Week 1", "Week 2", "Week 3", "Week 4"];
+const DAY_OPTIONS: DayName[] = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+];
 
 const CALENDAR_DAY_MS = 24 * 60 * 60 * 1000;
 const ROTATION_ANCHOR_DATE = {
@@ -20,6 +29,21 @@ function getCalendarDayNumber(date: Date) {
   return Math.floor(
     Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / CALENDAR_DAY_MS
   );
+}
+
+function addDays(date: Date, days: number) {
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + days);
+  return nextDate;
+}
+
+function getDayName(date: Date): DayName {
+  const dayIndex = date.getDay();
+  return DAY_OPTIONS[dayIndex === 0 ? 6 : dayIndex - 1];
+}
+
+function normalizeDayName(value: string | null | undefined): DayName | null {
+  return DAY_OPTIONS.includes(value as DayName) ? (value as DayName) : null;
 }
 
 export function normalizeRotationWeeks(
@@ -172,6 +196,95 @@ export function getRotationCycleLabel(
   } of ${normalizedRotationWeeks}`;
 }
 
+export function getSelectedCycleDate(
+  selectedWeek: WeekNumber | string,
+  selectedDay: string,
+  rotationWeeks: RotationWeeks | number = DEFAULT_ROTATION_WEEKS,
+  referenceDate: Date = new Date()
+) {
+  const normalizedRotationWeeks = normalizeRotationWeeks(rotationWeeks);
+  const normalizedSelectedWeek = normalizeWeekNumber(
+    selectedWeek,
+    normalizedRotationWeeks
+  );
+  const normalizedSelectedDay = normalizeDayName(selectedDay);
+  const searchWindowDays = getRotationDays(normalizedRotationWeeks);
+
+  if (!normalizedSelectedDay) {
+    return referenceDate;
+  }
+
+  for (let offset = 0; offset <= searchWindowDays; offset += 1) {
+    const candidateDate = addDays(referenceDate, offset);
+
+    if (
+      getDayName(candidateDate) === normalizedSelectedDay &&
+      getCycleWeek(candidateDate, normalizedRotationWeeks) === normalizedSelectedWeek
+    ) {
+      return candidateDate;
+    }
+  }
+
+  for (let offset = -1; offset >= -searchWindowDays; offset -= 1) {
+    const candidateDate = addDays(referenceDate, offset);
+
+    if (
+      getDayName(candidateDate) === normalizedSelectedDay &&
+      getCycleWeek(candidateDate, normalizedRotationWeeks) === normalizedSelectedWeek
+    ) {
+      return candidateDate;
+    }
+  }
+
+  return referenceDate;
+}
+
+function getCustomerScheduleAnchorDate(
+  customer: Pick<Customer, "week" | "day">,
+  defaultRotationWeeks: RotationWeeks | number
+) {
+  const normalizedDefaultRotationWeeks = normalizeRotationWeeks(defaultRotationWeeks);
+  const normalizedCustomerWeek = normalizeWeekNumber(
+    customer.week,
+    normalizedDefaultRotationWeeks
+  );
+  const normalizedCustomerDay = normalizeDayName(customer.day);
+  const anchorDate = new Date(
+    ROTATION_ANCHOR_DATE.year,
+    ROTATION_ANCHOR_DATE.monthIndex,
+    ROTATION_ANCHOR_DATE.day
+  );
+  const searchWindowDays = getRotationDays(normalizedDefaultRotationWeeks);
+
+  if (!normalizedCustomerDay) {
+    return anchorDate;
+  }
+
+  for (let offset = 0; offset <= searchWindowDays; offset += 1) {
+    const candidateDate = addDays(anchorDate, offset);
+
+    if (
+      getDayName(candidateDate) === normalizedCustomerDay &&
+      getCycleWeek(candidateDate, normalizedDefaultRotationWeeks) === normalizedCustomerWeek
+    ) {
+      return candidateDate;
+    }
+  }
+
+  for (let offset = -1; offset >= -searchWindowDays; offset -= 1) {
+    const candidateDate = addDays(anchorDate, offset);
+
+    if (
+      getDayName(candidateDate) === normalizedCustomerDay &&
+      getCycleWeek(candidateDate, normalizedDefaultRotationWeeks) === normalizedCustomerWeek
+    ) {
+      return candidateDate;
+    }
+  }
+
+  return anchorDate;
+}
+
 export function isCustomerDueInSelectedWeek(
   customer: Pick<Customer, "week" | "rotationWeeksOverride" | "cutFrequency">,
   selectedWeek: WeekNumber | string,
@@ -206,11 +319,16 @@ export function isCustomerDueOnDate(
     customer,
     defaultRotationWeeks
   );
-
-  return (
-    normalizeWeekNumber(customer.week, effectiveRotationWeeks) ===
-    getCycleWeek(date, effectiveRotationWeeks)
+  const normalizedDefaultRotationWeeks = normalizeRotationWeeks(defaultRotationWeeks);
+  const anchorDate = getCustomerScheduleAnchorDate(
+    customer,
+    normalizedDefaultRotationWeeks
   );
+  const weeksSinceAnchor = Math.floor(
+    (getCalendarDayNumber(date) - getCalendarDayNumber(anchorDate)) / 7
+  );
+
+  return positiveModulo(weeksSinceAnchor, effectiveRotationWeeks) === 0;
 }
 
 export function getRotationDays(rotationWeeks: RotationWeeks | number) {
