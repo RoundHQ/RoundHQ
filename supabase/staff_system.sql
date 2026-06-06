@@ -3,7 +3,7 @@ create table if not exists public.staff_members (
   auth_user_id uuid null,
   email text not null,
   full_name text not null,
-  role text not null check (role in ('Admin', 'Staff', 'Operator')),
+  role text not null check (role in ('Admin', 'Manager', 'Staff', 'Operator')),
   is_active boolean not null default true,
   phone text null,
   notes text null,
@@ -24,9 +24,10 @@ on public.staff_members (is_system_admin)
 where is_system_admin = true;
 
 create table if not exists public.role_permissions (
-  role text not null check (role in ('Admin', 'Staff', 'Operator')),
+  role text not null check (role in ('Admin', 'Manager', 'Staff', 'Operator')),
   page_key text not null check (
     page_key in (
+      'technician',
       'dashboard',
       'schedule',
       'rounds',
@@ -52,10 +53,25 @@ create table if not exists public.role_permissions (
 alter table public.role_permissions
 drop constraint if exists role_permissions_page_key_check;
 
+alter table public.staff_members
+drop constraint if exists staff_members_role_check;
+
+alter table public.staff_members
+add constraint staff_members_role_check
+check (role in ('Admin', 'Manager', 'Staff', 'Operator'));
+
+alter table public.role_permissions
+drop constraint if exists role_permissions_role_check;
+
+alter table public.role_permissions
+add constraint role_permissions_role_check
+check (role in ('Admin', 'Manager', 'Staff', 'Operator'));
+
 alter table public.role_permissions
 add constraint role_permissions_page_key_check
 check (
   page_key in (
+    'technician',
     'dashboard',
     'schedule',
     'rounds',
@@ -75,6 +91,7 @@ check (
 
 insert into public.role_permissions (role, page_key, allowed)
 values
+  ('Admin', 'technician', true),
   ('Admin', 'dashboard', true),
   ('Admin', 'schedule', true),
   ('Admin', 'rounds', true),
@@ -89,34 +106,36 @@ values
   ('Admin', 'invoices', true),
   ('Admin', 'staff', true),
   ('Admin', 'settings', true),
-  ('Staff', 'dashboard', true),
-  ('Staff', 'schedule', true),
-  ('Staff', 'rounds', true),
-  ('Staff', 'history', true),
-  ('Staff', 'map', true),
-  ('Staff', 'actions', true),
-  ('Staff', 'commercial', true),
-  ('Staff', 'commercialDocs', true),
-  ('Staff', 'customers', true),
-  ('Staff', 'expenses', true),
-  ('Staff', 'quotes', true),
-  ('Staff', 'invoices', true),
+  ('Manager', 'technician', true),
+  ('Manager', 'dashboard', true),
+  ('Manager', 'schedule', true),
+  ('Manager', 'rounds', true),
+  ('Manager', 'history', true),
+  ('Manager', 'map', true),
+  ('Manager', 'actions', true),
+  ('Manager', 'commercial', true),
+  ('Manager', 'commercialDocs', true),
+  ('Manager', 'customers', true),
+  ('Manager', 'expenses', true),
+  ('Manager', 'quotes', true),
+  ('Manager', 'invoices', true),
+  ('Manager', 'staff', false),
+  ('Manager', 'settings', false),
+  ('Staff', 'technician', true),
+  ('Staff', 'dashboard', false),
+  ('Staff', 'schedule', false),
+  ('Staff', 'rounds', false),
+  ('Staff', 'history', false),
+  ('Staff', 'map', false),
+  ('Staff', 'actions', false),
+  ('Staff', 'commercial', false),
+  ('Staff', 'commercialDocs', false),
+  ('Staff', 'customers', false),
+  ('Staff', 'expenses', false),
+  ('Staff', 'quotes', false),
+  ('Staff', 'invoices', false),
   ('Staff', 'staff', false),
-  ('Staff', 'settings', false),
-  ('Operator', 'dashboard', true),
-  ('Operator', 'schedule', false),
-  ('Operator', 'rounds', true),
-  ('Operator', 'history', true),
-  ('Operator', 'map', true),
-  ('Operator', 'actions', true),
-  ('Operator', 'commercial', true),
-  ('Operator', 'commercialDocs', false),
-  ('Operator', 'customers', false),
-  ('Operator', 'expenses', false),
-  ('Operator', 'quotes', false),
-  ('Operator', 'invoices', false),
-  ('Operator', 'staff', false),
-  ('Operator', 'settings', false)
+  ('Staff', 'settings', false)
 on conflict (role, page_key) do nothing;
 
 alter table public.staff_members enable row level security;

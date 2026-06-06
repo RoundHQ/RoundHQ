@@ -25,6 +25,7 @@ import {
 } from "@/lib/billing/subscriptions";
 import { createClient } from "@/lib/supabase/server";
 import { isStripeConfigured } from "@/lib/stripe/server";
+import { canAccessBilling, normalizeStaffRole } from "@/lib/team-permissions";
 import { ensureWorkspace } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
@@ -189,6 +190,36 @@ export default async function BillingPage() {
   }
 
   const organizationId = await ensureWorkspace(supabase, user);
+  const [membershipResult, staffResult] = await Promise.all([
+    supabase
+      .from("organization_members")
+      .select("role")
+      .eq("organization_id", organizationId)
+      .eq("user_id", user.id)
+      .eq("status", "active")
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("staff_members")
+      .select("role,is_system_admin,is_active")
+      .eq("organization_id", organizationId)
+      .or(`auth_user_id.eq.${user.id},email.eq.${user.email ?? ""}`)
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  const membershipRole = membershipResult.data?.role;
+  const staffRecord = staffResult.data;
+  const canViewBilling =
+    membershipRole === "owner" ||
+    membershipRole === "admin" ||
+    Boolean(staffRecord?.is_system_admin) ||
+    (staffRecord?.is_active === true &&
+      canAccessBilling(normalizeStaffRole(staffRecord.role)));
+
+  if (!canViewBilling) {
+    redirect("/dashboard");
+  }
+
   const subscription = await ensureSubscriptionRow(supabase, organizationId);
   const { data: organizations } = await supabase
     .from("organizations")

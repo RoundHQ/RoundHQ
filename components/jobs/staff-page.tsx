@@ -2,6 +2,7 @@
 
 import { type FormEvent, useMemo, useState } from "react";
 import {
+  KeyRound,
   Lock,
   Pencil,
   Plus,
@@ -17,7 +18,13 @@ import type {
   StaffMember,
   StaffPageAccessKey,
   StaffRole,
+  VisitLog,
 } from "@/components/jobs/types";
+import {
+  ADMIN_ONLY_STAFF_PAGE_KEYS,
+  EDITABLE_STAFF_ROLES,
+  getDefaultRolePageAccess,
+} from "@/lib/team-permissions";
 
 type StaffPageAccessOption = {
   key: StaffPageAccessKey;
@@ -32,10 +39,13 @@ type StaffFormValues = {
   isActive: boolean;
   phone: string;
   notes: string;
+  temporaryPassword: string;
+  sendSetupInvite: boolean;
 };
 
 type Props = {
   customers: Customer[];
+  visits?: VisitLog[];
   staffMembers: StaffMember[];
   rolePermissions: RolePermission[];
   pageOptions: StaffPageAccessOption[];
@@ -47,8 +57,11 @@ type Props = {
   staffAddOnQuantity?: number;
   subscriptionPlanName?: string;
   setupMessage?: string | null;
-  onAddStaff: (values: StaffFormValues) => Promise<void>;
-  onUpdateStaff: (staffId: number, values: StaffFormValues) => Promise<void>;
+  onAddStaff: (values: StaffFormValues) => Promise<string | void>;
+  onUpdateStaff: (
+    staffId: number,
+    values: StaffFormValues
+  ) => Promise<string | void>;
   onDeleteStaff: (staffId: number) => Promise<void>;
   onUpdateRolePermission: (
     role: Exclude<StaffRole, "Admin">,
@@ -57,8 +70,8 @@ type Props = {
   ) => Promise<void>;
 };
 
-const EDITABLE_ROLES: Array<Exclude<StaffRole, "Admin">> = ["Staff", "Operator"];
-const ADMIN_ONLY_PAGE_KEYS = new Set<StaffPageAccessKey>(["staff", "settings"]);
+const EDITABLE_ROLES = EDITABLE_STAFF_ROLES;
+const ADMIN_ONLY_PAGE_KEYS = ADMIN_ONLY_STAFF_PAGE_KEYS;
 
 function getEmptyFormValues(): StaffFormValues {
   return {
@@ -68,6 +81,8 @@ function getEmptyFormValues(): StaffFormValues {
     isActive: true,
     phone: "",
     notes: "",
+    temporaryPassword: "",
+    sendSetupInvite: false,
   };
 }
 
@@ -79,6 +94,8 @@ function getFormValuesFromStaffMember(staffMember: StaffMember): StaffFormValues
     isActive: staffMember.isActive,
     phone: staffMember.phone ?? "",
     notes: staffMember.notes ?? "",
+    temporaryPassword: "",
+    sendSetupInvite: false,
   };
 }
 
@@ -86,8 +103,34 @@ function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
 }
 
+function getDateKey(value: string | Date) {
+  const date = value instanceof Date ? value : new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function getWeekStart(date: Date) {
+  const weekStart = new Date(date);
+  const day = weekStart.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+
+  weekStart.setDate(weekStart.getDate() + mondayOffset);
+  weekStart.setHours(0, 0, 0, 0);
+
+  return weekStart;
+}
+
 export default function StaffPage({
   customers,
+  visits = [],
   staffMembers,
   rolePermissions,
   pageOptions,
@@ -108,6 +151,7 @@ export default function StaffPage({
   const [editingStaffId, setEditingStaffId] = useState<number | null>(null);
   const [formValues, setFormValues] = useState<StaffFormValues>(getEmptyFormValues);
   const [formError, setFormError] = useState<string | null>(null);
+  const [formNotice, setFormNotice] = useState<string | null>(null);
   const [isSavingForm, setIsSavingForm] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
   const [pendingPermissionKey, setPendingPermissionKey] = useState<string | null>(
@@ -128,6 +172,75 @@ export default function StaffPage({
       (customer) => customer.isGrassCuttingCustomer && customer.assignedStaffId != null
     ).length;
   }, [customers]);
+  const staffPerformance = useMemo(() => {
+    const today = new Date();
+    const todayKey = getDateKey(today);
+    const weekStart = getWeekStart(today);
+    const customerStaffLookup = new Map<number, number | null | undefined>();
+    const metrics = new Map<
+      number,
+      {
+        completedToday: number;
+        completedThisWeek: number;
+        totalThisWeek: number;
+        completionRate: number;
+      }
+    >();
+
+    for (const customer of customers) {
+      customerStaffLookup.set(customer.id, customer.assignedStaffId);
+    }
+
+    for (const staffMember of staffMembers) {
+      metrics.set(staffMember.id, {
+        completedToday: 0,
+        completedThisWeek: 0,
+        totalThisWeek: 0,
+        completionRate: 0,
+      });
+    }
+
+    for (const visit of visits) {
+      const assignedStaffId = customerStaffLookup.get(visit.customerId);
+
+      if (!assignedStaffId || !metrics.has(assignedStaffId)) {
+        continue;
+      }
+
+      const visitDate = new Date(visit.visitDate);
+
+      if (Number.isNaN(visitDate.getTime()) || visitDate < weekStart) {
+        continue;
+      }
+
+      const staffMetrics = metrics.get(assignedStaffId);
+
+      if (!staffMetrics) {
+        continue;
+      }
+
+      staffMetrics.totalThisWeek += 1;
+
+      if (visit.status === "completed") {
+        staffMetrics.completedThisWeek += 1;
+
+        if (getDateKey(visitDate) === todayKey) {
+          staffMetrics.completedToday += 1;
+        }
+      }
+    }
+
+    for (const staffMetrics of metrics.values()) {
+      staffMetrics.completionRate =
+        staffMetrics.totalThisWeek > 0
+          ? Math.round(
+              (staffMetrics.completedThisWeek / staffMetrics.totalThisWeek) * 100
+            )
+          : 0;
+    }
+
+    return metrics;
+  }, [customers, staffMembers, visits]);
 
   const activeStaffCount = useMemo(() => {
     return staffMembers.filter((staffMember) => staffMember.isActive).length;
@@ -153,6 +266,7 @@ export default function StaffPage({
     setEditingStaffId(null);
     setFormValues(getEmptyFormValues());
     setFormError(null);
+    setFormNotice(null);
   }
 
   function startCreate() {
@@ -164,6 +278,7 @@ export default function StaffPage({
     setEditingStaffId(staffMember.id);
     setFormValues(getFormValuesFromStaffMember(staffMember));
     setFormError(null);
+    setFormNotice(null);
   }
 
   function getRolePermissionValue(
@@ -174,7 +289,10 @@ export default function StaffPage({
       return true;
     }
 
-    return permissionLookup.get(`${role}:${pageKey}`) ?? false;
+    return (
+      permissionLookup.get(`${role}:${pageKey}`) ??
+      getDefaultRolePageAccess(role).includes(pageKey)
+    );
   }
 
   function getStaffMemberAssignedRounds(staffMemberId: number) {
@@ -217,6 +335,7 @@ export default function StaffPage({
 
     setIsSavingForm(true);
     setFormError(null);
+    setFormNotice(null);
 
     try {
       const payload: StaffFormValues = {
@@ -225,14 +344,37 @@ export default function StaffPage({
         email: nextEmail,
         phone: formValues.phone.trim(),
         notes: formValues.notes.trim(),
+        temporaryPassword: formValues.temporaryPassword.trim(),
+        sendSetupInvite:
+          editorMode === "edit" &&
+          formValues.sendSetupInvite &&
+          !formValues.temporaryPassword.trim(),
       };
 
       if (editorMode === "edit" && editingStaffId != null) {
-        await onUpdateStaff(editingStaffId, payload);
-        setFormValues(payload);
+        const message = await onUpdateStaff(editingStaffId, payload);
+        setFormValues({
+          ...payload,
+          temporaryPassword: "",
+          sendSetupInvite: false,
+        });
+        setFormNotice(
+          message ??
+            (payload.temporaryPassword
+              ? "Staff member saved and login details were emailed."
+              : payload.sendSetupInvite
+                ? "Staff member saved and setup email sent."
+              : "Staff member saved.")
+        );
       } else {
-        await onAddStaff(payload);
-        resetEditor();
+        const message = await onAddStaff(payload);
+        setFormValues(getEmptyFormValues());
+        setFormNotice(
+          message ??
+            (payload.temporaryPassword
+              ? "Staff member created and login details were emailed."
+              : "Staff member created and setup email sent.")
+        );
       }
     } catch (error) {
       setFormError(
@@ -283,7 +425,11 @@ export default function StaffPage({
     pageKey: StaffPageAccessKey,
     allowed: boolean
   ) {
-    if (!currentUserIsAdmin || !staffSystemReady || ADMIN_ONLY_PAGE_KEYS.has(pageKey)) {
+    if (
+      !currentUserIsAdmin ||
+      !staffSystemReady ||
+      ADMIN_ONLY_PAGE_KEYS.has(pageKey)
+    ) {
       return;
     }
 
@@ -315,9 +461,8 @@ export default function StaffPage({
               Staff, roles, and page access
             </h2>
             <p className="mt-2 max-w-3xl text-sm text-slate-500">
-              Your current account stays the single admin account. Staff and Operator
-              roles can be given page-by-page access, while Staff and Settings remain
-              admin-only.
+              Admins keep full access, Managers can use operational screens, and Staff
+              use the technician workflow for assigned route work.
             </p>
           </div>
 
@@ -454,7 +599,7 @@ export default function StaffPage({
                             className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
                               staffMember.role === "Admin"
                                 ? "bg-slate-900 text-white"
-                                : staffMember.role === "Operator"
+                                : staffMember.role === "Manager"
                                   ? "bg-sky-100 text-sky-800"
                                   : "bg-emerald-100 text-emerald-800"
                             }`}
@@ -492,6 +637,40 @@ export default function StaffPage({
                             round
                             {getStaffMemberAssignedRounds(staffMember.id) === 1 ? "" : "s"}
                           </p>
+                        </div>
+
+                        <div className="grid gap-2 sm:grid-cols-3">
+                          {[
+                            {
+                              label: "Today",
+                              value:
+                                staffPerformance.get(staffMember.id)?.completedToday ?? 0,
+                            },
+                            {
+                              label: "This week",
+                              value:
+                                staffPerformance.get(staffMember.id)?.completedThisWeek ??
+                                0,
+                            },
+                            {
+                              label: "Rate",
+                              value: `${
+                                staffPerformance.get(staffMember.id)?.completionRate ?? 0
+                              }%`,
+                            },
+                          ].map((metric) => (
+                            <div
+                              key={metric.label}
+                              className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2"
+                            >
+                              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+                                {metric.label}
+                              </p>
+                              <p className="mt-1 text-lg font-black text-slate-900">
+                                {metric.value}
+                              </p>
+                            </div>
+                          ))}
                         </div>
                       </div>
 
@@ -536,8 +715,8 @@ export default function StaffPage({
                 {editorMode === "edit" ? "Edit Staff Member" : "Add Staff Member"}
               </h3>
               <p className="mt-1 text-sm text-slate-500">
-                Staff and Operator accounts can be created here. The admin account
-                stays locked to your current login.
+                Create field staff and managers without giving access to billing or
+                admin-only settings.
               </p>
             </div>
 
@@ -669,6 +848,73 @@ export default function StaffPage({
               </span>
             </label>
 
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white">
+                  <KeyRound size={16} />
+                </span>
+                <div>
+                  <label className="block text-sm font-black text-slate-900">
+                    Account setup
+                  </label>
+                  <p className="mt-1 text-sm leading-6 text-emerald-800">
+                    {editorMode === "edit"
+                      ? "Leave blank to keep their current login. Enter a password to reset it and email the new details."
+                      : "Leave blank to email a setup link. Enter a password to create the account now and email the login details."}
+                  </p>
+                </div>
+              </div>
+              <input
+                type="password"
+                value={formValues.temporaryPassword}
+                onChange={(event) =>
+                  setFormValues((current) => ({
+                    ...current,
+                    temporaryPassword: event.target.value,
+                    sendSetupInvite:
+                      event.target.value.trim().length > 0
+                        ? false
+                        : current.sendSetupInvite,
+                  }))
+                }
+                className="mt-3 w-full rounded-2xl border border-emerald-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-emerald-500"
+                placeholder="Optional password, minimum 8 characters"
+                disabled={
+                  !currentUserIsAdmin ||
+                  !staffSystemReady ||
+                  Boolean(editingStaffMember?.isSystemAdmin)
+                }
+                minLength={8}
+              />
+              {editorMode === "edit" ? (
+                <label className="mt-3 flex items-center gap-3 rounded-xl border border-emerald-200 bg-white px-3 py-2">
+                  <input
+                    type="checkbox"
+                    checked={formValues.sendSetupInvite}
+                    onChange={(event) =>
+                      setFormValues((current) => ({
+                        ...current,
+                        sendSetupInvite: event.target.checked,
+                        temporaryPassword: event.target.checked
+                          ? ""
+                          : current.temporaryPassword,
+                      }))
+                    }
+                    className="h-4 w-4 rounded border-emerald-300"
+                    disabled={
+                      !currentUserIsAdmin ||
+                      !staffSystemReady ||
+                      Boolean(editingStaffMember?.isSystemAdmin) ||
+                      formValues.temporaryPassword.trim().length > 0
+                    }
+                  />
+                  <span className="text-sm font-semibold text-emerald-900">
+                    Email a fresh setup link
+                  </span>
+                </label>
+              ) : null}
+            </div>
+
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-700">
                 Notes
@@ -690,6 +936,12 @@ export default function StaffPage({
             {formError ? (
               <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {formError}
+              </div>
+            ) : null}
+
+            {formNotice ? (
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                {formNotice}
               </div>
             ) : null}
 
@@ -718,8 +970,8 @@ export default function StaffPage({
         <div>
           <h3 className="text-lg font-black text-slate-900">Role Access</h3>
           <p className="mt-1 text-sm text-slate-500">
-            Admin always has complete access. Staff and Operator can be allowed
-            onto the pages below, while Staff and Settings stay admin-only.
+            Admin always has complete access. Managers can be given operational
+            pages, while Staff stay focused on technician mode.
           </p>
         </div>
 

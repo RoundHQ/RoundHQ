@@ -8,15 +8,17 @@ export async function middleware(request: NextRequest) {
 
   const isLoginPage = request.nextUrl.pathname === "/login";
   const isSignupPage = request.nextUrl.pathname === "/signup";
+  const isStaffSetupPage = request.nextUrl.pathname === "/staff-setup";
   const isProtectedPath =
-    request.nextUrl.pathname.startsWith("/admin") ||
-    request.nextUrl.pathname.startsWith("/dashboard") ||
-    request.nextUrl.pathname.startsWith("/billing") ||
-    request.nextUrl.pathname.startsWith("/settings") ||
-    request.nextUrl.pathname.startsWith("/customers") ||
-    request.nextUrl.pathname.startsWith("/routes") ||
-    request.nextUrl.pathname.startsWith("/reports") ||
-    request.nextUrl.pathname.startsWith("/staff");
+    !isStaffSetupPage &&
+    (request.nextUrl.pathname.startsWith("/admin") ||
+      request.nextUrl.pathname.startsWith("/dashboard") ||
+      request.nextUrl.pathname.startsWith("/billing") ||
+      request.nextUrl.pathname.startsWith("/settings") ||
+      request.nextUrl.pathname.startsWith("/customers") ||
+      request.nextUrl.pathname.startsWith("/routes") ||
+      request.nextUrl.pathname.startsWith("/reports") ||
+      request.nextUrl.pathname.startsWith("/staff"));
 
   if (!isProtectedPath && !isLoginPage && !isSignupPage) {
     return response;

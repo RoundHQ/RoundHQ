@@ -1062,6 +1062,9 @@ export default function DashboardPage({
       tone: "bg-violet-50 text-violet-600",
     },
   ];
+  const visibleDashboardAttentionRows = dashboardAttentionRows.filter((row) =>
+    row.money ? Boolean(onGoToPayments) : Boolean(onGoToActions)
+  );
   const recentActivityRows = [
     ...recentVisits.slice(0, 3).map((visit) => {
       const customer = customers.find((entry) => entry.id === visit.customerId);
@@ -1301,32 +1304,53 @@ export default function DashboardPage({
               </select>
             </div>
 
-            <div className="flex flex-wrap gap-2 xl:flex-nowrap">
-              <button
-                type="button"
-                onClick={onGoToCustomers}
-                className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#20c766] px-4 py-3 text-sm font-bold text-white shadow-[0_16px_35px_rgba(32,199,102,0.28)] transition hover:-translate-y-0.5 hover:bg-[#16ad55] xl:flex-none"
-              >
-                <UserPlus size={17} />
-                New Customer
-              </button>
-              <button type="button" onClick={onGoToQuoteForm} className={subtleButtonClassName}>
-                <FilePlus2 size={16} />
-                Quote
-              </button>
-              <button type="button" onClick={onGoToInvoiceForm} className={subtleButtonClassName}>
-                <ReceiptText size={16} />
-                Invoice
-              </button>
-              <button
-                type="button"
-                onClick={onGoToPayments}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#003c35] px-4 py-3 text-sm font-bold text-white shadow-[0_16px_32px_rgba(0,60,53,0.2)] transition hover:-translate-y-0.5 hover:bg-[#022f2a]"
-              >
-                <CreditCard size={16} />
-                Payments
-              </button>
-            </div>
+            {onGoToCustomers ||
+            onGoToQuoteForm ||
+            onGoToInvoiceForm ||
+            onGoToPayments ? (
+              <div className="flex flex-wrap gap-2 xl:flex-nowrap">
+                {onGoToCustomers ? (
+                  <button
+                    type="button"
+                    onClick={onGoToCustomers}
+                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#20c766] px-4 py-3 text-sm font-bold text-white shadow-[0_16px_35px_rgba(32,199,102,0.28)] transition hover:-translate-y-0.5 hover:bg-[#16ad55] xl:flex-none"
+                  >
+                    <UserPlus size={17} />
+                    New Customer
+                  </button>
+                ) : null}
+                {onGoToQuoteForm ? (
+                  <button
+                    type="button"
+                    onClick={onGoToQuoteForm}
+                    className={subtleButtonClassName}
+                  >
+                    <FilePlus2 size={16} />
+                    Quote
+                  </button>
+                ) : null}
+                {onGoToInvoiceForm ? (
+                  <button
+                    type="button"
+                    onClick={onGoToInvoiceForm}
+                    className={subtleButtonClassName}
+                  >
+                    <ReceiptText size={16} />
+                    Invoice
+                  </button>
+                ) : null}
+                {onGoToPayments ? (
+                  <button
+                    type="button"
+                    onClick={onGoToPayments}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#003c35] px-4 py-3 text-sm font-bold text-white shadow-[0_16px_32px_rgba(0,60,53,0.2)] transition hover:-translate-y-0.5 hover:bg-[#022f2a]"
+                  >
+                    <CreditCard size={16} />
+                    Payments
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -1364,24 +1388,28 @@ export default function DashboardPage({
             iconClassName="bg-blue-50 text-blue-600"
             onClick={hasRoundWork ? onGoToRounds : onGoToSchedule}
           />
-          <DashboardStatCard
-            icon={<PoundSterling size={24} />}
-            value={formatWholeMoney(dayValueTotal)}
-            label="Revenue Today"
-            detail={`${scheduledWorkCount} scheduled`}
-            detailClassName="text-emerald-600"
-            iconClassName="bg-emerald-50 text-emerald-600"
-            onClick={onGoToPayments}
-          />
-          <DashboardStatCard
-            icon={<FileText size={24} />}
-            value={formatWholeMoney(outstandingPaymentSnapshot.total)}
-            label="Outstanding"
-            detail={`${quoteAttentionCount + invoiceAttentionCount} attention items`}
-            detailClassName="text-violet-600"
-            iconClassName="bg-violet-50 text-violet-600"
-            onClick={onGoToPayments}
-          />
+          {onGoToPayments ? (
+            <DashboardStatCard
+              icon={<PoundSterling size={24} />}
+              value={formatWholeMoney(dayValueTotal)}
+              label="Revenue Today"
+              detail={`${scheduledWorkCount} scheduled`}
+              detailClassName="text-emerald-600"
+              iconClassName="bg-emerald-50 text-emerald-600"
+              onClick={onGoToPayments}
+            />
+          ) : null}
+          {onGoToPayments ? (
+            <DashboardStatCard
+              icon={<FileText size={24} />}
+              value={formatWholeMoney(outstandingPaymentSnapshot.total)}
+              label="Outstanding"
+              detail={`${quoteAttentionCount + invoiceAttentionCount} attention items`}
+              detailClassName="text-violet-600"
+              iconClassName="bg-violet-50 text-violet-600"
+              onClick={onGoToPayments}
+            />
+          ) : null}
           {showAiReceptionistStats ? (
             <DashboardStatCard
               icon={<Bot size={24} />}
@@ -1422,45 +1450,49 @@ export default function DashboardPage({
                 </div>
               ) : null}
 
-              <div className="absolute left-4 top-6 z-10 overflow-hidden rounded-lg bg-white shadow-[0_12px_30px_rgba(15,23,42,0.12)] ring-1 ring-slate-200">
-                <button
-                  type="button"
-                  onClick={onGoToMap}
-                  className="block w-full bg-[#22a953] px-4 py-3 text-sm font-black text-white transition hover:bg-[#168943]"
-                >
-                  Optimise
-                </button>
-                <div className="grid gap-1 px-3 py-3 text-center text-xs font-bold text-slate-700">
-                  <span className="flex flex-col items-center gap-1 rounded-md px-2 py-2 hover:bg-slate-50">
-                    <Navigation size={17} />
-                    Traffic
-                  </span>
-                  <span className="flex flex-col items-center gap-1 rounded-md px-2 py-2 hover:bg-slate-50">
-                    <MapPin size={17} />
-                    Satellite
-                  </span>
+              {onGoToMap ? (
+                <div className="absolute left-4 top-6 z-10 overflow-hidden rounded-lg bg-white shadow-[0_12px_30px_rgba(15,23,42,0.12)] ring-1 ring-slate-200">
+                  <button
+                    type="button"
+                    onClick={onGoToMap}
+                    className="block w-full bg-[#22a953] px-4 py-3 text-sm font-black text-white transition hover:bg-[#168943]"
+                  >
+                    Optimise
+                  </button>
+                  <div className="grid gap-1 px-3 py-3 text-center text-xs font-bold text-slate-700">
+                    <span className="flex flex-col items-center gap-1 rounded-md px-2 py-2 hover:bg-slate-50">
+                      <Navigation size={17} />
+                      Traffic
+                    </span>
+                    <span className="flex flex-col items-center gap-1 rounded-md px-2 py-2 hover:bg-slate-50">
+                      <MapPin size={17} />
+                      Satellite
+                    </span>
+                  </div>
                 </div>
-              </div>
+              ) : null}
 
-              <div className="absolute bottom-20 left-6 z-10 overflow-hidden rounded-lg bg-white shadow-[0_12px_30px_rgba(15,23,42,0.12)] ring-1 ring-slate-200">
-                <button
-                  type="button"
-                  onClick={onGoToMap}
-                  className="flex h-10 w-10 items-center justify-center text-2xl font-semibold text-slate-800 hover:bg-slate-50"
-                  aria-label="Zoom in"
-                >
-                  +
-                </button>
-                <div className="h-px bg-slate-200" />
-                <button
-                  type="button"
-                  onClick={onGoToMap}
-                  className="flex h-10 w-10 items-center justify-center text-2xl font-semibold text-slate-800 hover:bg-slate-50"
-                  aria-label="Zoom out"
-                >
-                  -
-                </button>
-              </div>
+              {onGoToMap ? (
+                <div className="absolute bottom-20 left-6 z-10 overflow-hidden rounded-lg bg-white shadow-[0_12px_30px_rgba(15,23,42,0.12)] ring-1 ring-slate-200">
+                  <button
+                    type="button"
+                    onClick={onGoToMap}
+                    className="flex h-10 w-10 items-center justify-center text-2xl font-semibold text-slate-800 hover:bg-slate-50"
+                    aria-label="Zoom in"
+                  >
+                    +
+                  </button>
+                  <div className="h-px bg-slate-200" />
+                  <button
+                    type="button"
+                    onClick={onGoToMap}
+                    className="flex h-10 w-10 items-center justify-center text-2xl font-semibold text-slate-800 hover:bg-slate-50"
+                    aria-label="Zoom out"
+                  >
+                    -
+                  </button>
+                </div>
+              ) : null}
 
               <div className="absolute bottom-5 left-5 z-10 flex flex-wrap gap-3 rounded-lg bg-white/95 px-4 py-3 text-xs font-semibold text-slate-700 shadow-[0_12px_30px_rgba(15,23,42,0.12)] ring-1 ring-slate-200">
                 <span className="inline-flex items-center gap-2">
@@ -1506,21 +1538,25 @@ export default function DashboardPage({
                     Today&apos;s route team
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={onGoToMap}
-                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md bg-[#22a953] px-4 py-3 text-sm font-black text-white transition hover:bg-[#168943]"
-                >
-                  <Navigation size={16} />
-                  Navigate
-                </button>
-                <button
-                  type="button"
-                  onClick={onGoToSchedule}
-                  className="mt-2 inline-flex w-full items-center justify-center rounded-md border border-slate-200 px-4 py-2.5 text-sm font-black text-slate-800 transition hover:bg-slate-50"
-                >
-                  View Job
-                </button>
+                {onGoToMap ? (
+                  <button
+                    type="button"
+                    onClick={onGoToMap}
+                    className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md bg-[#22a953] px-4 py-3 text-sm font-black text-white transition hover:bg-[#168943]"
+                  >
+                    <Navigation size={16} />
+                    Navigate
+                  </button>
+                ) : null}
+                {onGoToSchedule ? (
+                  <button
+                    type="button"
+                    onClick={onGoToSchedule}
+                    className="mt-2 inline-flex w-full items-center justify-center rounded-md border border-slate-200 px-4 py-2.5 text-sm font-black text-slate-800 transition hover:bg-slate-50"
+                  >
+                    View Job
+                  </button>
+                ) : null}
               </aside>
             </div>
           </section>
@@ -1600,21 +1636,24 @@ export default function DashboardPage({
             </div>
           </section>
 
+          {visibleDashboardAttentionRows.length > 0 ? (
           <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-[0_16px_38px_rgba(15,23,42,0.06)]">
             <div className="flex items-center justify-between gap-3">
               <h3 className="text-lg font-black text-slate-950">
                 Jobs Requiring Attention
               </h3>
-              <button
-                type="button"
-                onClick={onGoToActions}
-                className="text-sm font-bold text-slate-800 transition hover:text-emerald-700"
-              >
-                View all
-              </button>
+              {onGoToActions ? (
+                <button
+                  type="button"
+                  onClick={onGoToActions}
+                  className="text-sm font-bold text-slate-800 transition hover:text-emerald-700"
+                >
+                  View all
+                </button>
+              ) : null}
             </div>
             <div className="mt-4 divide-y divide-slate-100">
-              {dashboardAttentionRows.map((row) => (
+              {visibleDashboardAttentionRows.map((row) => (
                 <button
                   key={row.label}
                   type="button"
@@ -1637,9 +1676,11 @@ export default function DashboardPage({
               ))}
             </div>
           </section>
+          ) : null}
         </div>
 
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_360px]">
+          {onGoToPayments ? (
           <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-[0_16px_38px_rgba(15,23,42,0.06)]">
             <div className="flex items-center justify-between gap-3">
               <h3 className="text-lg font-black text-slate-950">
@@ -1681,6 +1722,7 @@ export default function DashboardPage({
               </div>
             </div>
           </section>
+          ) : null}
 
           <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-[0_16px_38px_rgba(15,23,42,0.06)]">
             <div className="flex items-center justify-between gap-3">
@@ -1756,13 +1798,15 @@ export default function DashboardPage({
               <h3 className="text-lg font-black text-slate-950">
                 Recent Activity
               </h3>
-              <button
-                type="button"
-                onClick={onGoToRounds}
-                className="text-sm font-bold text-slate-800 transition hover:text-emerald-700"
-              >
-                View all
-              </button>
+              {onGoToRounds ? (
+                <button
+                  type="button"
+                  onClick={onGoToRounds}
+                  className="text-sm font-bold text-slate-800 transition hover:text-emerald-700"
+                >
+                  View all
+                </button>
+              ) : null}
             </div>
             <div className="mt-4 divide-y divide-slate-100">
               {recentActivityRows.length === 0 ? (
@@ -1795,6 +1839,7 @@ export default function DashboardPage({
           </section>
         </div>
 
+        {onGoToMap ? (
         <section className="flex flex-col gap-4 rounded-lg border border-emerald-100 bg-gradient-to-r from-emerald-50 via-white to-slate-50 p-5 shadow-[0_16px_38px_rgba(15,23,42,0.05)] sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-4">
             <span className="flex h-14 w-14 shrink-0 items-center justify-center border-r border-emerald-100 pr-4 text-emerald-600">
@@ -1819,6 +1864,7 @@ export default function DashboardPage({
             <ArrowRight size={16} className="text-emerald-600" />
           </button>
         </section>
+        ) : null}
 
         {announcement ? (
           <section

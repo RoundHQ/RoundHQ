@@ -47,6 +47,7 @@ import ActionsPage from "@/components/jobs/actions-page";
 import MapPage from "@/components/jobs/map-page";
 import RouteEfficiencyPage from "@/components/jobs/route-efficiency-page";
 import StaffPage from "@/components/jobs/staff-page";
+import TechnicianPage from "@/components/jobs/technician-page";
 import RoundsPage from "@/components/jobs/rounds-page";
 import DashboardPage from "@/components/jobs/dashboard-page";
 import SchedulePage from "@/components/jobs/schedule-page";
@@ -182,6 +183,18 @@ import type {
   AiReceptionistDashboardStats,
 } from "@/lib/ai-receptionist/call-logs";
 import { SHOW_AI_RECEPTIONIST_UI } from "@/lib/ai-receptionist/ui-visibility";
+import {
+  ADMIN_ONLY_STAFF_PAGE_KEYS,
+  DEFAULT_ROLE_PAGE_ACCESS,
+  STAFF_ROLES,
+  canAccessBilling,
+  canAccessOperationalScreens,
+  canAccessStaffPageKey,
+  canManageTeam,
+  getAllowedStaffPageKeys,
+  normalizeStaffRole as normalizeTeamStaffRole,
+  isAdminStaffRole,
+} from "@/lib/team-permissions";
 
 import {
   type CommercialRamsDocument,
@@ -337,6 +350,7 @@ type AppSettings = {
 
 
 type PageKey =
+    | "technician"
     | "dashboard"
     | "schedule"
     | "jobs"
@@ -362,6 +376,7 @@ type PageKey =
     | "settings";
 
 const WORKSPACE_ROUTE_PAGE_KEYS = [
+  "technician",
   "dashboard",
   "schedule",
   "jobs",
@@ -686,6 +701,21 @@ type StaffMemberWriteRow = {
   phone: string | null;
   notes: string | null;
   is_system_admin?: boolean;
+};
+
+type StaffMemberFormValues = Pick<
+  StaffMember,
+  "email" | "fullName" | "role" | "isActive" | "phone" | "notes"
+> & {
+  temporaryPassword?: string;
+  sendSetupInvite?: boolean;
+};
+
+type StaffInvitationApiResponse = {
+  ok?: boolean;
+  message?: string;
+  staffMember?: StaffMember;
+  error?: string;
 };
 
 type RolePermissionRow = {
@@ -1140,13 +1170,12 @@ function writeStoredBooleanPreference(key: string, value: boolean) {
   window.localStorage.setItem(key, value ? "true" : "false");
 }
 
-const STAFF_ROLES: StaffRole[] = ["Admin", "Staff", "Operator"];
-const EDITABLE_STAFF_ROLES: Array<Exclude<StaffRole, "Admin">> = ["Staff", "Operator"];
 const STAFF_PAGE_OPTIONS: {
   key: StaffPageAccessKey;
   label: string;
   section: string;
 }[] = [
+  { key: "technician", label: "Technician Mode", section: "Field Team" },
   { key: "dashboard", label: "Overview", section: "Overview" },
   { key: "schedule", label: "Schedule", section: "Work" },
   { key: "rounds", label: "Rounds", section: "Work" },
@@ -1161,8 +1190,9 @@ const STAFF_PAGE_OPTIONS: {
   { key: "staff", label: "Staff", section: "Team" },
   { key: "settings", label: "Settings", section: "Settings" },
 ];
-const ADMIN_ONLY_PAGE_KEYS = new Set<StaffPageAccessKey>(["staff", "settings"]);
+const ADMIN_ONLY_PAGE_KEYS = ADMIN_ONLY_STAFF_PAGE_KEYS;
 const PAGE_PERMISSION_OVERRIDES: Record<PageKey, StaffPageAccessKey> = {
+  technician: "technician",
   dashboard: "dashboard",
   schedule: "schedule",
   jobs: "schedule",
@@ -1189,6 +1219,7 @@ const PAGE_PERMISSION_OVERRIDES: Record<PageKey, StaffPageAccessKey> = {
 };
 
 const CUSTOMER_FEATURE_PAGE_OVERRIDES: Record<PageKey, CustomerFeatureKey> = {
+  technician: "schedule",
   dashboard: "dashboard",
   schedule: "schedule",
   jobs: "schedule",
@@ -1212,22 +1243,6 @@ const CUSTOMER_FEATURE_PAGE_OVERRIDES: Record<PageKey, CustomerFeatureKey> = {
   invoiceForm: "invoices",
   commercialDocs: "commercialDocs",
   settings: "settings",
-};
-const DEFAULT_ROLE_PAGE_ACCESS: Record<Exclude<StaffRole, "Admin">, StaffPageAccessKey[]> = {
-  Staff: [
-    "dashboard",
-    "schedule",
-    "rounds",
-    "history",
-    "map",
-    "actions",
-    "commercialDocs",
-    "customers",
-    "expenses",
-    "quotes",
-    "invoices",
-  ],
-  Operator: ["dashboard", "rounds", "history", "map", "actions"],
 };
 
 function normalizePdfHeaderStyle(value: unknown): PdfHeaderStyle {
@@ -2218,7 +2233,7 @@ function normalizeEmailAddress(value: string | null | undefined) {
 }
 
 function normalizeStaffRole(value: unknown): StaffRole {
-  return STAFF_ROLES.includes(value as StaffRole) ? (value as StaffRole) : "Staff";
+  return normalizeTeamStaffRole(value);
 }
 
 function normalizeStaffPageAccessKey(value: unknown): StaffPageAccessKey {
@@ -2308,9 +2323,7 @@ function createDefaultRolePermissions(): RolePermission[] {
             role === "Admin"
                 ? true
                 : !ADMIN_ONLY_PAGE_KEYS.has(pageOption.key) &&
-                  DEFAULT_ROLE_PAGE_ACCESS[role as Exclude<StaffRole, "Admin">].includes(
-                      pageOption.key
-                  ),
+                  DEFAULT_ROLE_PAGE_ACCESS[role].includes(pageOption.key),
       }))
   );
 }
@@ -2389,18 +2402,6 @@ function getActiveRoundCycle(
 ) {
   const cycle = activeRoundCycles[baseRoundKey];
   return Number.isInteger(cycle) && cycle > 0 ? cycle : 1;
-}
-
-function getActiveRoundKey(
-    activeRoundCycles: Record<string, number>,
-    week: WeekName,
-    day: DayName
-) {
-  const baseRoundKey = getBaseRoundKey(week, day);
-  return getRoundKeyForCycle(
-      baseRoundKey,
-      getActiveRoundCycle(activeRoundCycles, baseRoundKey)
-  );
 }
 
 function normalizeStoredRoundStateKey(key: string) {
@@ -2818,6 +2819,10 @@ function formatDatabaseError(error: { code?: string; message: string }) {
 
 function isMissingTableError(error: { code?: string; message: string }) {
   return error.code === "42P01" || error.code === "PGRST205";
+}
+
+function isPermissionDeniedError(error: { code?: string; message: string }) {
+  return error.code === "42501";
 }
 
 function isVisitRoundMetadataSchemaError(error: { code?: string; message: string }) {
@@ -3845,6 +3850,7 @@ function getFirstName(name: string) {
 }
 
 function getPageDisplayLabel(page: PageKey) {
+  if (page === "technician") return "Today's route";
   if (page === "customerProfile") return "Customer profile";
   if (page === "scheduledJobProfile") return "Scheduled job";
   if (page === "quoteForm") return "Quote";
@@ -5468,8 +5474,10 @@ export default function JobsApp({
       return false;
     }
 
-    return Boolean(currentStaffMember.isSystemAdmin) || currentStaffMember.role === "Admin";
+    return Boolean(currentStaffMember.isSystemAdmin) || isAdminStaffRole(currentStaffMember.role);
   }, [currentStaffMember, staffSystemReady]);
+  const currentUserRole = currentStaffMember?.role ?? (currentUserIsAdmin ? "Admin" : "Staff");
+  const currentUserCanManageTeam = currentUserIsAdmin || canManageTeam(currentUserRole);
   const canViewOwnerDocumentHistory = currentUserIsAdmin || isSupportAccess;
   const activeStaffMembers = useMemo(
       () => staffMembers.filter((staffMember) => staffMember.isActive),
@@ -5505,7 +5513,7 @@ export default function JobsApp({
       return new Set<StaffPageAccessKey>();
     }
 
-    return new Set<StaffPageAccessKey>(
+    const explicitPermissions =
         rolePermissions
             .filter(
                 (permission) =>
@@ -5513,9 +5521,17 @@ export default function JobsApp({
                     permission.allowed &&
                     !ADMIN_ONLY_PAGE_KEYS.has(permission.pageKey)
             )
-            .map((permission) => permission.pageKey)
-    );
+            .map((permission) => permission.pageKey);
+
+    return getAllowedStaffPageKeys(currentStaffMember.role, explicitPermissions);
   }, [currentStaffMember, currentUserIsAdmin, rolePermissions, staffSystemReady]);
+  const isTechnicianOnlyUser =
+      staffSystemReady &&
+      !currentUserIsAdmin &&
+      Boolean(currentStaffMember?.isActive) &&
+      hasTeamPlanAccess &&
+      allowedRolePages.size === 1 &&
+      allowedRolePages.has("technician");
   const hasPageAccess = useCallback(
       (nextPage: PageKey) => {
         const featureKey = getCustomerFeatureKey(nextPage);
@@ -5538,15 +5554,13 @@ export default function JobsApp({
 
         const accessKey = getPageAccessKey(nextPage);
 
-        if (ADMIN_ONLY_PAGE_KEYS.has(accessKey)) {
-          return false;
-        }
-
-        return allowedRolePages.has(accessKey);
+        return canAccessStaffPageKey(currentUserRole, accessKey, allowedRolePages);
       },
       [
         allowedRolePages,
+        currentStaffMember?.isActive,
         currentUserIsAdmin,
+        currentUserRole,
         customerFeatureAccess,
         hasTeamPlanAccess,
         planFeatureAccess,
@@ -5555,15 +5569,20 @@ export default function JobsApp({
   );
   const accessibleNavSections = useMemo(
       () =>
-          NAV_SECTIONS.map((section) => ({
+          isTechnicianOnlyUser
+              ? []
+              : NAV_SECTIONS.map((section) => ({
             ...section,
             items: section.items.filter((item) => hasPageAccess(item.key)),
           })).filter((section) => section.items.length > 0),
-      [hasPageAccess]
+      [hasPageAccess, isTechnicianOnlyUser]
   );
   const firstAccessiblePage = useMemo<PageKey | null>(
-      () => accessibleNavSections[0]?.items[0]?.key ?? null,
-      [accessibleNavSections]
+      () =>
+          isTechnicianOnlyUser
+              ? "technician"
+              : accessibleNavSections[0]?.items[0]?.key ?? null,
+      [accessibleNavSections, isTechnicianOnlyUser]
   );
   const newLeadsCount = useMemo(
       () => customerLeads.filter((lead) => lead.status === "new").length,
@@ -5588,12 +5607,14 @@ export default function JobsApp({
       () => getTodayPanelState(todayReferenceDate, activeRotationWeeks),
       [activeRotationWeeks, todayReferenceDate]
   );
-  const todayRoundKey = todayPanel.selectedDay
-      ? getActiveRoundKey(
-          activeRoundCycles,
-          todayPanel.week,
-          todayPanel.selectedDay
-      )
+  const todayBaseRoundKey = todayPanel.selectedDay
+      ? getBaseRoundKey(todayPanel.week, todayPanel.selectedDay)
+      : null;
+  const todayActiveRoundCycle = todayBaseRoundKey
+      ? getActiveRoundCycle(activeRoundCycles, todayBaseRoundKey)
+      : 1;
+  const todayRoundKey = todayBaseRoundKey
+      ? getRoundKeyForCycle(todayBaseRoundKey, todayActiveRoundCycle)
       : null;
   const isTodayLocked = todayRoundKey
       ? Boolean(lockedRounds[todayRoundKey])
@@ -5688,6 +5709,15 @@ export default function JobsApp({
     const activeSectionTitle = getNavSectionTitle(page);
     setExpandedNavSections(getExpandedNavSections(activeSectionTitle));
   }, [page]);
+
+  useEffect(() => {
+    if (!isTechnicianOnlyUser || page === "technician") {
+      return;
+    }
+
+    setExpandedNavSections(getExpandedNavSections(null));
+    setPage("technician");
+  }, [isTechnicianOnlyUser, page]);
 
   useEffect(() => {
     if (!isUserMenuOpen) {
@@ -6526,7 +6556,82 @@ export default function JobsApp({
               : Promise.resolve({ data: null, error: null }),
         ]);
 
-        if (customersResult.error) {
+        if (staffMembersResult.error && !isMissingTableError(staffMembersResult.error)) {
+          throw staffMembersResult.error;
+        }
+
+        if (rolePermissionsResult.error && !isMissingTableError(rolePermissionsResult.error)) {
+          throw rolePermissionsResult.error;
+        }
+
+        const preliminaryStaffTablesReady: StaffTablesReady = {
+          staffMembers: !staffMembersResult.error,
+          rolePermissions: !rolePermissionsResult.error,
+        };
+        const preliminaryStaffMembers = preliminaryStaffTablesReady.staffMembers
+            ? sortStaffMembers(
+                ((staffMembersResult.data ?? []) as StaffMemberRow[]).map(
+                    mapStaffMemberRowToStaffMember
+                )
+            )
+            : [];
+        const preliminaryRolePermissions = preliminaryStaffTablesReady.rolePermissions
+            ? ((rolePermissionsResult.data ?? []) as RolePermissionRow[]).map(
+                mapRolePermissionRowToRolePermission
+            )
+            : [];
+        const preliminaryCurrentStaffMember = findMatchingStaffMember(
+            preliminaryStaffMembers,
+            user.id,
+            user.email ?? null
+        );
+        const preliminaryCurrentUserIsAdmin =
+            Boolean(preliminaryCurrentStaffMember?.isSystemAdmin) ||
+            isAdminStaffRole(preliminaryCurrentStaffMember?.role);
+        const preliminaryAllowedPages =
+            preliminaryCurrentUserIsAdmin || !preliminaryCurrentStaffMember?.isActive
+                ? new Set<StaffPageAccessKey>(
+                    preliminaryCurrentUserIsAdmin
+                        ? STAFF_PAGE_OPTIONS.map((pageOption) => pageOption.key)
+                        : []
+                  )
+                : getAllowedStaffPageKeys(
+                    preliminaryCurrentStaffMember.role,
+                    preliminaryRolePermissions
+                        .filter(
+                            (permission) =>
+                                permission.role === preliminaryCurrentStaffMember.role &&
+                                permission.allowed &&
+                                !ADMIN_ONLY_PAGE_KEYS.has(permission.pageKey)
+                        )
+                        .map((permission) => permission.pageKey)
+                  );
+        const canIgnoreDeniedTable = (
+            error: { code?: string; message: string } | null,
+            pageKeys: StaffPageAccessKey[]
+        ) =>
+            Boolean(
+                error &&
+                isPermissionDeniedError(error) &&
+                !preliminaryCurrentUserIsAdmin &&
+                pageKeys.every((pageKey) => !preliminaryAllowedPages.has(pageKey))
+            );
+
+        if (
+            customersResult.error &&
+            !canIgnoreDeniedTable(customersResult.error, [
+              "dashboard",
+              "schedule",
+              "rounds",
+              "history",
+              "map",
+              "actions",
+              "customers",
+              "quotes",
+              "invoices",
+              "technician",
+            ])
+        ) {
           throw customersResult.error;
         }
 
@@ -6548,11 +6653,25 @@ export default function JobsApp({
           visitRoundMetadataWarning = VISIT_ROUND_METADATA_SETUP_NOTICE;
         }
 
-        if (visitsResult.error && !isVisitRoundMetadataSchemaError(visitsResult.error)) {
+        if (
+            visitsResult.error &&
+            !isVisitRoundMetadataSchemaError(visitsResult.error) &&
+            !canIgnoreDeniedTable(visitsResult.error, [
+              "dashboard",
+              "schedule",
+              "rounds",
+              "history",
+              "technician",
+            ])
+        ) {
           throw visitsResult.error;
         }
 
-        if (customerLeadsResult.error && !isMissingTableError(customerLeadsResult.error)) {
+        if (
+            customerLeadsResult.error &&
+            !isMissingTableError(customerLeadsResult.error) &&
+            !canIgnoreDeniedTable(customerLeadsResult.error, ["dashboard"])
+        ) {
           throw customerLeadsResult.error;
         }
 
@@ -6566,43 +6685,68 @@ export default function JobsApp({
           throw appStateResult.error;
         }
 
-        if (itemsResult.error && !isMissingTableError(itemsResult.error)) {
+        if (
+            itemsResult.error &&
+            !isMissingTableError(itemsResult.error) &&
+            !canIgnoreDeniedTable(itemsResult.error, ["quotes", "invoices", "expenses"])
+        ) {
           throw itemsResult.error;
         }
 
-        if (monthlyPaymentsResult.error && !isMissingTableError(monthlyPaymentsResult.error)) {
+        if (
+            monthlyPaymentsResult.error &&
+            !isMissingTableError(monthlyPaymentsResult.error) &&
+            !canIgnoreDeniedTable(monthlyPaymentsResult.error, [
+              "dashboard",
+              "customers",
+              "invoices",
+            ])
+        ) {
           throw monthlyPaymentsResult.error;
         }
 
-        if (commercialRamsResult.error && !isMissingTableError(commercialRamsResult.error)) {
+        if (
+            commercialRamsResult.error &&
+            !isMissingTableError(commercialRamsResult.error) &&
+            !canIgnoreDeniedTable(commercialRamsResult.error, ["commercialDocs"])
+        ) {
           throw commercialRamsResult.error;
         }
 
-        if (quotesResult.error && !isMissingTableError(quotesResult.error)) {
+        if (
+            quotesResult.error &&
+            !isMissingTableError(quotesResult.error) &&
+            !canIgnoreDeniedTable(quotesResult.error, ["quotes"])
+        ) {
           throw quotesResult.error;
         }
 
-        if (invoicesResult.error && !isMissingTableError(invoicesResult.error)) {
+        if (
+            invoicesResult.error &&
+            !isMissingTableError(invoicesResult.error) &&
+            !canIgnoreDeniedTable(invoicesResult.error, ["invoices"])
+        ) {
           throw invoicesResult.error;
         }
 
         if (
             recurringInvoiceTemplatesResult.error &&
-            !isRecurringInvoiceTemplateFallbackError(recurringInvoiceTemplatesResult.error)
+            !isRecurringInvoiceTemplateFallbackError(recurringInvoiceTemplatesResult.error) &&
+            !canIgnoreDeniedTable(recurringInvoiceTemplatesResult.error, ["invoices"])
         ) {
           throw recurringInvoiceTemplatesResult.error;
         }
 
-        if (scheduledJobsResult.error && !isMissingTableError(scheduledJobsResult.error)) {
+        if (
+            scheduledJobsResult.error &&
+            !isMissingTableError(scheduledJobsResult.error) &&
+            !canIgnoreDeniedTable(scheduledJobsResult.error, [
+              "dashboard",
+              "schedule",
+              "technician",
+            ])
+        ) {
           throw scheduledJobsResult.error;
-        }
-
-        if (staffMembersResult.error && !isMissingTableError(staffMembersResult.error)) {
-          throw staffMembersResult.error;
-        }
-
-        if (rolePermissionsResult.error && !isMissingTableError(rolePermissionsResult.error)) {
-          throw rolePermissionsResult.error;
         }
 
         if (isCancelled) {
@@ -6829,26 +6973,42 @@ export default function JobsApp({
           }
         }
 
-        if (nextStaffTablesReady.rolePermissions && nextRolePermissions.length === 0) {
-          const seededRolePermissionsResult = await supabase
-              .from("role_permissions")
-              .upsert(
-                  createDefaultRolePermissions().map((permission) =>
-                      withLoadedOrganizationId(mapRolePermissionToWriteRow(permission))
-                  ),
-                  {
-                    onConflict: "organization_id,role,page_key",
-                  }
+        if (nextStaffTablesReady.rolePermissions) {
+          const defaultRolePermissions = createDefaultRolePermissions();
+          const existingPermissionKeys = new Set(
+              nextRolePermissions.map(
+                  (permission) => `${permission.role}:${permission.pageKey}`
               )
-              .select(ROLE_PERMISSION_SELECT_FIELDS);
-
-          if (seededRolePermissionsResult.error) {
-            throw seededRolePermissionsResult.error;
-          }
-
-          nextRolePermissions = ((seededRolePermissionsResult.data ?? []) as RolePermissionRow[]).map(
-              mapRolePermissionRowToRolePermission
           );
+          const missingRolePermissions = defaultRolePermissions.filter(
+              (permission) =>
+                  !existingPermissionKeys.has(`${permission.role}:${permission.pageKey}`)
+          );
+
+          if (missingRolePermissions.length > 0) {
+            const seededRolePermissionsResult = await supabase
+                .from("role_permissions")
+                .upsert(
+                    missingRolePermissions.map((permission) =>
+                        withLoadedOrganizationId(mapRolePermissionToWriteRow(permission))
+                    ),
+                    {
+                      onConflict: "organization_id,role,page_key",
+                    }
+                )
+                .select(ROLE_PERMISSION_SELECT_FIELDS);
+
+            if (seededRolePermissionsResult.error) {
+              throw seededRolePermissionsResult.error;
+            }
+
+            nextRolePermissions = [
+              ...nextRolePermissions,
+              ...((seededRolePermissionsResult.data ?? []) as RolePermissionRow[]).map(
+                  mapRolePermissionRowToRolePermission
+              ),
+            ];
+          }
         }
 
         if (nextStaffTablesReady.staffMembers) {
@@ -9916,18 +10076,70 @@ export default function JobsApp({
     }
   }
 
-  async function addStaffMember(
-      values: Pick<
-          StaffMember,
-          "email" | "fullName" | "role" | "isActive" | "phone" | "notes"
-      >
-  ) {
+  async function postStaffInvitationRequest(body: {
+    action: "create" | "update";
+    staffMemberId?: number;
+    values: StaffMemberFormValues;
+  }): Promise<{ message?: string; staffMember: StaffMember }> {
+    const response = await fetch("/api/staff/invitations", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        action: body.action,
+        staffMemberId: body.staffMemberId,
+        values: {
+          email: body.values.email,
+          fullName: body.values.fullName,
+          role: body.values.role,
+          isActive: body.values.isActive,
+          phone: body.values.phone ?? "",
+          notes: body.values.notes ?? "",
+        },
+        temporaryPassword: body.values.temporaryPassword ?? "",
+        sendSetupInvite: Boolean(body.values.sendSetupInvite),
+      }),
+    });
+    const data = (await response
+      .json()
+      .catch(() => ({}))) as StaffInvitationApiResponse;
+
+    if (!response.ok) {
+      throw new Error(data.error ?? "Unable to save the staff member.");
+    }
+
+    if (!data.staffMember) {
+      throw new Error("RoundHQ saved the staff member but did not return the record.");
+    }
+
+    return {
+      message: data.message,
+      staffMember: data.staffMember,
+    };
+  }
+
+  async function addStaffMember(values: StaffMemberFormValues) {
     if (!staffTablesReady.staffMembers) {
       throw new Error("Run the staff system SQL setup script first.");
     }
 
     if (values.role === "Admin") {
       throw new Error("Only the current account can stay as Admin.");
+    }
+
+    const existingStaffMember = staffMembers.find(
+      (staffMember) =>
+        normalizeEmailAddress(staffMember.email) ===
+        normalizeEmailAddress(values.email)
+    );
+
+    if (existingStaffMember) {
+      throw new Error(
+        existingStaffMember.isSystemAdmin
+          ? "That email belongs to the primary admin account."
+          : "A staff member with this email already exists. Select them from Staff Members and use Edit to send a setup link or reset their password."
+      );
     }
 
     const activeStaffCount = staffMembers.filter(
@@ -9940,37 +10152,21 @@ export default function JobsApp({
       );
     }
 
-    const supabase = createSupabaseClient();
-    const { data, error } = await supabase
-        .from("staff_members")
-        .insert(
-            withCurrentOrganizationId(
-                mapStaffMemberToWriteRow({
-                  ...values,
-                  authUserId: null,
-                  isSystemAdmin: false,
-                })
-            )
-        )
-        .select(STAFF_MEMBER_SELECT_FIELDS)
-        .single();
+    const result = await postStaffInvitationRequest({
+      action: "create",
+      values,
+    });
+    const persistedStaffMember = result.staffMember;
 
-    if (error) {
-      setDatabaseError(formatDatabaseError(error));
-      throw error;
-    }
-
-    const persistedStaffMember = mapStaffMemberRowToStaffMember(data as StaffMemberRow);
     setStaffMembers((prev) => sortStaffMembers([...prev, persistedStaffMember]));
     setDatabaseError(getDatabaseSetupNotice(workflowTablesReady, staffTablesReady));
+
+    return result.message;
   }
 
   async function saveStaffMember(
       staffMemberId: number,
-      values: Pick<
-          StaffMember,
-          "email" | "fullName" | "role" | "isActive" | "phone" | "notes"
-      >
+      values: StaffMemberFormValues
   ) {
     if (!staffTablesReady.staffMembers) {
       throw new Error("Run the staff system SQL setup script first.");
@@ -9981,6 +10177,10 @@ export default function JobsApp({
 
     if (!existingStaffMember) {
       throw new Error("That staff member no longer exists.");
+    }
+
+    if (existingStaffMember.isSystemAdmin) {
+      throw new Error("The primary admin account cannot be edited here.");
     }
 
     const nextRole = existingStaffMember.isSystemAdmin ? "Admin" : values.role;
@@ -10003,34 +10203,18 @@ export default function JobsApp({
       );
     }
 
-    const supabase = createSupabaseClient();
-    const { data, error } = await supabase
-        .from("staff_members")
-        .update(
-            withCurrentOrganizationId(
-                mapStaffMemberToWriteRow({
-                  authUserId: existingStaffMember.authUserId ?? null,
-                  email: nextEmail,
-                  fullName: values.fullName,
-                  role: nextRole,
-                  isActive: nextIsActive,
-                  phone: values.phone,
-                  notes: values.notes,
-                  isSystemAdmin: existingStaffMember.isSystemAdmin,
-                })
-            )
-        )
-        .eq("id", staffMemberId)
-        .eq("organization_id", getWritableOrganizationId())
-        .select(STAFF_MEMBER_SELECT_FIELDS)
-        .single();
+    const result = await postStaffInvitationRequest({
+      action: "update",
+      staffMemberId,
+      values: {
+        ...values,
+        email: nextEmail,
+        role: nextRole,
+        isActive: nextIsActive,
+      },
+    });
+    const persistedStaffMember = result.staffMember;
 
-    if (error) {
-      setDatabaseError(formatDatabaseError(error));
-      throw error;
-    }
-
-    const persistedStaffMember = mapStaffMemberRowToStaffMember(data as StaffMemberRow);
     setStaffMembers((prev) =>
         sortStaffMembers(
             prev.map((staffMember) =>
@@ -10050,6 +10234,8 @@ export default function JobsApp({
     }
 
     setDatabaseError(getDatabaseSetupNotice(workflowTablesReady, staffTablesReady));
+
+    return result.message;
   }
 
   async function deleteStaffMember(staffMemberId: number) {
@@ -10179,7 +10365,9 @@ export default function JobsApp({
   }, [customers]);
 
   const shouldRestrictWorkToCurrentStaff =
-      staffSystemReady && !currentUserIsAdmin && Boolean(currentStaffMember?.id);
+      staffSystemReady &&
+      !canAccessOperationalScreens(currentUserRole) &&
+      Boolean(currentStaffMember?.id);
   const visibleRoundCustomers = useMemo(() => {
     if (!shouldRestrictWorkToCurrentStaff || !currentStaffMember?.id) {
       return customers;
@@ -10214,7 +10402,8 @@ export default function JobsApp({
     );
     const items: Array<DashboardAttentionItem & { sortRank: number; sortValue: number }> = [];
 
-    for (const quote of quotes) {
+    if (hasPageAccess("quotes")) {
+      for (const quote of quotes) {
       if (!["Approved", "Sent"].includes(quote.status) || linkedQuoteIds.has(quote.id)) {
         continue;
       }
@@ -10259,9 +10448,11 @@ export default function JobsApp({
         sortRank: 1,
         sortValue: daysSinceAnchor - intervalDays,
       });
+      }
     }
 
-    for (const invoice of invoices) {
+    if (hasPageAccess("invoices")) {
+      for (const invoice of invoices) {
       if (["Draft", "Paid", "Declined"].includes(invoice.status)) {
         continue;
       }
@@ -10313,6 +10504,7 @@ export default function JobsApp({
         sortRank: 0,
         sortValue: daysOverdue,
       });
+      }
     }
 
     return items
@@ -10324,7 +10516,14 @@ export default function JobsApp({
           return right.sortValue - left.sortValue;
         })
         .map(({ sortRank, sortValue, ...item }) => item);
-  }, [appSettings.paymentTermsDays, invoiceReminders, invoices, quoteFollowUps, quotes]);
+  }, [
+    appSettings.paymentTermsDays,
+    hasPageAccess,
+    invoiceReminders,
+    invoices,
+    quoteFollowUps,
+    quotes,
+  ]);
 
   const activeWorkflowQuote = useMemo(() => {
     if (workflowMessageTarget?.kind !== "quote_follow_up") {
@@ -12140,17 +12339,23 @@ export default function JobsApp({
     );
   }
 
-  function getCurrentVisit(customerId: number) {
+  function getCurrentVisitForRound(
+      customerId: number,
+      targetWeek: WeekName,
+      targetDay: DayName,
+      targetRoundCycle: number,
+      targetRoundIsLocked: boolean
+  ) {
     const customer = customerMap.get(customerId);
     if (!customer || !customer.isGrassCuttingCustomer) {
       return null;
     }
 
     const visitRoundKey = getVisitRoundKey(
-        selectedWeek,
-        selectedDay,
+        targetWeek,
+        targetDay,
         customer.customerType,
-        activeRoundCycle
+        targetRoundCycle
     );
     const matchingVisits = visitLogs
         .filter((visit) => {
@@ -12160,14 +12365,14 @@ export default function JobsApp({
             return visit.roundKey === visitRoundKey;
           }
 
-          if (activeRoundCycle > 1 && !isLocked) {
+          if (targetRoundCycle > 1 && !targetRoundIsLocked) {
             return false;
           }
 
           if (visit.week && visit.day) {
             return (
-                visit.week === selectedWeek &&
-                visit.day === selectedDay &&
+                visit.week === targetWeek &&
+                visit.day === targetDay &&
                 (visit.customerType
                     ? visit.customerType === customer.customerType
                     : true)
@@ -12184,17 +12389,44 @@ export default function JobsApp({
     return matchingVisits[0] ?? null;
   }
 
+  function getCurrentVisit(customerId: number) {
+    return getCurrentVisitForRound(
+        customerId,
+        selectedWeek,
+        selectedDay,
+        activeRoundCycle,
+        isLocked
+    );
+  }
+
   async function markVisit(
       customerId: number,
       status: "cut" | "not_cut",
-      extra?: { notes?: string; notCutReason?: NotCutReason; paid?: boolean }
+      extra?: { notes?: string; notCutReason?: NotCutReason; paid?: boolean },
+      roundContext?: {
+        week: WeekName;
+        day: DayName;
+        roundCycle: number;
+        isLocked: boolean;
+      }
   ) {
-    if (isLocked) return;
+    const targetWeek = roundContext?.week ?? selectedWeek;
+    const targetDay = roundContext?.day ?? selectedDay;
+    const targetRoundCycle = roundContext?.roundCycle ?? activeRoundCycle;
+    const targetRoundIsLocked = roundContext?.isLocked ?? isLocked;
+
+    if (targetRoundIsLocked) return;
 
     const customer = customerMap.get(customerId);
     if (!customer) return;
 
-    const existingVisit = getCurrentVisit(customerId);
+    const existingVisit = getCurrentVisitForRound(
+        customerId,
+        targetWeek,
+        targetDay,
+        targetRoundCycle,
+        targetRoundIsLocked
+    );
     const pendingCashPaymentDate =
         customer.paymentMethod === "Cash"
             ? pendingCashPaymentDates[String(customerId)] ?? null
@@ -12237,10 +12469,10 @@ export default function JobsApp({
     const nowIso = new Date().toISOString();
     const priceAtVisit = Number(customer.grassCutAmount ?? 0);
     const visitRoundKey = getVisitRoundKey(
-        selectedWeek,
-        selectedDay,
+        targetWeek,
+        targetDay,
         customer.customerType,
-        activeRoundCycle
+        targetRoundCycle
     );
 
     const newVisit = {
@@ -12259,8 +12491,8 @@ export default function JobsApp({
           )
           : null,
       roundKey: visitRoundKey,
-      week: selectedWeek,
-      day: selectedDay,
+      week: targetWeek,
+      day: targetDay,
       customerType: customer.customerType,
       priceAtVisit,
     } as VisitLog;
@@ -13008,6 +13240,54 @@ export default function JobsApp({
     );
   }
 
+  if (isTechnicianOnlyUser) {
+    return (
+        <HelpProvider
+            helpEnabled={appSettings.helpEnabled}
+            hasCompletedOnboarding={hasCompletedOnboarding}
+            launcherOpen={false}
+            onLauncherOpenChange={setIsHelpLauncherOpen}
+            onHelpEnabledChange={updateHelpEnabled}
+            onOnboardingCompleted={markOnboardingCompleted}
+            actions={helpTourActions}
+        >
+          <TechnicianPage
+              staffMember={currentStaffMember}
+              customers={visibleRoundCustomers}
+              scheduledJobs={visibleScheduledJobs}
+              visits={visitLogs}
+              today={todayReferenceDate}
+              defaultRotationWeeks={defaultRotationWeeks}
+              notCutReasons={appSettings.notCutReasons}
+              databaseNotice={databaseError}
+              getCurrentVisit={(customerId) =>
+                  todayPanel.selectedDay
+                      ? getCurrentVisitForRound(
+                          customerId,
+                          todayPanel.week,
+                          todayPanel.selectedDay,
+                          todayActiveRoundCycle,
+                          isTodayLocked
+                      )
+                      : null
+              }
+              onMarkVisit={(customerId, status, extra) =>
+                  todayPanel.selectedDay
+                      ? markVisit(customerId, status, extra, {
+                          week: todayPanel.week,
+                          day: todayPanel.selectedDay,
+                          roundCycle: todayActiveRoundCycle,
+                          isLocked: isTodayLocked,
+                      })
+                      : Promise.resolve()
+              }
+              onToggleScheduledJobCompleted={toggleScheduledJobCompleted}
+              onLogout={handleLogout}
+          />
+        </HelpProvider>
+    );
+  }
+
   return (
       <HelpProvider
           helpEnabled={appSettings.helpEnabled}
@@ -13059,7 +13339,7 @@ export default function JobsApp({
               </button>
             </div>
 
-            {!isSidebarCollapsed ? (
+            {!isSidebarCollapsed && canAccessBilling(currentUserRole) ? (
                 <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-left">
                   <span className="block text-xs font-black uppercase tracking-[0.16em] text-[#20c766]">
                     {activeSubscriptionPlan.name} plan
@@ -13407,23 +13687,25 @@ export default function JobsApp({
                               </span>
                             </span>
                           </a>
-                          <a
-                              href="/billing"
-                              role="menuitem"
-                              data-tour="billing-menu-item"
-                              onClick={() => setIsUserMenuOpen(false)}
-                              className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-[#071426] transition hover:bg-[#f7faf9] hover:text-emerald-700"
-                          >
-                            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
-                              <CreditCard size={17} />
-                            </span>
-                            <span>
-                              <span className="block">Billing</span>
-                              <span className="text-xs font-medium text-[#667085]">
-                                {activeSubscriptionPlan.name} plan - manage billing
-                              </span>
-                            </span>
-                          </a>
+                          {canAccessBilling(currentUserRole) ? (
+                              <a
+                                  href="/billing"
+                                  role="menuitem"
+                                  data-tour="billing-menu-item"
+                                  onClick={() => setIsUserMenuOpen(false)}
+                                  className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-[#071426] transition hover:bg-[#f7faf9] hover:text-emerald-700"
+                              >
+                                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+                                  <CreditCard size={17} />
+                                </span>
+                                <span>
+                                  <span className="block">Billing</span>
+                                  <span className="text-xs font-medium text-[#667085]">
+                                    {activeSubscriptionPlan.name} plan - manage billing
+                                  </span>
+                                </span>
+                              </a>
+                          ) : null}
                           <div className="my-2 border-t border-[#e5e7eb]" />
                           <button
                               type="button"
@@ -13693,18 +13975,44 @@ export default function JobsApp({
                       showAdvancedInsights={hasGrowthPlan}
                       announcement={platformAnnouncement}
                       attentionItems={dashboardAttentionItems}
-                      onGoToRounds={() => navigateToPage("rounds")}
-                      onGoToActions={
-                          hasGrowthPlan ? () => navigateToPage("actions") : undefined
+                      onGoToRounds={
+                          hasPageAccess("rounds")
+                              ? () => navigateToPage("rounds")
+                              : undefined
                       }
-                      onGoToMap={() => navigateToPage("map")}
-                      onGoToCustomers={() => navigateToPage("customers")}
-                      onGoToQuoteForm={() => openNewQuoteForm()}
-                      onGoToInvoiceForm={() => openNewInvoiceForm()}
-                      onGoToSchedule={() => navigateToPage("schedule")}
-                      onGoToPayments={() => navigateToPage("payments")}
+                      onGoToActions={
+                          hasGrowthPlan && hasPageAccess("actions")
+                              ? () => navigateToPage("actions")
+                              : undefined
+                      }
+                      onGoToMap={
+                          hasPageAccess("map") ? () => navigateToPage("map") : undefined
+                      }
+                      onGoToCustomers={
+                          hasPageAccess("customers")
+                              ? () => navigateToPage("customers")
+                              : undefined
+                      }
+                      onGoToQuoteForm={
+                          hasPageAccess("quoteForm") ? () => openNewQuoteForm() : undefined
+                      }
+                      onGoToInvoiceForm={
+                          hasPageAccess("invoiceForm")
+                              ? () => openNewInvoiceForm()
+                              : undefined
+                      }
+                      onGoToSchedule={
+                          hasPageAccess("schedule")
+                              ? () => navigateToPage("schedule")
+                              : undefined
+                      }
+                      onGoToPayments={
+                          hasPageAccess("payments")
+                              ? () => navigateToPage("payments")
+                              : undefined
+                      }
                       onGoToCustomerProfit={
-                          hasGrowthPlan
+                          hasGrowthPlan && hasPageAccess("customerProfit")
                               ? () => navigateToPage("customerProfit")
                               : undefined
                       }
@@ -13712,14 +14020,24 @@ export default function JobsApp({
                       dayOptions={DAY_OPTIONS}
                       onWeekChange={(week) => setSelectedWeek(week as WeekName)}
                       onDayChange={(day) => setSelectedDay(day as DayName)}
-                      onOpenCustomer={openCustomerProfile}
-                      onOpenQuote={openEditQuoteForm}
-                      onOpenInvoice={openEditInvoiceForm}
+                      onOpenCustomer={
+                          hasPageAccess("customerProfile") ? openCustomerProfile : undefined
+                      }
+                      onOpenQuote={
+                          hasPageAccess("quotes") ? openEditQuoteForm : undefined
+                      }
+                      onOpenInvoice={
+                          hasPageAccess("invoices") ? openEditInvoiceForm : undefined
+                      }
                       onSendQuoteFollowUp={
-                          hasGrowthPlan ? openQuoteFollowUpDialog : undefined
+                          hasGrowthPlan && hasPageAccess("quotes")
+                              ? openQuoteFollowUpDialog
+                              : undefined
                       }
                       onSendInvoiceReminder={
-                          hasGrowthPlan ? openInvoiceReminderDialog : undefined
+                          hasGrowthPlan && hasPageAccess("invoices")
+                              ? openInvoiceReminderDialog
+                              : undefined
                       }
                   />
               )}
@@ -14378,12 +14696,13 @@ export default function JobsApp({
               {page === "staff" && (
                   <StaffPage
                       customers={customers}
+                      visits={visitLogs}
                       staffMembers={staffMembers}
                       rolePermissions={rolePermissions}
                       pageOptions={STAFF_PAGE_OPTIONS}
                       currentUserId={currentUserId}
                       currentUserEmail={currentUserEmail}
-                      currentUserIsAdmin={currentUserIsAdmin}
+                      currentUserIsAdmin={currentUserCanManageTeam}
                       staffSystemReady={staffSystemReady}
                       staffLimit={activeStaffLimit}
                       staffAddOnQuantity={staffAddonQuantity}

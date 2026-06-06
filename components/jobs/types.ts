@@ -1,4 +1,5 @@
 export type PageKey =
+  | "technician"
   | "dashboard"
   | "rounds"
   | "commercial"
@@ -59,9 +60,10 @@ export type Staff = {
   role: string | null;
 };
 
-export type StaffRole = "Admin" | "Staff" | "Operator";
+export type StaffRole = "Admin" | "Manager" | "Staff" | "Operator";
 
 export type StaffPageAccessKey =
+  | "technician"
   | "dashboard"
   | "schedule"
   | "rounds"

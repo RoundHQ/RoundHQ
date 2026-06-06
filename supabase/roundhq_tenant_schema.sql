@@ -548,7 +548,7 @@ create table if not exists public.staff_members (
   auth_user_id uuid null references auth.users(id) on delete set null,
   email text not null,
   full_name text not null,
-  role text not null check (role in ('Admin', 'Staff', 'Operator')),
+  role text not null check (role in ('Admin', 'Manager', 'Staff', 'Operator')),
   is_active boolean not null default true,
   phone text null,
   notes text null,
@@ -564,12 +564,77 @@ create unique index if not exists staff_members_org_auth_user_id_unique_idx
 on public.staff_members (organization_id, auth_user_id)
 where auth_user_id is not null;
 
+create table if not exists public.staff_account_invites (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  staff_member_id bigint not null references public.staff_members(id) on delete cascade,
+  email text not null,
+  token_hash text not null unique,
+  mode text not null default 'setup' check (mode in ('setup', 'owner_password')),
+  created_by_user_id uuid null references auth.users(id) on delete set null,
+  accepted_by_user_id uuid null references auth.users(id) on delete set null,
+  expires_at timestamptz not null,
+  accepted_at timestamptz null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists staff_account_invites_org_staff_idx
+on public.staff_account_invites (organization_id, staff_member_id, created_at desc);
+
+create index if not exists staff_account_invites_pending_token_idx
+on public.staff_account_invites (token_hash)
+where accepted_at is null;
+
+create or replace function public.current_staff_member_id(target_organization_id uuid)
+returns bigint
+as 'select staff_members.id from public.staff_members where staff_members.organization_id = target_organization_id and staff_members.is_active = true and (staff_members.auth_user_id = auth.uid() or lower(staff_members.email) = lower(coalesce(auth.jwt() ->> ''email'', ''''))) order by staff_members.is_system_admin desc, staff_members.id asc limit 1'
+language sql
+stable
+security definer
+set search_path = public;
+
+create or replace function public.current_staff_role(target_organization_id uuid)
+returns text
+as 'select case when staff_members.is_system_admin then ''Admin'' when staff_members.role = ''Operator'' then ''Manager'' else staff_members.role end from public.staff_members where staff_members.organization_id = target_organization_id and staff_members.is_active = true and (staff_members.auth_user_id = auth.uid() or lower(staff_members.email) = lower(coalesce(auth.jwt() ->> ''email'', ''''))) order by staff_members.is_system_admin desc, staff_members.id asc limit 1'
+language sql
+stable
+security definer
+set search_path = public;
+
+create or replace function public.can_access_operational_data(target_organization_id uuid)
+returns boolean
+as 'select public.is_organization_admin(target_organization_id) or exists (
+  select 1
+  from public.staff_members
+  join public.role_permissions
+    on role_permissions.organization_id = target_organization_id
+   and role_permissions.role = case
+     when staff_members.is_system_admin then ''Admin''
+     when staff_members.role = ''Operator'' then ''Manager''
+     else staff_members.role
+   end
+   and role_permissions.allowed = true
+   and role_permissions.page_key not in (''technician'', ''staff'', ''settings'')
+  where staff_members.organization_id = target_organization_id
+    and staff_members.is_active = true
+    and (
+      staff_members.auth_user_id = auth.uid()
+      or lower(staff_members.email) = lower(coalesce(auth.jwt() ->> ''email'', ''''))
+    )
+)'
+language sql
+stable
+security definer
+set search_path = public;
+
 create table if not exists public.role_permissions (
   organization_id uuid not null default public.current_organization_id()
     references public.organizations(id) on delete cascade,
-  role text not null check (role in ('Admin', 'Staff', 'Operator')),
+  role text not null check (role in ('Admin', 'Manager', 'Staff', 'Operator')),
   page_key text not null check (
     page_key in (
+      'technician',
       'dashboard',
       'schedule',
       'rounds',
@@ -595,10 +660,25 @@ create table if not exists public.role_permissions (
 alter table public.role_permissions
 drop constraint if exists role_permissions_page_key_check;
 
+alter table public.staff_members
+drop constraint if exists staff_members_role_check;
+
+alter table public.staff_members
+add constraint staff_members_role_check
+check (role in ('Admin', 'Manager', 'Staff', 'Operator'));
+
+alter table public.role_permissions
+drop constraint if exists role_permissions_role_check;
+
+alter table public.role_permissions
+add constraint role_permissions_role_check
+check (role in ('Admin', 'Manager', 'Staff', 'Operator'));
+
 alter table public.role_permissions
 add constraint role_permissions_page_key_check
 check (
   page_key in (
+    'technician',
     'dashboard',
     'schedule',
     'rounds',
@@ -1380,6 +1460,7 @@ alter table public.customer_account_settings enable row level security;
 alter table public.ai_receptionist_settings enable row level security;
 alter table public.app_state enable row level security;
 alter table public.staff_members enable row level security;
+alter table public.staff_account_invites enable row level security;
 alter table public.role_permissions enable row level security;
 alter table public.customers enable row level security;
 alter table public.visits enable row level security;
@@ -1678,11 +1759,33 @@ create policy "Members can read staff members"
 on public.staff_members
 for select
 to authenticated
-using (public.is_organization_member(organization_id));
+using (
+  public.is_organization_member(organization_id)
+  and (
+    public.can_access_operational_data(organization_id)
+    or auth_user_id = auth.uid()
+    or lower(email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+  )
+);
 
 drop policy if exists "Admins can write staff members" on public.staff_members;
 create policy "Admins can write staff members"
 on public.staff_members
+for all
+to authenticated
+using (public.is_organization_admin(organization_id))
+with check (public.is_organization_admin(organization_id));
+
+drop policy if exists "Admins can read staff account invites" on public.staff_account_invites;
+create policy "Admins can read staff account invites"
+on public.staff_account_invites
+for select
+to authenticated
+using (public.is_organization_admin(organization_id));
+
+drop policy if exists "Admins can write staff account invites" on public.staff_account_invites;
+create policy "Admins can write staff account invites"
+on public.staff_account_invites
 for all
 to authenticated
 using (public.is_organization_admin(organization_id))
@@ -1708,135 +1811,255 @@ create policy "Members can read customers"
 on public.customers
 for select
 to authenticated
-using (public.is_organization_member(organization_id));
+using (
+  public.is_organization_member(organization_id)
+  and (
+    public.can_access_operational_data(organization_id)
+    or assigned_staff_id = public.current_staff_member_id(organization_id)
+  )
+);
 
 drop policy if exists "Members can write customers" on public.customers;
 create policy "Members can write customers"
 on public.customers
 for all
 to authenticated
-using (public.is_organization_member(organization_id))
-with check (public.is_organization_member(organization_id));
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+)
+with check (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
 
 drop policy if exists "Members can read visits" on public.visits;
 create policy "Members can read visits"
 on public.visits
 for select
 to authenticated
-using (public.is_organization_member(organization_id));
+using (
+  public.is_organization_member(organization_id)
+  and (
+    public.can_access_operational_data(organization_id)
+    or exists (
+      select 1
+      from public.customers
+      where customers.organization_id = visits.organization_id
+        and customers.id = visits.customer_id
+        and customers.assigned_staff_id = public.current_staff_member_id(visits.organization_id)
+    )
+  )
+);
 
 drop policy if exists "Members can write visits" on public.visits;
 create policy "Members can write visits"
 on public.visits
 for all
 to authenticated
-using (public.is_organization_member(organization_id))
-with check (public.is_organization_member(organization_id));
+using (
+  public.is_organization_member(organization_id)
+  and (
+    public.can_access_operational_data(organization_id)
+    or exists (
+      select 1
+      from public.customers
+      where customers.organization_id = visits.organization_id
+        and customers.id = visits.customer_id
+        and customers.assigned_staff_id = public.current_staff_member_id(visits.organization_id)
+    )
+  )
+)
+with check (
+  public.is_organization_member(organization_id)
+  and (
+    public.can_access_operational_data(organization_id)
+    or exists (
+      select 1
+      from public.customers
+      where customers.organization_id = visits.organization_id
+        and customers.id = visits.customer_id
+        and customers.assigned_staff_id = public.current_staff_member_id(visits.organization_id)
+    )
+  )
+);
 
 drop policy if exists "Members can read customer leads" on public.customer_leads;
 create policy "Members can read customer leads"
 on public.customer_leads
 for select
 to authenticated
-using (public.is_organization_member(organization_id));
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
 
 drop policy if exists "Members can write customer leads" on public.customer_leads;
 create policy "Members can write customer leads"
 on public.customer_leads
 for all
 to authenticated
-using (public.is_organization_member(organization_id))
-with check (public.is_organization_member(organization_id));
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+)
+with check (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
 
 drop policy if exists "Members can read monthly payments" on public.monthly_payments;
 create policy "Members can read monthly payments"
 on public.monthly_payments
 for select
 to authenticated
-using (public.is_organization_member(organization_id));
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
 
 drop policy if exists "Members can write monthly payments" on public.monthly_payments;
 create policy "Members can write monthly payments"
 on public.monthly_payments
 for all
 to authenticated
-using (public.is_organization_member(organization_id))
-with check (public.is_organization_member(organization_id));
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+)
+with check (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
 
 drop policy if exists "Members can read items" on public.items;
 create policy "Members can read items"
 on public.items
 for select
 to authenticated
-using (public.is_organization_member(organization_id));
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
 
 drop policy if exists "Members can write items" on public.items;
 create policy "Members can write items"
 on public.items
 for all
 to authenticated
-using (public.is_organization_member(organization_id))
-with check (public.is_organization_member(organization_id));
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+)
+with check (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
 
 drop policy if exists "Members can read quotes" on public.quotes;
 create policy "Members can read quotes"
 on public.quotes
 for select
 to authenticated
-using (public.is_organization_member(organization_id));
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
 
 drop policy if exists "Members can write quotes" on public.quotes;
 create policy "Members can write quotes"
 on public.quotes
 for all
 to authenticated
-using (public.is_organization_member(organization_id))
-with check (public.is_organization_member(organization_id));
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+)
+with check (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
 
 drop policy if exists "Members can read invoices" on public.invoices;
 create policy "Members can read invoices"
 on public.invoices
 for select
 to authenticated
-using (public.is_organization_member(organization_id));
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
 
 drop policy if exists "Members can write invoices" on public.invoices;
 create policy "Members can write invoices"
 on public.invoices
 for all
 to authenticated
-using (public.is_organization_member(organization_id))
-with check (public.is_organization_member(organization_id));
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+)
+with check (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
 
 drop policy if exists "Members can read recurring invoice templates" on public.recurring_invoice_templates;
 create policy "Members can read recurring invoice templates"
 on public.recurring_invoice_templates
 for select
 to authenticated
-using (public.is_organization_member(organization_id));
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
 
 drop policy if exists "Members can write recurring invoice templates" on public.recurring_invoice_templates;
 create policy "Members can write recurring invoice templates"
 on public.recurring_invoice_templates
 for all
 to authenticated
-using (public.is_organization_member(organization_id))
-with check (public.is_organization_member(organization_id));
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+)
+with check (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
 
 drop policy if exists "Members can read scheduled jobs" on public.scheduled_jobs;
 create policy "Members can read scheduled jobs"
 on public.scheduled_jobs
 for select
 to authenticated
-using (public.is_organization_member(organization_id));
+using (
+  public.is_organization_member(organization_id)
+  and (
+    public.can_access_operational_data(organization_id)
+    or assigned_staff_id = public.current_staff_member_id(organization_id)
+  )
+);
 
 drop policy if exists "Members can write scheduled jobs" on public.scheduled_jobs;
 create policy "Members can write scheduled jobs"
 on public.scheduled_jobs
 for all
 to authenticated
-using (public.is_organization_member(organization_id))
-with check (public.is_organization_member(organization_id));
+using (
+  public.is_organization_member(organization_id)
+  and (
+    public.can_access_operational_data(organization_id)
+    or assigned_staff_id = public.current_staff_member_id(organization_id)
+  )
+)
+with check (
+  public.is_organization_member(organization_id)
+  and (
+    public.can_access_operational_data(organization_id)
+    or assigned_staff_id = public.current_staff_member_id(organization_id)
+  )
+);
 
 drop policy if exists "Members can read scheduling recommendations" on public.scheduling_recommendations;
 create policy "Members can read scheduling recommendations"
