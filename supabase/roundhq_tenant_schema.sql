@@ -1256,6 +1256,7 @@ create table if not exists public.recurring_invoice_templates (
   linked_quote_id text null references public.quotes(id) on delete set null,
   frequency text not null check (frequency in ('Monthly', 'Quarterly', 'Yearly')),
   next_send_date date not null,
+  next_due_date date null check (next_due_date is null or next_due_date >= next_send_date),
   preferred_send_method text null check (preferred_send_method is null or preferred_send_method in ('email', 'text')),
   send_to text null,
   is_active boolean not null default true,
@@ -1267,6 +1268,16 @@ create table if not exists public.recurring_invoice_templates (
 
 create index if not exists recurring_invoice_templates_org_next_send_date_idx
 on public.recurring_invoice_templates (organization_id, next_send_date asc);
+
+alter table if exists public.recurring_invoice_templates
+  add column if not exists next_due_date date null;
+
+alter table if exists public.recurring_invoice_templates
+  drop constraint if exists recurring_invoice_templates_next_due_date_check;
+
+alter table if exists public.recurring_invoice_templates
+  add constraint recurring_invoice_templates_next_due_date_check
+  check (next_due_date is null or next_due_date >= next_send_date);
 
 create table if not exists public.scheduled_jobs (
   id text primary key,

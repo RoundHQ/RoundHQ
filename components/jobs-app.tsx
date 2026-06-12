@@ -890,6 +890,7 @@ type RecurringInvoiceTemplateRow = {
   linked_quote_id: string | null;
   frequency: string;
   next_send_date: string;
+  next_due_date?: string | null;
   preferred_send_method: string | null;
   send_to: string | null;
   is_active: boolean | null;
@@ -920,6 +921,7 @@ type RecurringInvoiceTemplateWriteRow = {
   linked_quote_id: string | null;
   frequency: RecurringInvoiceFrequency;
   next_send_date: string;
+  next_due_date: string | null;
   preferred_send_method: DocumentDeliveryMethod | null;
   send_to: string | null;
   is_active: boolean;
@@ -3526,6 +3528,7 @@ function mapRecurringInvoiceTemplateRowToTemplate(
       getInputDateValue(row.next_send_date) ||
       getInputDateValue(row.created_at ?? undefined) ||
       getTodayDateInputValue();
+  const nextDueDate = getInputDateValue(row.next_due_date ?? undefined);
 
   return {
     id: row.id,
@@ -3550,6 +3553,7 @@ function mapRecurringInvoiceTemplateRowToTemplate(
     linkedQuoteId: row.linked_quote_id ?? undefined,
     frequency: normalizeRecurringInvoiceFrequency(row.frequency),
     nextSendDate,
+    nextDueDate: nextDueDate || undefined,
     preferredSendMethod: normalizeDocumentDeliveryMethod(
         row.preferred_send_method
     ),
@@ -3595,6 +3599,7 @@ function mapRecurringInvoiceTemplateToRow(
     linked_quote_id: template.linkedQuoteId ?? null,
     frequency: normalizeRecurringInvoiceFrequency(template.frequency),
     next_send_date: template.nextSendDate,
+    next_due_date: getInputDateValue(template.nextDueDate) || null,
     preferred_send_method:
         normalizeDocumentDeliveryMethod(template.preferredSendMethod) ?? null,
     send_to: template.sendTo?.trim() || null,
@@ -9350,6 +9355,7 @@ export default function JobsApp({
       customerName: template.customerName.trim() || "Recurring Invoice",
       items: template.items,
       nextSendDate: getInputDateValue(template.nextSendDate) || getTodayDateInputValue(),
+      nextDueDate: getInputDateValue(template.nextDueDate) || undefined,
       isActive: Boolean(template.isActive),
     };
     const nextTemplates = sortRecurringInvoiceTemplates([
@@ -10733,6 +10739,16 @@ export default function JobsApp({
 
         for (const template of dueTemplates) {
           let nextSendDate = getInputDateValue(template.nextSendDate);
+          let nextDueDate =
+              getInputDateValue(template.nextDueDate) ||
+              (nextSendDate
+                  ? addDaysToIsoDate(
+                      nextSendDate,
+                      typeof template.dueDaysAfterIssue === "number"
+                          ? template.dueDaysAfterIssue
+                          : appSettings.paymentTermsDays
+                  )
+                  : "");
           let updatedTemplate = { ...template };
 
           while (nextSendDate && nextSendDate <= today) {
@@ -10758,12 +10774,14 @@ export default function JobsApp({
               customerName: linkedCustomer?.name ?? template.customerName,
               ...documentFields,
               date: nextSendDate,
-              dueDate: addDaysToIsoDate(
-                  nextSendDate,
-                  typeof template.dueDaysAfterIssue === "number"
-                      ? template.dueDaysAfterIssue
-                      : appSettings.paymentTermsDays
-              ),
+              dueDate:
+                  nextDueDate ||
+                  addDaysToIsoDate(
+                      nextSendDate,
+                      typeof template.dueDaysAfterIssue === "number"
+                          ? template.dueDaysAfterIssue
+                          : appSettings.paymentTermsDays
+                  ),
               status: getRecurringInvoiceDefaultStatus(template.status),
               items: template.items.map((item) => ({ ...item })),
               notes: template.notes?.trim() || undefined,
@@ -10790,12 +10808,17 @@ export default function JobsApp({
                   nextSendDate,
                   template.frequency
               ),
+              nextDueDate: nextDueDate
+                  ? advanceRecurringInvoiceDate(nextDueDate, template.frequency)
+                  : undefined,
             };
             nextSendDate = updatedTemplate.nextSendDate;
+            nextDueDate = updatedTemplate.nextDueDate ?? "";
           }
 
           if (
               updatedTemplate.nextSendDate !== template.nextSendDate ||
+              updatedTemplate.nextDueDate !== template.nextDueDate ||
               updatedTemplate.lastGeneratedDate !== template.lastGeneratedDate
           ) {
             await saveRecurringInvoiceTemplate(updatedTemplate);
@@ -13298,8 +13321,8 @@ export default function JobsApp({
           onOnboardingCompleted={markOnboardingCompleted}
           actions={helpTourActions}
       >
-      <div className="min-h-screen bg-[#f7faf9] text-[#071426]">
-        <div className="flex min-h-screen">
+      <div className="min-h-screen overflow-x-hidden bg-[#f7faf9] text-[#071426]">
+        <div className="flex min-h-screen min-w-0">
           <aside
               className={`hidden ${sidebarWidthClassName} shrink-0 flex-col bg-[#003c35] py-6 text-white shadow-[20px_0_60px_rgba(0,60,53,0.18)] transition-[width,padding] duration-200 lg:flex ${
                   isSidebarCollapsed ? "px-3" : "px-4"
@@ -13502,8 +13525,8 @@ export default function JobsApp({
 
           </aside>
 
-          <main className="min-w-0 flex-1 bg-[#f7faf9]">
-            <div className="mx-auto flex min-h-screen w-full max-w-[1680px] flex-col px-4 py-5 sm:px-6 lg:px-8">
+          <main className="min-w-0 flex-1 overflow-x-hidden bg-[#f7faf9]">
+            <div className="mx-auto flex min-h-screen w-full max-w-full flex-col px-4 py-5 sm:px-6 lg:max-w-[1680px] lg:px-8">
               <div className="mb-5 rounded-2xl bg-[#003c35] px-4 py-4 text-white shadow-[0_18px_45px_rgba(0,60,53,0.18)] lg:hidden">
                 <div className="flex items-center justify-between gap-4">
                   <img
@@ -13540,9 +13563,9 @@ export default function JobsApp({
                 </div>
               </div>
 
-              <header className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                <div>
-                  <h1 className="text-3xl font-black tracking-tight text-[#071426]">
+              <header className="mb-6 flex min-w-0 flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                <div className="min-w-0">
+                  <h1 className="break-words text-2xl font-black tracking-tight text-[#071426] sm:text-3xl">
                     {headerTitle}
                   </h1>
                   {page === "dashboard" ? (
@@ -13594,7 +13617,7 @@ export default function JobsApp({
                   )}
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <div
                       className="hidden h-11 items-center gap-2 rounded-full border border-[#d7efe5] bg-white px-3 text-[#071426] shadow-[0_10px_24px_rgba(7,20,38,0.05)] sm:flex"
                       title={`Weather overview for ${HEADER_WEATHER_LOCATION_LABEL}`}
@@ -13889,10 +13912,11 @@ export default function JobsApp({
                   </section>
               ) : null}
 
-              {!hasPageAccess(page) ? (
-                  <AccessPendingPage />
-              ) : (
-                  <>
+              <div className="min-w-0 max-w-full overflow-x-auto pb-8">
+                {!hasPageAccess(page) ? (
+                    <AccessPendingPage />
+                ) : (
+                    <>
               {(page === "rounds" || page === "commercial") && (
                   <section className="mb-5 rounded-3xl border bg-white p-3.5 shadow-sm">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -14730,8 +14754,9 @@ export default function JobsApp({
                       onSend={sendWorkflowAttentionMessage}
                   />
               ) : null}
-                  </>
-              )}
+                    </>
+                )}
+              </div>
             </div>
           </main>
         </div>

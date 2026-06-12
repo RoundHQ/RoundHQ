@@ -127,6 +127,17 @@
   html {
     @apply font-sans;
   }
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: clip;
+  }
+  img,
+  video,
+  canvas,
+  svg {
+    max-width: 100%;
+  }
 }
 
 .pac-container {

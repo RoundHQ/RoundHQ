@@ -119,7 +119,7 @@ export default function LoginPage() {
       <div className="absolute -right-8 top-36 hidden h-[300px] w-[300px] rounded-full border border-[#20d85a]/12 lg:block" />
 
       <div className="relative z-10 mx-auto flex min-h-[calc(100vh-3.5rem)] w-full max-w-7xl flex-col">
-        <header className="flex items-center justify-between">
+        <header className="flex items-center justify-between gap-4">
           <Link href="/" className="block shrink-0" aria-label="RoundHQ home">
             <Image
               src="/roundhq-logo-long-white.png"
@@ -127,7 +127,7 @@ export default function LoginPage() {
               width={1200}
               height={300}
               priority
-              className="h-auto w-[210px] sm:w-[235px]"
+              className="h-auto w-[170px] sm:w-[235px]"
             />
           </Link>
           <Link
@@ -138,12 +138,12 @@ export default function LoginPage() {
           </Link>
         </header>
 
-        <div className="grid flex-1 items-center gap-10 py-12 lg:grid-cols-[1fr_440px]">
+        <div className="grid flex-1 items-center gap-10 py-10 sm:py-12 lg:grid-cols-[1fr_440px]">
           <section className="max-w-2xl">
             <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#20d85a]">
               Welcome back
             </p>
-            <h1 className="mt-6 text-5xl font-extrabold leading-[1.08] tracking-normal text-white sm:text-6xl">
+            <h1 className="mt-6 text-4xl font-extrabold leading-[1.08] tracking-normal text-white sm:text-6xl">
               Login to your RoundHQ dashboard.
             </h1>
             <p className="mt-6 max-w-xl text-lg leading-8 text-white/78">

@@ -430,6 +430,7 @@ export type RecurringInvoiceTemplate = {
   linkedQuoteId?: string;
   frequency: RecurringInvoiceFrequency;
   nextSendDate: string;
+  nextDueDate?: string;
   preferredSendMethod?: DocumentDeliveryMethod;
   sendTo?: string;
   isActive: boolean;

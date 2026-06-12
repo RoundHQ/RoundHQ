@@ -114,7 +114,7 @@ function RoundHQLogo({ compact = false }: { compact?: boolean }) {
         width={1200}
         height={300}
         priority={!compact}
-        className={compact ? "h-auto w-[180px]" : "h-auto w-[220px] sm:w-[240px]"}
+        className={compact ? "h-auto w-[160px] sm:w-[180px]" : "h-auto w-[180px] sm:w-[240px]"}
       />
     </Link>
   );
@@ -156,7 +156,7 @@ function DesktopMockup() {
   ];
 
   return (
-    <div className="relative mx-auto w-full max-w-[760px] pb-20">
+    <div className="relative mx-auto hidden w-full max-w-[760px] pb-20 sm:block">
       <div className="absolute -right-5 top-0 hidden h-[420px] w-[420px] rounded-full border border-[#20d85a]/12 lg:block" />
       <div className="absolute right-6 top-10 hidden h-[340px] w-[340px] rounded-full border border-[#20d85a]/12 lg:block" />
       <div className="relative rounded-[18px] border-[10px] border-[#172122] bg-[#172122] shadow-[0_35px_90px_rgba(0,0,0,0.55)]">
@@ -351,7 +351,7 @@ export default async function HomePage() {
         <div className="absolute inset-0 opacity-[0.08] [background-image:linear-gradient(rgba(255,255,255,0.18)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.18)_1px,transparent_1px)] [background-size:64px_64px]" />
 
         <header className="relative z-10">
-          <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-7 sm:px-8">
+          <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-6 sm:px-8 sm:py-7">
             <RoundHQLogo />
 
             <nav className="hidden items-center gap-9 text-sm font-semibold text-white/88 lg:flex">
@@ -378,7 +378,7 @@ export default async function HomePage() {
               </Link>
               <Link
                 href="/signup"
-                className="inline-flex items-center rounded-md bg-[#19c653] px-5 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.3)] transition hover:bg-[#22d861]"
+                className="inline-flex items-center rounded-md bg-[#19c653] px-4 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.3)] transition hover:bg-[#22d861] sm:px-5"
               >
                 Sign up
               </Link>
@@ -393,7 +393,7 @@ export default async function HomePage() {
               <br />
               and field service teams
             </p>
-            <h1 className="mt-8 max-w-2xl text-5xl font-extrabold leading-[1.08] tracking-normal text-white sm:text-6xl">
+            <h1 className="mt-8 max-w-2xl text-4xl font-extrabold leading-[1.08] tracking-normal text-white sm:text-6xl">
               Simple software for running your maintenance business.
             </h1>
             <p className="mt-7 max-w-xl text-lg leading-8 text-white/82">
@@ -402,7 +402,7 @@ export default async function HomePage() {
               property maintenance teams.
             </p>
 
-            <div className="mt-8 flex flex-wrap gap-4">
+            <div className="mt-8 flex flex-col gap-4 sm:flex-row sm:flex-wrap">
               <Link
                 href="/signup"
                 className="inline-flex items-center justify-center rounded-md bg-[#19c653] px-6 py-4 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.3)] transition hover:bg-[#22d861]"
@@ -451,7 +451,7 @@ export default async function HomePage() {
                     {pillar.title}
                   </h2>
                   {pillar.price ? (
-                    <p className="mt-3 text-5xl font-extrabold text-white">
+                    <p className="mt-3 text-4xl font-extrabold text-white sm:text-5xl">
                       {pillar.price}
                       <span className="ml-2 text-lg font-bold text-[#20d85a]">
                         / month
@@ -474,7 +474,7 @@ export default async function HomePage() {
             <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#16a647]">
               Everything you need in one place
             </p>
-            <h2 className="mt-4 text-4xl font-extrabold leading-tight tracking-normal text-slate-950 sm:text-5xl">
+            <h2 className="mt-4 text-3xl font-extrabold leading-tight tracking-normal text-slate-950 sm:text-5xl">
               Powerful features. Built for the way maintenance businesses work.
             </h2>
           </div>
@@ -505,7 +505,7 @@ export default async function HomePage() {
       <section id="about" className="bg-[#002b2d] px-5 py-16 text-white sm:px-8 lg:py-20">
         <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.78fr_1.22fr] lg:items-center">
           <div>
-            <h2 className="max-w-lg text-4xl font-extrabold leading-tight tracking-normal">
+            <h2 className="max-w-lg text-3xl font-extrabold leading-tight tracking-normal sm:text-4xl">
               Trusted by maintenance businesses{" "}
               <span className="text-[#20d85a]">every day.</span>
             </h2>
@@ -551,7 +551,7 @@ export default async function HomePage() {
             <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#16a647]">
               Launch pricing
             </p>
-            <h2 className="mt-4 text-4xl font-extrabold leading-tight tracking-normal text-slate-950 sm:text-5xl">
+            <h2 className="mt-4 text-3xl font-extrabold leading-tight tracking-normal text-slate-950 sm:text-5xl">
               Start solo, then grow into a small team.
             </h2>
             <p className="mt-5 text-base leading-8 text-slate-600">
@@ -582,8 +582,8 @@ export default async function HomePage() {
                 <h3 className="mt-4 max-w-md text-2xl font-extrabold text-slate-950">
                   {plan.description}
                 </h3>
-                <div className="mt-6 flex items-end gap-2">
-                  <p className="text-5xl font-extrabold tracking-normal text-slate-950">
+                <div className="mt-6 flex flex-wrap items-end gap-2">
+                  <p className="text-4xl font-extrabold tracking-normal text-slate-950 sm:text-5xl">
                     {plan.priceLabel}
                   </p>
                   <p className="pb-2 text-sm font-bold text-[#168b43]">

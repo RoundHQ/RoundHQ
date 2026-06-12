@@ -11,6 +11,7 @@ export type DocumentEmailSettings = {
 
 export type SendDocumentEmailPayload = {
   recipient: string;
+  recipients?: string[];
   subject: string;
   message: string;
   filename: string;
@@ -24,6 +25,16 @@ export type SendTestEmailPayload = {
   message: string;
   settings: DocumentEmailSettings;
 };
+
+export const MAX_DOCUMENT_EMAIL_ATTACHMENT_BYTES = 4 * 1024 * 1024;
+
+export function formatDocumentEmailAttachmentLimit() {
+  return `${Math.floor(MAX_DOCUMENT_EMAIL_ATTACHMENT_BYTES / (1024 * 1024))}MB`;
+}
+
+export function getDocumentEmailAttachmentTooLargeMessage() {
+  return `The generated PDF is too large to email from the website. Keep the PDF under ${formatDocumentEmailAttachmentLimit()} by using a smaller document logo or downloading the PDF and sending it from your email app.`;
+}
 
 export function normalizeDocumentEmailSettings(
   value?: Partial<DocumentEmailSettings> | null

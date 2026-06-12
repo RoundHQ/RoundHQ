@@ -99,7 +99,7 @@ export default async function BlogPostPage({
             ) : null}
           </div>
 
-          <h1 className="mt-6 max-w-4xl text-5xl font-extrabold leading-[1.08] tracking-normal text-white sm:text-6xl">
+          <h1 className="mt-6 max-w-4xl text-4xl font-extrabold leading-[1.08] tracking-normal text-white sm:text-6xl">
             {post.title}
           </h1>
           <p className="mt-6 max-w-3xl text-lg leading-8 text-white/78">
@@ -137,7 +137,7 @@ export default async function BlogPostPage({
               <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#168b43]">
                 Related
               </p>
-              <h2 className="mt-3 text-4xl font-extrabold tracking-normal text-slate-950">
+              <h2 className="mt-3 text-3xl font-extrabold tracking-normal text-slate-950 sm:text-4xl">
                 More from this category.
               </h2>
             </div>

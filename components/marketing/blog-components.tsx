@@ -36,7 +36,7 @@ function RoundHQLogo({ compact = false }: { compact?: boolean }) {
         width={1200}
         height={300}
         priority={!compact}
-        className={compact ? "h-auto w-[180px]" : "h-auto w-[220px] sm:w-[240px]"}
+        className={compact ? "h-auto w-[160px] sm:w-[180px]" : "h-auto w-[180px] sm:w-[240px]"}
       />
     </Link>
   );
@@ -45,7 +45,7 @@ function RoundHQLogo({ compact = false }: { compact?: boolean }) {
 export function BlogMarketingHeader({ pages }: { pages: SitePage[] }) {
   return (
     <header className="relative z-10 border-b border-white/10">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-5 px-5 py-7 sm:px-8">
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-6 sm:px-8 sm:py-7">
         <RoundHQLogo />
 
         <nav className="hidden items-center gap-8 text-sm font-semibold text-white/88 lg:flex">
@@ -68,7 +68,7 @@ export function BlogMarketingHeader({ pages }: { pages: SitePage[] }) {
           </Link>
           <Link
             href="/signup"
-            className="inline-flex items-center rounded-md bg-[#19c653] px-5 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.3)] transition hover:bg-[#22d861]"
+            className="inline-flex items-center rounded-md bg-[#19c653] px-4 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.3)] transition hover:bg-[#22d861] sm:px-5"
           >
             Sign up
           </Link>
@@ -208,7 +208,7 @@ export function BlogPostCard({
 
         <h2
           className={`mt-5 font-extrabold leading-tight tracking-normal text-slate-950 ${
-            featured ? "text-4xl" : "text-2xl"
+            featured ? "text-3xl sm:text-4xl" : "text-2xl"
           }`}
         >
           {post.title}

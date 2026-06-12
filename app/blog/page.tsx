@@ -66,13 +66,13 @@ export default async function BlogPage({
             <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#20d85a]">
               {settings.heroEyebrow}
             </p>
-            <h1 className="mt-6 max-w-3xl text-5xl font-extrabold leading-[1.08] tracking-normal text-white sm:text-6xl">
+            <h1 className="mt-6 max-w-3xl text-4xl font-extrabold leading-[1.08] tracking-normal text-white sm:text-6xl">
               {settings.title}
             </h1>
             <p className="mt-6 max-w-2xl whitespace-pre-line text-lg leading-8 text-white/78">
               {settings.summary}
             </p>
-            <div className="mt-8 flex flex-wrap gap-3">
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
               <Link
                 href={settings.ctaHref}
                 className="inline-flex items-center gap-2 rounded-md bg-[#19c653] px-6 py-4 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.3)] transition hover:bg-[#22d861]"

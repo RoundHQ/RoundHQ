@@ -219,7 +219,7 @@ function RoundHQLogo({ compact = false }: { compact?: boolean }) {
         width={1200}
         height={300}
         priority={!compact}
-        className={compact ? "h-auto w-[180px]" : "h-auto w-[220px] sm:w-[240px]"}
+        className={compact ? "h-auto w-[160px] sm:w-[180px]" : "h-auto w-[180px] sm:w-[240px]"}
       />
     </Link>
   );
@@ -228,7 +228,7 @@ function RoundHQLogo({ compact = false }: { compact?: boolean }) {
 function MarketingHeader({ pages }: { pages: SitePage[] }) {
   return (
     <header className="relative z-10 border-b border-white/10">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-5 px-5 py-7 sm:px-8">
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-6 sm:px-8 sm:py-7">
         <RoundHQLogo />
 
         <nav className="hidden items-center gap-8 text-sm font-semibold text-white/88 lg:flex">
@@ -251,7 +251,7 @@ function MarketingHeader({ pages }: { pages: SitePage[] }) {
           </Link>
           <Link
             href="/signup"
-            className="inline-flex items-center rounded-md bg-[#19c653] px-5 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.3)] transition hover:bg-[#22d861]"
+            className="inline-flex items-center rounded-md bg-[#19c653] px-4 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.3)] transition hover:bg-[#22d861] sm:px-5"
           >
             Sign up
           </Link>
@@ -359,7 +359,7 @@ function PageBody({ page }: { page: SitePage }) {
           <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#168b43]">
             {page.navLabel}
           </p>
-          <h2 className="mt-4 text-4xl font-extrabold leading-tight tracking-normal text-slate-950 sm:text-5xl">
+          <h2 className="mt-4 text-3xl font-extrabold leading-tight tracking-normal text-slate-950 sm:text-5xl">
             {bodyHeadings[page.slug]}
           </h2>
         </div>
@@ -416,7 +416,7 @@ function FeaturesContent() {
             <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#168b43]">
               Feature set
             </p>
-            <h2 className="mt-4 text-4xl font-extrabold leading-tight tracking-normal text-slate-950 sm:text-5xl">
+            <h2 className="mt-4 text-3xl font-extrabold leading-tight tracking-normal text-slate-950 sm:text-5xl">
               The tools are connected because the work is connected.
             </h2>
             <p className="mt-5 text-base leading-8 text-slate-600">
@@ -440,7 +440,7 @@ function FeaturesContent() {
             <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#168b43]">
               Workflow
             </p>
-            <h2 className="mt-4 text-4xl font-extrabold leading-tight tracking-normal text-slate-950 sm:text-5xl">
+            <h2 className="mt-4 text-3xl font-extrabold leading-tight tracking-normal text-slate-950 sm:text-5xl">
               From new lead to paid invoice.
             </h2>
             <p className="mt-5 text-base leading-8 text-slate-600">
@@ -496,7 +496,7 @@ function PlanCard({ plan }: { plan: SubscriptionPlan }) {
         {plan.description}
       </h3>
       <div className="mt-6 flex flex-wrap items-end gap-2">
-        <p className="text-5xl font-extrabold tracking-normal text-slate-950">
+        <p className="text-4xl font-extrabold tracking-normal text-slate-950 sm:text-5xl">
           GBP {plan.priceMonthly}
         </p>
         <p className="pb-2 text-sm font-bold text-[#168b43]">
@@ -551,7 +551,7 @@ function PricingContent() {
             <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#168b43]">
               Plans
             </p>
-            <h2 className="mt-4 text-4xl font-extrabold leading-tight tracking-normal text-slate-950 sm:text-5xl">
+            <h2 className="mt-4 text-3xl font-extrabold leading-tight tracking-normal text-slate-950 sm:text-5xl">
               Start with the essentials. Upgrade when the operation needs more.
             </h2>
           </div>
@@ -570,7 +570,7 @@ function PricingContent() {
             <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#168b43]">
               Good to know
             </p>
-            <h2 className="mt-4 text-4xl font-extrabold leading-tight tracking-normal text-slate-950 sm:text-5xl">
+            <h2 className="mt-4 text-3xl font-extrabold leading-tight tracking-normal text-slate-950 sm:text-5xl">
               Pricing is tied to the business, not every single customer.
             </h2>
           </div>
@@ -608,7 +608,7 @@ function AboutContent() {
           <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#168b43]">
             Product philosophy
           </p>
-          <h2 className="mt-4 text-4xl font-extrabold leading-tight tracking-normal text-slate-950 sm:text-5xl">
+          <h2 className="mt-4 text-3xl font-extrabold leading-tight tracking-normal text-slate-950 sm:text-5xl">
             RoundHQ is built for the business behind the tools.
           </h2>
           <p className="mt-5 text-base leading-8 text-slate-600">
@@ -646,7 +646,7 @@ function ContactContent() {
           <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#168b43]">
             Contact routes
           </p>
-          <h2 className="mt-4 text-4xl font-extrabold leading-tight tracking-normal text-slate-950 sm:text-5xl">
+          <h2 className="mt-4 text-3xl font-extrabold leading-tight tracking-normal text-slate-950 sm:text-5xl">
             Send the right message to the right place.
           </h2>
           <p className="mt-5 text-base leading-8 text-slate-600">
@@ -728,13 +728,13 @@ export default async function SitePageView({ slug }: { slug: SitePageSlug }) {
             <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#20d85a]">
               {page.eyebrow}
             </p>
-            <h1 className="mt-6 max-w-3xl text-5xl font-extrabold leading-[1.08] tracking-normal text-white sm:text-6xl">
+            <h1 className="mt-6 max-w-3xl text-4xl font-extrabold leading-[1.08] tracking-normal text-white sm:text-6xl">
               {page.title}
             </h1>
             <p className="mt-6 max-w-2xl whitespace-pre-line text-lg leading-8 text-white/78">
               {page.summary}
             </p>
-            <div className="mt-8 flex flex-wrap gap-3">
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
               <Link
                 href={page.primaryCtaHref}
                 className="inline-flex items-center gap-2 rounded-md bg-[#19c653] px-6 py-4 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.3)] transition hover:bg-[#22d861]"
@@ -781,7 +781,7 @@ export default async function SitePageView({ slug }: { slug: SitePageSlug }) {
             <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#20d85a]">
               Ready when you are
             </p>
-            <h2 className="mt-4 max-w-2xl text-4xl font-extrabold leading-tight tracking-normal">
+              <h2 className="mt-4 max-w-2xl text-3xl font-extrabold leading-tight tracking-normal sm:text-4xl">
               Bring your customers, rounds, quotes, invoices, and payments into
               RoundHQ.
             </h2>

@@ -1027,16 +1027,16 @@ export default function CustomerProfilePage({
             method="email"
             title={`Resend ${activeInvoice.invoiceNumber}`}
             recipientOptions={customerEmails}
-            initialRecipient={customerEmails[0]}
+            initialRecipients={customerEmails.slice(0, 1)}
             initialSubject={getInvoiceEmailSubject(activeInvoice, businessDetails)}
             initialMessage={getInvoiceEmailMessage(activeInvoice, businessDetails)}
             onClose={() => setSendInvoiceTargetId(null)}
-            onSend={async ({ recipient, subject, message }) => {
+            onSend={async ({ recipient, recipients, subject, message }) => {
               await sendInvoiceDocument({
                 invoice: activeInvoice,
                 businessDetails,
                 method: "email",
-                recipient,
+                recipients,
                 subject:
                   subject.trim() ||
                   getInvoiceEmailSubject(activeInvoice, businessDetails),

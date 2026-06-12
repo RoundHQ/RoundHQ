@@ -22,11 +22,11 @@ export default function AccountDisabledGate({
             width={1200}
             height={300}
             priority
-            className="h-auto w-[220px]"
+            className="h-auto w-[170px] sm:w-[220px]"
           />
         </Link>
 
-        <section className="mt-12 rounded-lg border border-white/12 bg-white p-8 text-slate-950 shadow-[0_30px_80px_rgba(0,0,0,0.35)]">
+        <section className="mt-10 rounded-lg border border-white/12 bg-white p-6 text-slate-950 shadow-[0_30px_80px_rgba(0,0,0,0.35)] sm:mt-12 sm:p-8">
           <div className="mb-6 flex size-12 items-center justify-center rounded-md bg-rose-100 text-rose-700">
             <ShieldAlert aria-hidden="true" className="size-6" />
           </div>

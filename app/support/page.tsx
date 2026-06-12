@@ -180,7 +180,7 @@ export default async function SupportPage({
                 width={1200}
                 height={300}
                 priority
-                className="h-auto w-[210px] sm:w-[235px]"
+                className="h-auto w-[170px] sm:w-[235px]"
               />
             </Link>
             <div className="flex flex-wrap gap-2">
@@ -207,7 +207,7 @@ export default async function SupportPage({
               <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#20d85a]">
                 Customer support
               </p>
-              <h1 className="mt-5 max-w-3xl text-5xl font-extrabold leading-[1.08] tracking-normal text-white sm:text-6xl">
+              <h1 className="mt-5 max-w-3xl text-4xl font-extrabold leading-[1.08] tracking-normal text-white sm:text-6xl">
                 Help for {support.workspaceName}.
               </h1>
               <p className="mt-6 max-w-2xl text-lg leading-8 text-white/78">
@@ -221,7 +221,7 @@ export default async function SupportPage({
                 <p className="text-sm font-bold uppercase tracking-[0.12em] text-slate-500">
                   Open
                 </p>
-                <p className="mt-3 text-4xl font-extrabold">
+                <p className="mt-3 text-3xl font-extrabold sm:text-4xl">
                   {
                     support.tickets.filter(
                       (ticket) =>
@@ -234,7 +234,7 @@ export default async function SupportPage({
                 <p className="text-sm font-bold uppercase tracking-[0.12em] text-slate-500">
                   Waiting
                 </p>
-                <p className="mt-3 text-4xl font-extrabold">
+                <p className="mt-3 text-3xl font-extrabold sm:text-4xl">
                   {
                     support.tickets.filter(
                       (ticket) => ticket.status === "waiting_on_customer"
@@ -246,7 +246,7 @@ export default async function SupportPage({
                 <p className="text-sm font-bold uppercase tracking-[0.12em] text-slate-500">
                   Total
                 </p>
-                <p className="mt-3 text-4xl font-extrabold">
+                <p className="mt-3 text-3xl font-extrabold sm:text-4xl">
                   {support.tickets.length}
                 </p>
               </div>

@@ -16,6 +16,7 @@ import { sendInvoiceDocument } from "./document-delivery";
 import {
   formatCurrency,
   getCustomerEmailAddresses,
+  getInputDateValue,
   getTodayDateInputValue,
 } from "./helpers";
 import type {
@@ -410,6 +411,47 @@ function getInvoiceDueDaysAfterIssue(invoice: Invoice, fallbackDays: number) {
   return Number.isFinite(dayDifference) ? Math.max(0, dayDifference) : Math.max(0, fallbackDays);
 }
 
+function addDaysToDateInputValue(value: string, days: number) {
+  const normalized = getInputDateValue(value);
+
+  if (!normalized) {
+    return getTodayDateInputValue();
+  }
+
+  const date = new Date(`${normalized}T12:00:00`);
+  const wholeDays = Number.isFinite(days) ? Math.floor(days) : 0;
+
+  date.setDate(date.getDate() + wholeDays);
+
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
+    2,
+    "0"
+  )}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function getRecurringTemplatePaymentByDate(
+  template: RecurringInvoiceTemplate,
+  fallbackDays: number
+) {
+  const nextSendDate = getInputDateValue(template.nextSendDate);
+  const nextDueDate = getInputDateValue(template.nextDueDate);
+
+  if (nextDueDate) {
+    return nextDueDate;
+  }
+
+  if (nextSendDate) {
+    return addDaysToDateInputValue(
+      nextSendDate,
+      typeof template.dueDaysAfterIssue === "number"
+        ? template.dueDaysAfterIssue
+        : fallbackDays
+    );
+  }
+
+  return "";
+}
+
 function getDefaultRecurringStatus(status: InvoiceStatus): InvoiceStatus {
   if (status === "Paid" || status === "Accepted") {
     return "Unpaid";
@@ -469,6 +511,9 @@ export default function InvoicesPage({
   const [recurringFrequency, setRecurringFrequency] =
     useState<RecurringInvoiceFrequency>("Monthly");
   const [recurringNextSendDate, setRecurringNextSendDate] = useState(
+    getTodayDateInputValue()
+  );
+  const [recurringNextDueDate, setRecurringNextDueDate] = useState(
     getTodayDateInputValue()
   );
   const [recurringSendMethod, setRecurringSendMethod] =
@@ -647,6 +692,17 @@ export default function InvoicesPage({
     const phoneValue = customer?.phone?.trim() || "";
     const nextSendDate =
       template?.nextSendDate || invoice?.date || getTodayDateInputValue();
+    const dueDaysAfterIssue = invoice
+      ? getInvoiceDueDaysAfterIssue(invoice, defaultPaymentTermsDays)
+      : defaultPaymentTermsDays;
+    const nextDueDateCandidate =
+      (template
+        ? getRecurringTemplatePaymentByDate(template, defaultPaymentTermsDays)
+        : "") || addDaysToDateInputValue(nextSendDate, dueDaysAfterIssue);
+    const nextDueDate =
+      getInputDateValue(nextDueDateCandidate) >= getInputDateValue(nextSendDate)
+        ? nextDueDateCandidate
+        : addDaysToDateInputValue(nextSendDate, dueDaysAfterIssue);
     const sendMethod = template?.preferredSendMethod || "email";
     const sendTo =
       template?.sendTo ||
@@ -658,6 +714,7 @@ export default function InvoicesPage({
     });
     setRecurringFrequency(template?.frequency ?? "Monthly");
     setRecurringNextSendDate(nextSendDate);
+    setRecurringNextDueDate(nextDueDate);
     setRecurringSendMethod(sendMethod);
     setRecurringSendTo(sendTo);
     setRecurringIsActive(template?.isActive ?? true);
@@ -918,6 +975,10 @@ export default function InvoicesPage({
               const sourceInvoice = invoices.find(
                 (invoice) => invoice.id === template.sourceInvoiceId
               );
+              const paymentByDate = getRecurringTemplatePaymentByDate(
+                template,
+                defaultPaymentTermsDays
+              );
 
               return (
                 <article
@@ -932,6 +993,12 @@ export default function InvoicesPage({
                       <p className="mt-1 text-sm text-slate-500">
                         {template.frequency} • Next send{" "}
                         {new Date(template.nextSendDate).toLocaleDateString()}
+                        {paymentByDate ? (
+                          <>
+                            {" - Payment by "}
+                            {new Date(paymentByDate).toLocaleDateString()}
+                          </>
+                        ) : null}
                       </p>
                     </div>
 
@@ -1305,11 +1372,11 @@ export default function InvoicesPage({
           method={sendTarget.method}
           title={`Email ${activeInvoice.invoiceNumber}`}
           recipientOptions={emailRecipients}
-          initialRecipient={emailRecipients[0]}
+          initialRecipients={emailRecipients.slice(0, 1)}
           initialSubject={getInvoiceEmailSubject(activeInvoice, businessDetails)}
           initialMessage={getInvoiceEmailMessage(activeInvoice, businessDetails)}
           onClose={() => setSendTarget(null)}
-          onSend={async ({ recipient, subject, message }) => {
+          onSend={async ({ recipient, recipients, subject, message }) => {
             const invoiceForSending = await ensureInvoicePaymentLink(activeInvoice);
             const fallbackMessage = getInvoiceEmailMessage(
               invoiceForSending,
@@ -1324,7 +1391,7 @@ export default function InvoicesPage({
               invoice: invoiceForSending,
               businessDetails,
               method: sendTarget.method,
-              recipient,
+              recipients,
               subject:
                 subject.trim() ||
                 getInvoiceEmailSubject(invoiceForSending, businessDetails),
@@ -1376,7 +1443,38 @@ export default function InvoicesPage({
                 <input
                   type="date"
                   value={recurringNextSendDate}
-                  onChange={(event) => setRecurringNextSendDate(event.target.value)}
+                  onChange={(event) => {
+                    const nextSendDate = event.target.value;
+                    const dueDaysAfterIssue = getInvoiceDueDaysAfterIssue(
+                      recurringInvoice,
+                      defaultPaymentTermsDays
+                    );
+
+                    setRecurringNextSendDate(nextSendDate);
+
+                    if (
+                      !getInputDateValue(recurringNextDueDate) ||
+                      getInputDateValue(recurringNextDueDate) <
+                        getInputDateValue(nextSendDate)
+                    ) {
+                      setRecurringNextDueDate(
+                        addDaysToDateInputValue(nextSendDate, dueDaysAfterIssue)
+                      );
+                    }
+                  }}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700">
+                  Payment By Date
+                </label>
+                <input
+                  type="date"
+                  value={recurringNextDueDate}
+                  min={recurringNextSendDate || undefined}
+                  onChange={(event) => setRecurringNextDueDate(event.target.value)}
                   className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
                 />
               </div>
@@ -1454,9 +1552,9 @@ export default function InvoicesPage({
                   Keep this recurring invoice active
                 </label>
                 <p className="mt-2 text-xs text-slate-500">
-                  Generated invoices will keep the same line items, VAT setup, and due-by
-                  gap as this source invoice. Preferred send details are saved with the
-                  template so the new invoice is ready for you to send.
+                  Generated invoices will keep the same line items, VAT setup, and
+                  selected payment-by date. Preferred send details are saved with
+                  the template so the new invoice is ready for you to send.
                 </p>
               </div>
             </div>
@@ -1473,6 +1571,21 @@ export default function InvoicesPage({
                   setIsSavingRecurring(true);
 
                   try {
+                    const normalizedNextSendDate =
+                      getInputDateValue(recurringNextSendDate) ||
+                      getTodayDateInputValue();
+                    const dueDaysAfterIssue = getInvoiceDueDaysAfterIssue(
+                      recurringInvoice,
+                      defaultPaymentTermsDays
+                    );
+                    const normalizedNextDueDate =
+                      getInputDateValue(recurringNextDueDate) >=
+                      normalizedNextSendDate
+                        ? getInputDateValue(recurringNextDueDate)
+                        : addDaysToDateInputValue(
+                            normalizedNextSendDate,
+                            dueDaysAfterIssue
+                          );
                     const templatePayload: RecurringInvoiceTemplate = {
                       id: recurringTemplate?.id ?? crypto.randomUUID(),
                       sourceInvoiceId: recurringInvoice.id,
@@ -1497,7 +1610,8 @@ export default function InvoicesPage({
                       ),
                       linkedQuoteId: recurringInvoice.linkedQuoteId,
                       frequency: recurringFrequency,
-                      nextSendDate: recurringNextSendDate || getTodayDateInputValue(),
+                      nextSendDate: normalizedNextSendDate,
+                      nextDueDate: normalizedNextDueDate,
                       preferredSendMethod: recurringSendMethod,
                       sendTo: recurringSendTo.trim() || undefined,
                       isActive: recurringIsActive,
@@ -1513,7 +1627,9 @@ export default function InvoicesPage({
                     setIsSavingRecurring(false);
                   }
                 }}
-                disabled={!recurringNextSendDate || isSavingRecurring}
+                disabled={
+                  !recurringNextSendDate || !recurringNextDueDate || isSavingRecurring
+                }
                 className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isSavingRecurring ? "Saving..." : "Save Recurring Invoice"}

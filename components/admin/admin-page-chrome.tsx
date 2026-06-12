@@ -22,7 +22,7 @@ export function AdminLogo() {
         width={1200}
         height={300}
         priority
-        className="h-auto w-[210px] sm:w-[235px]"
+        className="h-auto w-[170px] sm:w-[235px]"
       />
     </Link>
   );
@@ -40,7 +40,7 @@ export function AdminTopHeader() {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 text-sm">
+        <div className="flex max-w-full flex-wrap gap-2 text-sm">
           <Link
             href="/admin/customers"
             className="inline-flex items-center gap-2 rounded-md border border-white/12 px-4 py-2 font-bold text-white/88 transition hover:bg-white/10 hover:text-white"
@@ -122,7 +122,7 @@ export function AdminHeroShell({
             <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#20d85a]">
               {eyebrow}
             </p>
-            <h1 className="mt-5 max-w-3xl text-5xl font-extrabold leading-[1.08] tracking-normal text-white sm:text-6xl">
+            <h1 className="mt-5 max-w-3xl text-4xl font-extrabold leading-[1.08] tracking-normal text-white sm:text-6xl">
               {title}
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-8 text-white/78">
@@ -150,7 +150,7 @@ export function AdminSetupNotice({
       <div className="absolute inset-0 opacity-[0.08] [background-image:linear-gradient(rgba(255,255,255,0.18)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.18)_1px,transparent_1px)] [background-size:64px_64px]" />
       <div className="relative z-10 mx-auto max-w-4xl">
         <AdminLogo />
-        <section className="mt-12 rounded-lg border border-white/12 bg-white p-8 text-slate-950 shadow-[0_30px_80px_rgba(0,0,0,0.35)]">
+        <section className="mt-10 rounded-lg border border-white/12 bg-white p-6 text-slate-950 shadow-[0_30px_80px_rgba(0,0,0,0.35)] sm:mt-12 sm:p-8">
           <div className="mb-6 flex size-12 items-center justify-center rounded-md bg-amber-100 text-amber-800">
             <AlertTriangle aria-hidden="true" className="size-6" />
           </div>

@@ -342,6 +342,10 @@ const visitDays = [
     "Sunday",
 ];
 const workflowMessageMethodOptions: WorkflowMessageMethod[] = ["email"];
+const MAX_LOGO_UPLOAD_SOURCE_BYTES = 10 * 1024 * 1024;
+const MAX_LOGO_UPLOAD_WIDTH = 1200;
+const MAX_LOGO_UPLOAD_HEIGHT = 800;
+const LOGO_UPLOAD_JPEG_QUALITY = 0.86;
 
 const defaultSettings: SettingsData = {
     businessName: "Your Business",
@@ -1328,6 +1332,112 @@ function getExportDateStamp() {
     return new Date().toISOString().slice(0, 10);
 }
 
+function getBoundedLogoDimensions(width: number, height: number) {
+    if (width <= 0 || height <= 0) {
+        return { width: 1, height: 1 };
+    }
+
+    const scale = Math.min(
+        1,
+        MAX_LOGO_UPLOAD_WIDTH / width,
+        MAX_LOGO_UPLOAD_HEIGHT / height
+    );
+
+    return {
+        width: Math.max(1, Math.round(width * scale)),
+        height: Math.max(1, Math.round(height * scale)),
+    };
+}
+
+function readFileAsDataUrl(file: File) {
+    return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+
+        reader.onload = () => {
+            const result = typeof reader.result === "string" ? reader.result : "";
+            resolve(result);
+        };
+        reader.onerror = () => reject(new Error("Unable to read the logo image."));
+        reader.readAsDataURL(file);
+    });
+}
+
+function loadImageFromObjectUrl(url: string) {
+    return new Promise<HTMLImageElement>((resolve, reject) => {
+        const image = new Image();
+
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error("Unable to load the logo image."));
+        image.src = url;
+    });
+}
+
+function canvasHasTransparentPixels(
+    context: CanvasRenderingContext2D,
+    width: number,
+    height: number
+) {
+    try {
+        const pixels = context.getImageData(0, 0, width, height).data;
+
+        for (let index = 3; index < pixels.length; index += 4) {
+            if (pixels[index] < 245) {
+                return true;
+            }
+        }
+    } catch {
+        return false;
+    }
+
+    return false;
+}
+
+async function optimizeLogoFileForStorage(file: File) {
+    if (!file.type.startsWith("image/")) {
+        throw new Error("Choose an image file for your logo.");
+    }
+
+    if (file.size > MAX_LOGO_UPLOAD_SOURCE_BYTES) {
+        throw new Error("Choose a logo image under 10MB.");
+    }
+
+    if (file.type === "image/svg+xml") {
+        return readFileAsDataUrl(file);
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+
+    try {
+        const image = await loadImageFromObjectUrl(objectUrl);
+        const dimensions = getBoundedLogoDimensions(
+            image.naturalWidth || image.width,
+            image.naturalHeight || image.height
+        );
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d");
+
+        if (!context) {
+            throw new Error("Unable to optimise the logo image.");
+        }
+
+        canvas.width = dimensions.width;
+        canvas.height = dimensions.height;
+        context.drawImage(image, 0, 0, dimensions.width, dimensions.height);
+
+        const outputType = canvasHasTransparentPixels(
+            context,
+            dimensions.width,
+            dimensions.height
+        )
+            ? "image/png"
+            : "image/jpeg";
+
+        return canvas.toDataURL(outputType, LOGO_UPLOAD_JPEG_QUALITY);
+    } finally {
+        URL.revokeObjectURL(objectUrl);
+    }
+}
+
 export default function SettingsPage({
                                          initialSettings,
                                          accountEmail,
@@ -2131,17 +2241,26 @@ export default function SettingsPage({
         reader.readAsText(file);
     }
 
-    function handleLogoUpload(event: React.ChangeEvent<HTMLInputElement>) {
-        const file = event.target.files?.[0];
+    async function handleLogoUpload(event: React.ChangeEvent<HTMLInputElement>) {
+        const input = event.currentTarget;
+        const file = input.files?.[0];
         if (!file) return;
 
-        const reader = new FileReader();
-        reader.onload = () => {
-            const result = typeof reader.result === "string" ? reader.result : "";
+        try {
+            const result = await optimizeLogoFileForStorage(file);
             update("logoUrl", result);
-            showMessage("Logo uploaded locally.", "success");
-        };
-        reader.readAsDataURL(file);
+            showMessage("Logo uploaded and optimised locally.", "success");
+        } catch (error) {
+            console.error("Logo upload failed:", error);
+            showMessage(
+                error instanceof Error && error.message.trim()
+                    ? error.message
+                    : "Unable to upload the logo image.",
+                "error"
+            );
+        } finally {
+            input.value = "";
+        }
     }
 
     function handleImport(event: React.ChangeEvent<HTMLInputElement>) {

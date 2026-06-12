@@ -11,10 +11,11 @@ import type {
   StripeInvoicePaymentStatus,
 } from "./types";
 import {
+  getDocumentEmailAttachmentTooLargeMessage,
   hasConfiguredDocumentEmailSettings,
+  MAX_DOCUMENT_EMAIL_ATTACHMENT_BYTES,
   normalizeDocumentEmailSettings,
   type DocumentEmailSettings,
-  type SendDocumentEmailPayload,
   type SendTestEmailPayload,
 } from "@/lib/email/document-email";
 
@@ -78,71 +79,6 @@ type InvoiceDocument = {
 
 type DeliveryBusinessDetails = DocumentBrandDetails & DocumentEmailSettings;
 
-function downloadBlob(blob: Blob, filename: string) {
-  const objectUrl = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = objectUrl;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  document.body.removeChild(anchor);
-  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-}
-
-function createPdfFile(blob: Blob, filename: string) {
-  return new File([blob], filename, { type: "application/pdf" });
-}
-
-function canSharePdfFile(file: File) {
-  if (typeof navigator === "undefined" || typeof navigator.share !== "function") {
-    return false;
-  }
-
-  if (typeof navigator.canShare !== "function") {
-    return true;
-  }
-
-  try {
-    return navigator.canShare({ files: [file] });
-  } catch {
-    return false;
-  }
-}
-
-async function shareOrDownloadFile(options: {
-  blob: Blob;
-  filename: string;
-  title: string;
-  text: string;
-}) {
-  const file = createPdfFile(options.blob, options.filename);
-
-  if (canSharePdfFile(file)) {
-    await navigator.share({
-      title: options.title,
-      text: options.text,
-      files: [file],
-    });
-    return "shared";
-  }
-
-  downloadBlob(options.blob, options.filename);
-  return "downloaded";
-}
-
-async function blobToBase64(blob: Blob) {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  const chunkSize = 0x8000;
-  let binary = "";
-
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    const chunk = bytes.subarray(index, index + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-
-  return btoa(binary);
-}
-
 function getEmailSettings(businessDetails: DeliveryBusinessDetails) {
   return normalizeDocumentEmailSettings({
     emailFromName: businessDetails.emailFromName,
@@ -156,10 +92,36 @@ function getEmailSettings(businessDetails: DeliveryBusinessDetails) {
   });
 }
 
+async function getEmailResponseError(response: Response, fallback: string) {
+  if (response.status === 413) {
+    return getDocumentEmailAttachmentTooLargeMessage();
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+
+  if (contentType.toLowerCase().includes("application/json")) {
+    const responseBody = (await response.json().catch(() => null)) as
+      | { error?: string }
+      | null;
+    const message = responseBody?.error?.trim();
+
+    if (message) {
+      return message;
+    }
+  }
+
+  const statusDetail = response.status
+    ? ` (${response.status}${response.statusText ? ` ${response.statusText}` : ""})`
+    : "";
+
+  return `${fallback}${statusDetail}`;
+}
+
 async function sendDocumentEmail(options: {
   blob: Blob;
   filename: string;
-  recipient: string;
+  recipient?: string;
+  recipients?: string[];
   subject: string;
   message: string;
   businessDetails: DeliveryBusinessDetails;
@@ -172,34 +134,58 @@ async function sendDocumentEmail(options: {
     );
   }
 
-  const payload: SendDocumentEmailPayload = {
-    recipient: options.recipient,
-    subject: options.subject,
-    message: options.message,
-    filename: options.filename,
-    pdfBase64: await blobToBase64(options.blob),
-    settings,
-  };
+  if (options.blob.size > MAX_DOCUMENT_EMAIL_ATTACHMENT_BYTES) {
+    throw new Error(getDocumentEmailAttachmentTooLargeMessage());
+  }
+
+  const recipients = normalizeDocumentRecipients(
+    options.recipients ?? [options.recipient ?? ""]
+  );
+
+  if (recipients.length === 0) {
+    throw new Error("Choose at least one email address.");
+  }
+
+  const formData = new FormData();
+  formData.set("recipient", recipients[0]);
+  formData.set("recipients", JSON.stringify(recipients));
+  formData.set("subject", options.subject);
+  formData.set("message", options.message);
+  formData.set("filename", options.filename);
+  formData.set("settings", JSON.stringify(settings));
+  formData.set("pdf", options.blob, options.filename || "document.pdf");
 
   const response = await fetch("/api/send-document-email", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
+    body: formData,
   });
-
-  const responseBody = (await response.json().catch(() => null)) as
-    | { error?: string }
-    | null;
 
   if (!response.ok) {
     throw new Error(
-      responseBody?.error?.trim() || "Unable to send the email from the website."
+      await getEmailResponseError(
+        response,
+        "Unable to send the email from the website."
+      )
     );
   }
 
   return "sent";
+}
+
+function normalizeDocumentRecipients(values: Array<string | null | undefined>) {
+  const recipientMap = new Map<string, string>();
+
+  for (const value of values) {
+    const trimmedValue = value?.trim();
+
+    if (!trimmedValue) {
+      continue;
+    }
+
+    recipientMap.set(trimmedValue.toLowerCase(), trimmedValue);
+  }
+
+  return Array.from(recipientMap.values());
 }
 
 export async function sendCustomerEmailMessage(options: {
@@ -231,13 +217,12 @@ export async function sendCustomerEmailMessage(options: {
     body: JSON.stringify(payload),
   });
 
-  const responseBody = (await response.json().catch(() => null)) as
-    | { error?: string }
-    | null;
-
   if (!response.ok) {
     throw new Error(
-      responseBody?.error?.trim() || "Unable to send the email from the website."
+      await getEmailResponseError(
+        response,
+        "Unable to send the email from the website."
+      )
     );
   }
 
@@ -248,7 +233,8 @@ export async function sendQuoteDocument(options: {
   quote: QuoteDocument;
   businessDetails: DeliveryBusinessDetails;
   method: "email";
-  recipient: string;
+  recipient?: string;
+  recipients?: string[];
   subject: string;
   message: string;
 }) {
@@ -259,6 +245,7 @@ export async function sendQuoteDocument(options: {
     blob,
     filename,
     recipient: options.recipient,
+    recipients: options.recipients,
     subject: options.subject,
     message: options.message,
     businessDetails: options.businessDetails,
@@ -269,7 +256,8 @@ export async function sendInvoiceDocument(options: {
   invoice: InvoiceDocument;
   businessDetails: DeliveryBusinessDetails;
   method: "email";
-  recipient: string;
+  recipient?: string;
+  recipients?: string[];
   subject: string;
   message: string;
 }) {
@@ -280,6 +268,7 @@ export async function sendInvoiceDocument(options: {
     blob,
     filename,
     recipient: options.recipient,
+    recipients: options.recipients,
     subject: options.subject,
     message: options.message,
     businessDetails: options.businessDetails,

@@ -141,6 +141,9 @@ const BODY_BOTTOM = PAGE_HEIGHT - 24;
 const FOOTER_Y = PAGE_HEIGHT - 12;
 const GBP_SYMBOL = String.fromCharCode(163);
 const STRIPE_SECURE_PAYMENT_LOGO_URL = "/stripe-secure-payment-logo-cropped.png";
+const MAX_LOGO_ASSET_WIDTH = 1200;
+const MAX_LOGO_ASSET_HEIGHT = 800;
+const LOGO_JPEG_QUALITY = 0.86;
 
 function formatMoney(value: number) {
     return `${GBP_SYMBOL}${value.toFixed(2)}`;
@@ -376,6 +379,24 @@ function shouldPreserveLogoArtwork(logoUrl?: string) {
     return /\.jpe?g(?:$|[?#])/i.test(candidate);
 }
 
+function getBoundedImageDimensions(
+    width: number,
+    height: number,
+    maxWidth: number,
+    maxHeight: number
+) {
+    if (width <= 0 || height <= 0) {
+        return { width: 1, height: 1 };
+    }
+
+    const scale = Math.min(1, maxWidth / width, maxHeight / height);
+
+    return {
+        width: Math.max(1, Math.round(width * scale)),
+        height: Math.max(1, Math.round(height * scale)),
+    };
+}
+
 async function loadLogoAsset(logoUrl?: string): Promise<LogoAsset | null> {
     if (typeof window === "undefined") {
         return null;
@@ -401,8 +422,16 @@ async function loadLogoAsset(logoUrl?: string): Promise<LogoAsset | null> {
                 return;
             }
 
-            const width = image.naturalWidth || image.width;
-            const height = image.naturalHeight || image.height;
+            const naturalWidth = image.naturalWidth || image.width;
+            const naturalHeight = image.naturalHeight || image.height;
+            const dimensions = getBoundedImageDimensions(
+                naturalWidth,
+                naturalHeight,
+                MAX_LOGO_ASSET_WIDTH,
+                MAX_LOGO_ASSET_HEIGHT
+            );
+            const width = dimensions.width;
+            const height = dimensions.height;
 
             canvas.width = width;
             canvas.height = height;
@@ -410,7 +439,7 @@ async function loadLogoAsset(logoUrl?: string): Promise<LogoAsset | null> {
 
             if (preserveArtwork) {
                 resolve({
-                    dataUrl: canvas.toDataURL("image/jpeg", 0.98),
+                    dataUrl: canvas.toDataURL("image/jpeg", LOGO_JPEG_QUALITY),
                     width,
                     height,
                     format: "JPEG",

@@ -106,7 +106,7 @@ export default function StaffSetupPage() {
       <div className="absolute inset-0 opacity-[0.08] [background-image:linear-gradient(rgba(255,255,255,0.18)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.18)_1px,transparent_1px)] [background-size:64px_64px]" />
 
       <div className="relative z-10 mx-auto flex min-h-[calc(100vh-3.5rem)] w-full max-w-6xl flex-col">
-        <header className="flex items-center justify-between">
+        <header className="flex items-center justify-between gap-4">
           <Link href="/" className="block shrink-0" aria-label="RoundHQ home">
             <Image
               src="/roundhq-logo-long-white.png"
@@ -114,7 +114,7 @@ export default function StaffSetupPage() {
               width={1200}
               height={300}
               priority
-              className="h-auto w-[210px] sm:w-[235px]"
+              className="h-auto w-[170px] sm:w-[235px]"
             />
           </Link>
           <Link
@@ -125,12 +125,12 @@ export default function StaffSetupPage() {
           </Link>
         </header>
 
-        <div className="grid flex-1 items-center gap-10 py-12 lg:grid-cols-[1fr_440px]">
+        <div className="grid flex-1 items-center gap-10 py-10 sm:py-12 lg:grid-cols-[1fr_440px]">
           <section className="max-w-2xl">
             <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#20d85a]">
               Staff account setup
             </p>
-            <h1 className="mt-6 text-5xl font-extrabold leading-[1.08] tracking-normal text-white sm:text-6xl">
+            <h1 className="mt-6 text-4xl font-extrabold leading-[1.08] tracking-normal text-white sm:text-6xl">
               Create your RoundHQ password.
             </h1>
             <p className="mt-6 max-w-xl text-lg leading-8 text-white/78">

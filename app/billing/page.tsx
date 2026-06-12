@@ -39,7 +39,7 @@ function RoundHQLogo() {
         width={1200}
         height={300}
         priority
-        className="h-auto w-[210px] sm:w-[235px]"
+        className="h-auto w-[170px] sm:w-[235px]"
       />
     </Link>
   );
@@ -106,8 +106,8 @@ function PlanCard({
       <h3 className="mt-3 text-xl font-extrabold text-slate-950">
         {plan.description}
       </h3>
-      <div className="mt-5 flex items-end gap-2">
-        <p className="text-5xl font-extrabold tracking-normal text-slate-950">
+      <div className="mt-5 flex flex-wrap items-end gap-2">
+        <p className="text-4xl font-extrabold tracking-normal text-slate-950 sm:text-5xl">
           {plan.priceLabel}
         </p>
         <p className="pb-2 text-sm font-bold text-[#168b43]">
@@ -273,7 +273,7 @@ export default async function BillingPage() {
         <div className="absolute -right-8 top-36 hidden h-[300px] w-[300px] rounded-full border border-[#20d85a]/12 lg:block" />
 
         <header className="relative z-10 border-b border-white/10">
-          <div className="mx-auto flex max-w-7xl items-center justify-between gap-5 px-5 py-6 sm:px-8">
+          <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-6 sm:px-8">
             <RoundHQLogo />
             <Link
               href="/dashboard"
@@ -291,7 +291,7 @@ export default async function BillingPage() {
               <p className="text-sm font-bold uppercase tracking-[0.16em] text-[#20d85a]">
                 Billing
               </p>
-              <h1 className="mt-5 max-w-3xl text-5xl font-extrabold leading-[1.08] tracking-normal text-white sm:text-6xl">
+              <h1 className="mt-5 max-w-3xl text-4xl font-extrabold leading-[1.08] tracking-normal text-white sm:text-6xl">
                 Manage your RoundHQ subscription.
               </h1>
               <p className="mt-6 max-w-2xl text-lg leading-8 text-white/78">

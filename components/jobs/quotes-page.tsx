@@ -937,16 +937,16 @@ export default function QuotesPage({
           method={sendTarget.method}
           title={`Email ${activeQuote.quoteNumber}`}
           recipientOptions={emailRecipients}
-          initialRecipient={emailRecipients[0]}
+          initialRecipients={emailRecipients.slice(0, 1)}
           initialSubject={getQuoteEmailSubject(activeQuote, businessDetails)}
           initialMessage={getQuoteEmailMessage(activeQuote, businessDetails)}
           onClose={() => setSendTarget(null)}
-          onSend={async ({ recipient, subject, message }) => {
+          onSend={async ({ recipient, recipients, subject, message }) => {
             await sendQuoteDocument({
               quote: activeQuote,
               businessDetails,
               method: sendTarget.method,
-              recipient,
+              recipients,
               subject:
                 subject.trim() ||
                 getQuoteEmailSubject(activeQuote, businessDetails),
