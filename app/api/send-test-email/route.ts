@@ -1,9 +1,5 @@
 import { NextResponse } from "next/server";
 import {
-  getPlatformEmailSettings,
-  isPlatformEmailConfigured,
-} from "@/lib/admin/email-settings";
-import {
   getDocumentEmailFromValue,
   hasConfiguredDocumentEmailSettings,
   normalizeDocumentEmailSettings,
@@ -45,10 +41,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const platformSettings = await getPlatformEmailSettings();
-    const settings = isPlatformEmailConfigured(platformSettings)
-      ? platformSettings
-      : normalizeDocumentEmailSettings(body.settings);
+    const settings = normalizeDocumentEmailSettings(body.settings);
     requestSettings = settings;
 
     if (!hasConfiguredDocumentEmailSettings(settings)) {

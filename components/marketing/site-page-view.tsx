@@ -219,7 +219,7 @@ function RoundHQLogo({ compact = false }: { compact?: boolean }) {
         width={1200}
         height={300}
         priority={!compact}
-        className={compact ? "h-auto w-[160px] sm:w-[180px]" : "h-auto w-[180px] sm:w-[240px]"}
+        className={compact ? "h-auto w-[160px] sm:w-[180px]" : "h-auto w-[140px] sm:w-[240px]"}
       />
     </Link>
   );
@@ -242,16 +242,16 @@ function MarketingHeader({ pages }: { pages: SitePage[] }) {
           </Link>
         </nav>
 
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
           <Link
             href="/login"
-            className="hidden rounded-md px-3 py-2 text-sm font-semibold text-white/88 transition hover:bg-white/10 hover:text-white sm:inline-flex"
+            className="inline-flex rounded-md border border-white/12 px-3 py-2 text-sm font-semibold text-white/88 transition hover:bg-white/10 hover:text-white"
           >
             Login
           </Link>
           <Link
             href="/signup"
-            className="inline-flex items-center rounded-md bg-[#19c653] px-4 py-3 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.3)] transition hover:bg-[#22d861] sm:px-5"
+            className="inline-flex items-center rounded-md bg-[#19c653] px-3 py-2.5 text-sm font-bold text-white shadow-[0_14px_34px_rgba(25,198,83,0.3)] transition hover:bg-[#22d861] sm:px-5 sm:py-3"
           >
             Sign up
           </Link>

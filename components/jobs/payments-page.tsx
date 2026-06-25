@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronLeft,
@@ -83,9 +83,11 @@ const DAY_FILTER_OPTIONS: DayName[] = [
 ];
 type WeekFilter = "all" | WeekNumber;
 type DayFilter = "all" | DayName;
+type PaymentSectionKey = "monthly" | "transfer" | "cash";
 type OutstandingPaymentRow = {
   customerId: number;
   customerName: string;
+  sectionKey: PaymentSectionKey;
   routeLabel: string;
   method: string;
   amount: number;
@@ -231,6 +233,9 @@ export default function PaymentsPage({
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [removingVisitId, setRemovingVisitId] = useState<string | null>(null);
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
+  const [highlightedCardKey, setHighlightedCardKey] = useState<string | null>(null);
+  const customerCardRefs = useRef<Record<string, HTMLElement | null>>({});
+  const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const normalizedSearch = getNormalizedQuery(search);
   const normalizedDefaultRotationWeeks = normalizeRotationWeeks(defaultRotationWeeks);
   const routeRotationWeeks = normalizeRotationWeeks(
@@ -244,6 +249,14 @@ export default function PaymentsPage({
       setWeekFilter("all");
     }
   }, [weekFilter, weekFilterOptions]);
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const seasonDateRange = useMemo(
     () =>
@@ -431,6 +444,7 @@ export default function PaymentsPage({
       rows.push({
         customerId: customer.id,
         customerName: customer.name,
+        sectionKey: "monthly",
         routeLabel: getCustomerRouteLabel(customer),
         method: customer.paymentMethod ?? "Monthly",
         amount: missingMonths.length * monthlyCharge,
@@ -459,6 +473,7 @@ export default function PaymentsPage({
       rows.push({
         customerId: customer.id,
         customerName: customer.name,
+        sectionKey: customer.paymentMethod === "Cash" ? "cash" : "transfer",
         routeLabel: getCustomerRouteLabel(customer),
         method: customer.paymentMethod ?? "On Day Transfer",
         amount: unpaidVisits.reduce((total, visit) => total + visit.amount, 0),
@@ -683,6 +698,42 @@ export default function PaymentsPage({
     });
   }
 
+  function setCustomerCardRef(cardKey: string) {
+    return (element: HTMLElement | null) => {
+      customerCardRefs.current[cardKey] = element;
+    };
+  }
+
+  function openCustomerPaymentRow(
+    sectionKey: PaymentSectionKey,
+    customerId: number
+  ) {
+    const cardKey = getCustomerCardKey(sectionKey, customerId);
+
+    setExpandedCards((previous) => ({
+      ...previous,
+      [cardKey]: true,
+    }));
+    setHighlightedCardKey(cardKey);
+
+    if (highlightTimeoutRef.current) {
+      clearTimeout(highlightTimeoutRef.current);
+    }
+
+    highlightTimeoutRef.current = setTimeout(() => {
+      setHighlightedCardKey((previous) =>
+        previous === cardKey ? null : previous
+      );
+    }, 2800);
+
+    requestAnimationFrame(() => {
+      customerCardRefs.current[cardKey]?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    });
+  }
+
   function renderSectionActions(sectionKey: string, sectionCustomers: Customer[]) {
     if (sectionCustomers.length === 0) {
       return null;
@@ -818,7 +869,9 @@ export default function PaymentsPage({
                     </div>
 
                     <button
-                      onClick={() => onOpenCustomer(row.customerId)}
+                      onClick={() =>
+                        openCustomerPaymentRow(row.sectionKey, row.customerId)
+                      }
                       className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
                     >
                       Open
@@ -874,12 +927,16 @@ export default function PaymentsPage({
               const cardKey = getCustomerCardKey("monthly", customer.id);
               const isExpanded = Boolean(expandedCards[cardKey]);
               const hasSearchMatch = Boolean(normalizedSearch);
+              const isHighlighted = highlightedCardKey === cardKey;
 
               return (
                 <article
                   key={customer.id}
+                  ref={setCustomerCardRef(cardKey)}
                   className={`overflow-hidden rounded-[24px] border shadow-sm ${
-                    hasSearchMatch
+                    isHighlighted
+                      ? "border-[#244d51] bg-emerald-50/70 ring-2 ring-[#18b74f]/35"
+                      : hasSearchMatch
                       ? "border-amber-300 bg-amber-50/50"
                       : "border-slate-200 bg-white"
                   }`}
@@ -1203,12 +1260,16 @@ export default function PaymentsPage({
               const cardKey = getCustomerCardKey(sectionKey, customer.id);
               const isExpanded = Boolean(expandedCards[cardKey]);
               const hasSearchMatch = Boolean(normalizedSearch);
+              const isHighlighted = highlightedCardKey === cardKey;
 
               return (
                 <article
                   key={customer.id}
+                  ref={setCustomerCardRef(cardKey)}
                   className={`overflow-hidden rounded-[24px] border shadow-sm ${
-                    hasSearchMatch
+                    isHighlighted
+                      ? "border-[#244d51] bg-emerald-50/70 ring-2 ring-[#18b74f]/35"
+                      : hasSearchMatch
                       ? "border-amber-300 bg-amber-50/50"
                       : "border-slate-200 bg-white"
                   }`}

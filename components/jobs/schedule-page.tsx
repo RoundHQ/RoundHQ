@@ -518,6 +518,18 @@ export default function SchedulePage({
   async function handleAddJob() {
     if (!title.trim() || !selectedDate) return;
 
+    const trimmedStartTime = startTime.trim();
+    const trimmedFinishTime = finishTime.trim();
+
+    if (
+      trimmedStartTime &&
+      trimmedFinishTime &&
+      trimmedFinishTime <= trimmedStartTime
+    ) {
+      window.alert("Finish time needs to be later than the start time.");
+      return;
+    }
+
     const selectedCustomer =
       linkedCustomerId !== ""
         ? customers.find((customer) => customer.id === Number(linkedCustomerId)) ?? null
@@ -529,6 +541,8 @@ export default function SchedulePage({
         title: title.trim(),
         date: selectedDate,
         notes: notes.trim(),
+        startTime: trimmedStartTime || undefined,
+        finishTime: trimmedFinishTime || undefined,
         type: jobType,
         status: "Scheduled",
         customerId: linkedCustomerId ? Number(linkedCustomerId) : null,
@@ -882,7 +896,7 @@ export default function SchedulePage({
 
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-[24px] bg-white p-6 shadow-xl">
+          <div className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-[24px] bg-white p-6 shadow-xl">
             <h3 className="text-xl font-black tracking-tight text-slate-900">
               {modalMode === "quote" ? "Schedule Quoted Work" : "Add Appointment"}
             </h3>
@@ -1019,6 +1033,32 @@ export default function SchedulePage({
                       </option>
                       ))}
                     </select>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700">
+                        Approx. Start Time
+                      </label>
+                      <input
+                        type="time"
+                        value={startTime}
+                        onChange={(event) => setStartTime(event.target.value)}
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700">
+                        Approx. Finish Time
+                      </label>
+                      <input
+                        type="time"
+                        value={finishTime}
+                        onChange={(event) => setFinishTime(event.target.value)}
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
+                      />
+                    </div>
                   </div>
 
                   <div>
