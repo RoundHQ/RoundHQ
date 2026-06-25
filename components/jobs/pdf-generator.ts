@@ -900,24 +900,20 @@ function drawDetailCard(
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
 
+    const labelWidth = Math.min(38, width * 0.38);
+    const valueX = x + 5 + labelWidth;
+    const valueWidth = Math.max(24, width - 10 - labelWidth);
     const valueLineHeight = 4.6;
-    const labelBlockHeight = 4.8;
-    const rowGap = 4;
+    const rowGap = 2.2;
     const rowValues = safeRows.map((row) => {
-        const wrapped = doc.splitTextToSize(row.value || "-", width - 16);
+        const wrapped = doc.splitTextToSize(row.value || "-", valueWidth);
         return wrapped.length > 0 ? wrapped : ["-"];
     });
     const rowHeights = rowValues.map((wrapped) =>
         Math.max(5.5, wrapped.length * valueLineHeight)
     );
 
-    const height =
-        18 +
-        rowHeights.reduce(
-            (sum, rowHeight) => sum + labelBlockHeight + rowHeight + rowGap,
-            0
-        ) +
-        3;
+    const height = getDetailCardHeight(doc, width, safeRows);
 
     drawCardShell(doc, x, y, width, height, palette, accentColor);
     setTextColor(doc, palette.muted);
@@ -925,7 +921,7 @@ function drawDetailCard(
     doc.setFontSize(8);
     doc.text(title.toUpperCase(), x + 5, y + 9.5);
 
-    let currentY = y + 17.5;
+    let currentY = y + 17;
     safeRows.forEach((row, index) => {
         const wrapped = rowValues[index];
 
@@ -934,17 +930,61 @@ function drawDetailCard(
         doc.setFontSize(8);
         doc.text(row.label.toUpperCase(), x + 5, currentY);
 
-        currentY += labelBlockHeight;
-
         setTextColor(doc, palette.ink);
         doc.setFont("helvetica", "normal");
         doc.setFontSize(10);
-        doc.text(wrapped, x + 5, currentY);
+        doc.text(wrapped, valueX, currentY);
 
         currentY += rowHeights[index] + rowGap;
     });
 
     return height;
+}
+
+function getDetailCardHeight(doc: jsPDF, width: number, rows: DetailRow[]) {
+    const safeRows = rows.length > 0 ? rows : [{ label: "Details", value: "-" }];
+    const valueLineHeight = 4.6;
+    const labelWidth = Math.min(38, width * 0.38);
+    const valueWidth = Math.max(24, width - 10 - labelWidth);
+    const rowGap = 2.2;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+
+    return (
+        15 +
+        safeRows.reduce((sum, row) => {
+            const wrapped = doc.splitTextToSize(row.value || "-", valueWidth);
+            const rowHeight = Math.max(5.5, wrapped.length * valueLineHeight);
+            return sum + rowHeight + rowGap;
+        }, 0) +
+        6
+    );
+}
+
+function getPaymentBadgeCardHeight(
+    doc: jsPDF,
+    options: {
+        width: number;
+        paymentBadgeAsset: LogoAsset | null;
+    }
+) {
+    const { width, paymentBadgeAsset } = options;
+    const copy = "Secure card payments available through Stripe.";
+    const wrappedCopy = doc.splitTextToSize(copy, width - 10);
+    const badgeMaxWidth = width - 10;
+    const badgeMaxHeight = 16;
+    const badgeDimensions = paymentBadgeAsset
+        ? fitInside(
+              badgeMaxWidth,
+              badgeMaxHeight,
+              paymentBadgeAsset.width,
+              paymentBadgeAsset.height
+          )
+        : null;
+    const imageHeight = badgeDimensions ? badgeDimensions.height + 5 : 0;
+
+    return 17 + imageHeight + wrappedCopy.length * 4.6 + 8;
 }
 
 function drawPaymentBadgeCard(
@@ -971,8 +1011,7 @@ function drawPaymentBadgeCard(
               paymentBadgeAsset.height
           )
         : null;
-    const imageHeight = badgeDimensions ? badgeDimensions.height + 5 : 0;
-    const height = 17 + imageHeight + wrappedCopy.length * 4.6 + 8;
+    const height = getPaymentBadgeCardHeight(doc, { width, paymentBadgeAsset });
 
     drawCardShell(doc, x, y, width, height, palette, palette.primary);
     setTextColor(doc, palette.muted);
@@ -1158,7 +1197,7 @@ function drawSummaryCard(
         accentColor = null,
         emphasizedBackground = null,
     } = options;
-    const height = 15 + rows.length * 8.5 + 6;
+    const height = getSummaryCardHeight(rows);
 
     drawCardShell(doc, x, y, width, height, palette, accentColor);
     setTextColor(doc, palette.muted);
@@ -1208,6 +1247,28 @@ function drawSummaryCard(
     return height;
 }
 
+function getSummaryCardHeight(rows: SummaryRow[]) {
+    return 15 + rows.length * 8.5 + 6;
+}
+
+function getParagraphCardHeight(
+    doc: jsPDF,
+    width: number,
+    body: string | undefined
+) {
+    const text = body?.trim();
+
+    if (!text) {
+        return 0;
+    }
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    const wrapped = doc.splitTextToSize(text, width - 10);
+
+    return 15 + wrapped.length * 4.8 + 8;
+}
+
 function drawParagraphCard(
     doc: jsPDF,
     options: {
@@ -1230,7 +1291,7 @@ function drawParagraphCard(
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
     const wrapped = doc.splitTextToSize(text, width - 10);
-    const height = 15 + wrapped.length * 4.8 + 8;
+    const height = getParagraphCardHeight(doc, width, text);
 
     drawCardShell(doc, x, y, width, height, palette, accentColor);
     setTextColor(doc, palette.muted);
@@ -1246,6 +1307,24 @@ function drawParagraphCard(
     return height;
 }
 
+function getBankTransferRows(businessDetails: DocumentBrandDetails) {
+    return [
+        { label: "Account Name", value: normalizeOptionalText(businessDetails.bankAccountName) },
+        { label: "Sort Code", value: normalizeOptionalText(businessDetails.bankSortCode) },
+        { label: "Account Number", value: normalizeOptionalText(businessDetails.bankAccountNumber) },
+    ].filter((row) => row.value) as DetailRow[];
+}
+
+function getBankTransferCardHeight(
+    doc: jsPDF,
+    width: number,
+    businessDetails: DocumentBrandDetails
+) {
+    const rows = getBankTransferRows(businessDetails);
+
+    return rows.length > 0 ? getDetailCardHeight(doc, width, rows) : 0;
+}
+
 function drawBankTransferCard(
     doc: jsPDF,
     options: {
@@ -1257,11 +1336,7 @@ function drawBankTransferCard(
     }
 ) {
     const { x, y, width, businessDetails, palette } = options;
-    const rows = [
-        { label: "Account Name", value: normalizeOptionalText(businessDetails.bankAccountName) },
-        { label: "Sort Code", value: normalizeOptionalText(businessDetails.bankSortCode) },
-        { label: "Account Number", value: normalizeOptionalText(businessDetails.bankAccountNumber) },
-    ].filter((row) => row.value) as DetailRow[];
+    const rows = getBankTransferRows(businessDetails);
 
     if (rows.length === 0) {
         return 0;
@@ -1984,12 +2059,60 @@ async function buildInvoicePdfDocument(
 
     y = drawItemsTable(doc, invoice.items, y, palette, "");
 
+    const summaryWidth = 62;
+    const bottomColumnGap = 6;
+    const leftColumnWidth = CONTENT_WIDTH - summaryWidth - bottomColumnGap;
     const paymentLinkUrl = invoice.stripePaymentLinkUrl?.trim();
-    const bottomStartY = ensurePageSpace(doc, y, paymentLinkUrl ? 116 : 86);
-    const leftColumnWidth = 114;
+    const notesBody =
+        siteLines.length > 0 && invoice.notes?.trim() ? invoice.notes.trim() : "";
+    const invoiceTerms =
+        invoice.terms?.trim() || businessDetails.defaultInvoiceTerms?.trim();
+    const termsBody =
+        invoiceTerms ||
+        (businessDetails.termsAndConditionsUrl?.trim()
+            ? `Terms and conditions: ${businessDetails.termsAndConditionsUrl.trim()}`
+            : "");
+    const summaryRows: SummaryRow[] = [
+        { label: "Subtotal", value: formatMoney(subtotal) },
+        ...(vatAmount > 0
+            ? [{ label: `VAT (${Number(invoice.vatRate ?? 0)}%)`, value: formatMoney(vatAmount) }]
+            : []),
+        { label: "Total Due", value: formatMoney(Number(invoice.total || 0)), emphasized: true },
+    ];
+    const leftColumnCardHeights = [
+        paymentLinkUrl
+            ? getPaymentBadgeCardHeight(doc, {
+                  width: leftColumnWidth,
+                  paymentBadgeAsset,
+              })
+            : 0,
+        getBankTransferCardHeight(doc, leftColumnWidth, businessDetails),
+        getParagraphCardHeight(doc, leftColumnWidth, notesBody),
+    ].filter((height) => height > 0);
+    const leftColumnHeight =
+        leftColumnCardHeights.reduce((sum, height) => sum + height, 0) +
+        Math.max(0, leftColumnCardHeights.length - 1) * bottomColumnGap;
+    const summaryHeight = getSummaryCardHeight(summaryRows);
+    const termsHeight = getParagraphCardHeight(doc, summaryWidth, termsBody);
+    const rightColumnHeight =
+        summaryHeight + (termsHeight > 0 ? bottomColumnGap + termsHeight : 0);
+    const bottomStartY = ensurePageSpace(
+        doc,
+        y,
+        Math.max(leftColumnHeight, rightColumnHeight)
+    );
+    const bottomPageNumber = doc.getNumberOfPages();
     let nextLeftY = bottomStartY;
 
     if (paymentLinkUrl) {
+        nextLeftY = ensurePageSpace(
+            doc,
+            nextLeftY,
+            getPaymentBadgeCardHeight(doc, {
+                width: leftColumnWidth,
+                paymentBadgeAsset,
+            })
+        );
         const paymentLinkHeight = drawPaymentBadgeCard(doc, {
             x: MARGIN,
             y: nextLeftY,
@@ -1998,9 +2121,14 @@ async function buildInvoicePdfDocument(
             paymentBadgeAsset,
             palette,
         });
-        nextLeftY += paymentLinkHeight + 6;
+        nextLeftY += paymentLinkHeight + bottomColumnGap;
     }
 
+    nextLeftY = ensurePageSpace(
+        doc,
+        nextLeftY,
+        getBankTransferCardHeight(doc, leftColumnWidth, businessDetails)
+    );
     const bankHeight = drawBankTransferCard(doc, {
         x: MARGIN,
         y: nextLeftY,
@@ -2010,63 +2138,57 @@ async function buildInvoicePdfDocument(
     });
 
     if (bankHeight > 0) {
-        nextLeftY += bankHeight + 6;
+        nextLeftY += bankHeight + bottomColumnGap;
     }
 
-    if (siteLines.length > 0 && invoice.notes?.trim()) {
+    if (notesBody) {
+        nextLeftY = ensurePageSpace(
+            doc,
+            nextLeftY,
+            getParagraphCardHeight(doc, leftColumnWidth, notesBody)
+        );
         const notesHeight = drawParagraphCard(doc, {
             x: MARGIN,
             y: nextLeftY,
             width: leftColumnWidth,
             title: "Notes",
-            body: invoice.notes,
+            body: notesBody,
             palette,
             accentColor: null,
         });
-        nextLeftY += notesHeight + 6;
+        nextLeftY += notesHeight + bottomColumnGap;
     }
 
-    const invoiceTerms =
-        invoice.terms?.trim() || businessDetails.defaultInvoiceTerms?.trim();
-
-    if (invoiceTerms) {
-        drawParagraphCard(doc, {
-            x: MARGIN,
-            y: nextLeftY,
-            width: leftColumnWidth,
-            title: "Terms",
-            body: invoiceTerms,
-            palette,
-            accentColor: null,
-        });
-    } else if (businessDetails.termsAndConditionsUrl?.trim()) {
-        drawParagraphCard(doc, {
-            x: MARGIN,
-            y: nextLeftY,
-            width: leftColumnWidth,
-            title: "Terms",
-            body: `Terms and conditions: ${businessDetails.termsAndConditionsUrl.trim()}`,
-            palette,
-            accentColor: null,
-        });
-    }
-
-    drawSummaryCard(doc, {
-        x: PAGE_WIDTH - MARGIN - 62,
+    doc.setPage(bottomPageNumber);
+    const summaryX = PAGE_WIDTH - MARGIN - summaryWidth;
+    const renderedSummaryHeight = drawSummaryCard(doc, {
+        x: summaryX,
         y: bottomStartY,
-        width: 62,
+        width: summaryWidth,
         title: "Total",
-        rows: [
-            { label: "Subtotal", value: formatMoney(subtotal) },
-            ...(vatAmount > 0
-                ? [{ label: `VAT (${Number(invoice.vatRate ?? 0)}%)`, value: formatMoney(vatAmount) }]
-                : []),
-            { label: "Total Due", value: formatMoney(Number(invoice.total || 0)), emphasized: true },
-        ],
+        rows: summaryRows,
         palette,
         accentColor: palette.secondary,
         emphasizedBackground: palette.secondary,
     });
+
+    if (termsBody) {
+        let nextRightY = bottomStartY + renderedSummaryHeight + bottomColumnGap;
+        nextRightY = ensurePageSpace(
+            doc,
+            nextRightY,
+            getParagraphCardHeight(doc, summaryWidth, termsBody)
+        );
+        drawParagraphCard(doc, {
+            x: summaryX,
+            y: nextRightY,
+            width: summaryWidth,
+            title: "Terms",
+            body: termsBody,
+            palette,
+            accentColor: null,
+        });
+    }
 
     addFooters(doc, businessDetails, palette, pdfSettings);
     return doc;
