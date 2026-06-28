@@ -110,6 +110,11 @@ import {
   sendCustomerEmailMessage,
 } from "@/components/jobs/document-delivery";
 import {
+  createLearnedRuleFromRow,
+  normalizeStatementText,
+  type ReconciliationReviewRow,
+} from "@/lib/payments/reconciliation";
+import {
   DEFAULT_AUTO_SCHEDULING_SETTINGS,
   buildSchedulingEmailDrafts,
   chooseSchedulingSlot,
@@ -203,6 +208,8 @@ import {
   type CustomerLeadCustomerDraft,
   type CustomerLeadReply,
   type CustomerLeadStatus,
+  type CustomerCreditBalance,
+  type CustomerPaymentFingerprint,
   type DashboardAttentionItem,
   type DocumentHistoryEntry,
   type DocumentDeliveryMethod,
@@ -210,12 +217,20 @@ import {
   QUOTE_STATUS_OPTIONS,
   DEFAULT_NOT_CUT_REASONS,
   type Customer,
+  type PaymentAuditEvent,
+  type PaymentIgnoreRule,
+  type PaymentMatchingRule,
+  type PaymentReconciliationAllocation,
+  type PaymentReconciliationImportStatus,
+  type PaymentReconciliationMatchStatus,
   type InvoiceReminderState,
   type InvoiceStatus,
   type MonthlyPayment,
   type QuoteFollowUpState,
   type RecurringInvoiceFrequency,
   type RecurringInvoiceTemplate,
+  type StatementImportRecord,
+  type StatementImportRowRecord,
   type StripeInvoicePaymentStatus,
   type VisitLog,
   type NotCutReason,
@@ -364,6 +379,7 @@ type PageKey =
     | "customerProfit"
     | "payments"
     | "expenses"
+    | "paymentReconciliation"
     | "customerProfile"
     | "actions"
     | "map"
@@ -390,6 +406,7 @@ const WORKSPACE_ROUTE_PAGE_KEYS = [
   "customerProfit",
   "payments",
   "expenses",
+  "paymentReconciliation",
   "customerProfile",
   "actions",
   "map",
@@ -669,6 +686,7 @@ type WorkflowTablesReady = {
   recurringInvoiceTemplates: boolean;
   scheduledJobs: boolean;
   monthlyPayments: boolean;
+  paymentReconciliation: boolean;
   commercialRams: boolean;
   customerLeads: boolean;
 };
@@ -993,6 +1011,198 @@ type MonthlyPaymentWriteRow = {
   payment_date: string | null;
 };
 
+type StatementImportDbRow = {
+  id: string;
+  file_name: string;
+  file_type: string;
+  row_count: number;
+  imported_count: number;
+  skipped_count: number;
+  matched_count: number;
+  manual_matched_count: number;
+  ignored_count: number;
+  total_amount: number;
+  status: string;
+  imported_by: string | null;
+  undone_at: string | null;
+  undone_by: string | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+type StatementImportWriteRow = {
+  id: string;
+  file_name: string;
+  file_type: string;
+  row_count: number;
+  imported_count: number;
+  skipped_count: number;
+  matched_count: number;
+  manual_matched_count: number;
+  ignored_count: number;
+  total_amount: number;
+  status: PaymentReconciliationImportStatus;
+  imported_by?: string | null;
+  undone_at?: string | null;
+  undone_by?: string | null;
+};
+
+type StatementImportRowDbRow = {
+  id: string;
+  statement_import_id: string;
+  transaction_date: string;
+  description: string;
+  customer_name_from_statement: string | null;
+  amount: number;
+  suggested_customer_id: number | null;
+  selected_customer_id: number | null;
+  selected_visit_ids: Array<string | number> | null;
+  selected_invoice_ids: string[] | null;
+  allocations: PaymentReconciliationAllocation[] | null;
+  match_confidence: number;
+  match_reason: string;
+  match_status: string;
+  status: string;
+  duplicate_of_payment_id: string | null;
+  created_payment_id: string | null;
+  raw_row: Record<string, string> | null;
+  transaction_fingerprint: string;
+  created_at: string;
+};
+
+type StatementImportRowWriteRow = {
+  id: string;
+  statement_import_id: string;
+  transaction_date: string;
+  description: string;
+  customer_name_from_statement: string | null;
+  amount: number;
+  suggested_customer_id: number | null;
+  selected_customer_id: number | null;
+  selected_visit_ids: Array<string | number>;
+  selected_invoice_ids: string[];
+  allocations: PaymentReconciliationAllocation[];
+  match_confidence: number;
+  match_reason: string;
+  match_status: PaymentReconciliationMatchStatus;
+  status: StatementImportRowRecord["status"];
+  duplicate_of_payment_id: string | null;
+  created_payment_id: string | null;
+  raw_row: Record<string, string>;
+  transaction_fingerprint: string;
+};
+
+type PaymentMatchingRuleDbRow = {
+  id: string;
+  customer_id: number;
+  match_type: string;
+  match_value: string;
+  confidence_weight: number;
+  created_by: string | null;
+  last_used_at: string | null;
+  use_count: number;
+  is_enabled: boolean | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+type PaymentMatchingRuleWriteRow = {
+  id: string;
+  customer_id: number;
+  match_type: PaymentMatchingRule["matchType"];
+  match_value: string;
+  confidence_weight: number;
+  created_by?: string | null;
+  last_used_at?: string | null;
+  use_count: number;
+  is_enabled: boolean;
+};
+
+type PaymentIgnoreRuleDbRow = {
+  id: string;
+  match_type: string;
+  match_value: string;
+  created_by: string | null;
+  is_enabled: boolean | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+type PaymentIgnoreRuleWriteRow = {
+  id: string;
+  match_type: PaymentIgnoreRule["matchType"];
+  match_value: string;
+  created_by?: string | null;
+  is_enabled: boolean;
+};
+
+type CustomerPaymentFingerprintDbRow = {
+  id: string;
+  customer_id: number;
+  typical_amount: number | null;
+  typical_reference: string | null;
+  typical_payment_delay_days: number | null;
+  usually_pays_multiple_visits: boolean | null;
+  last_seen_at: string | null;
+  confidence_score: number;
+  created_at: string;
+  updated_at: string | null;
+};
+
+type CustomerPaymentFingerprintWriteRow = {
+  id: string;
+  customer_id: number;
+  typical_amount: number | null;
+  typical_reference: string | null;
+  typical_payment_delay_days: number | null;
+  usually_pays_multiple_visits: boolean | null;
+  last_seen_at: string | null;
+  confidence_score: number;
+};
+
+type CustomerCreditBalanceDbRow = {
+  id: string;
+  customer_id: number;
+  amount: number;
+  source_import_row_id: string | null;
+  note: string | null;
+  is_reversed: boolean | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+type CustomerCreditBalanceWriteRow = {
+  id: string;
+  customer_id: number;
+  amount: number;
+  source_import_row_id?: string | null;
+  note?: string | null;
+  is_reversed: boolean;
+};
+
+type PaymentAuditEventDbRow = {
+  id: string;
+  statement_import_id: string | null;
+  statement_import_row_id: string | null;
+  customer_id: number | null;
+  event_type: string;
+  summary: string;
+  metadata: Record<string, unknown> | null;
+  created_by: string | null;
+  created_at: string;
+};
+
+type PaymentAuditEventWriteRow = {
+  id: string;
+  statement_import_id?: string | null;
+  statement_import_row_id?: string | null;
+  customer_id?: number | null;
+  event_type: PaymentAuditEvent["eventType"];
+  summary: string;
+  metadata?: Record<string, unknown>;
+  created_by?: string | null;
+};
+
 const CUSTOMER_SELECT_FIELDS = "*";
 const QUOTE_SELECT_FIELDS =
     "id,quote_number,customer_id,customer_name,customer_type,customer_address,customer_town,customer_postcode,site_name,site_address,site_town,site_postcode,date,status,items,notes,total,work_type,estimated_duration_minutes,auto_scheduling_preference,auto_scheduling_disabled,service_round_scheduling_preference,auto_scheduled_job_id,scheduling_status,created_at";
@@ -1002,6 +1212,20 @@ const RECURRING_INVOICE_TEMPLATE_SELECT_FIELDS = "*";
 const SCHEDULED_JOB_SELECT_FIELDS = "*";
 const MONTHLY_PAYMENT_SELECT_FIELDS =
     "id,customer_id,payment_month,payment_date,created_at,updated_at";
+const STATEMENT_IMPORT_SELECT_FIELDS =
+    "id,file_name,file_type,row_count,imported_count,skipped_count,matched_count,manual_matched_count,ignored_count,total_amount,status,imported_by,undone_at,undone_by,created_at,updated_at";
+const STATEMENT_IMPORT_ROW_SELECT_FIELDS =
+    "id,statement_import_id,transaction_date,description,customer_name_from_statement,amount,suggested_customer_id,selected_customer_id,selected_visit_ids,selected_invoice_ids,allocations,match_confidence,match_reason,match_status,status,duplicate_of_payment_id,created_payment_id,raw_row,transaction_fingerprint,created_at";
+const PAYMENT_MATCHING_RULE_SELECT_FIELDS =
+    "id,customer_id,match_type,match_value,confidence_weight,created_by,last_used_at,use_count,is_enabled,created_at,updated_at";
+const PAYMENT_IGNORE_RULE_SELECT_FIELDS =
+    "id,match_type,match_value,created_by,is_enabled,created_at,updated_at";
+const CUSTOMER_PAYMENT_FINGERPRINT_SELECT_FIELDS =
+    "id,customer_id,typical_amount,typical_reference,typical_payment_delay_days,usually_pays_multiple_visits,last_seen_at,confidence_score,created_at,updated_at";
+const CUSTOMER_CREDIT_BALANCE_SELECT_FIELDS =
+    "id,customer_id,amount,source_import_row_id,note,is_reversed,created_at,updated_at";
+const PAYMENT_AUDIT_EVENT_SELECT_FIELDS =
+    "id,statement_import_id,statement_import_row_id,customer_id,event_type,summary,metadata,created_by,created_at";
 const STAFF_MEMBER_SELECT_FIELDS =
     "id,auth_user_id,email,full_name,role,is_active,phone,notes,is_system_admin,created_at,updated_at";
 const ROLE_PERMISSION_SELECT_FIELDS =
@@ -1208,6 +1432,7 @@ const PAGE_PERMISSION_OVERRIDES: Record<PageKey, StaffPageAccessKey> = {
   customerProfit: "customers",
   payments: "customers",
   expenses: "expenses",
+  paymentReconciliation: "expenses",
   customerProfile: "customers",
   actions: "actions",
   map: "map",
@@ -1235,6 +1460,7 @@ const CUSTOMER_FEATURE_PAGE_OVERRIDES: Record<PageKey, CustomerFeatureKey> = {
   customerProfit: "customerProfit",
   payments: "payments",
   expenses: "expenses",
+  paymentReconciliation: "payments",
   customerProfile: "customers",
   actions: "actions",
   map: "map",
@@ -1855,6 +2081,7 @@ const DEFAULT_WORKFLOW_TABLES_READY: WorkflowTablesReady = {
   recurringInvoiceTemplates: false,
   scheduledJobs: false,
   monthlyPayments: false,
+  paymentReconciliation: false,
   commercialRams: false,
   customerLeads: false,
 };
@@ -2613,6 +2840,16 @@ function formatDatabaseError(error: { code?: string; message: string }) {
 
   switch (error.code) {
     case "42P01":
+      if (
+          message.includes("statement_import") ||
+          message.includes("payment_matching_rules") ||
+          message.includes("payment_ignore_rules") ||
+          message.includes("customer_payment_fingerprints") ||
+          message.includes("customer_credit_balances") ||
+          message.includes("payment_audit_events")
+      ) {
+        return "Supabase is connected, but the payment reconciliation tables are missing. Run the latest tenant SQL setup script and refresh.";
+      }
       if (message.includes("monthly_payments")) {
         return "Supabase is connected, but the monthly_payments table is missing. Run the payment tracking SQL setup script and refresh.";
       }
@@ -2645,6 +2882,16 @@ function formatDatabaseError(error: { code?: string; message: string }) {
       }
       return "Supabase is reachable, but the shared app_state table is missing. Run the SQL setup script and refresh.";
     case "42501":
+      if (
+          message.includes("statement_import") ||
+          message.includes("payment_matching_rules") ||
+          message.includes("payment_ignore_rules") ||
+          message.includes("customer_payment_fingerprints") ||
+          message.includes("customer_credit_balances") ||
+          message.includes("payment_audit_events")
+      ) {
+        return "Supabase is connected, but the payment reconciliation policies are missing or too strict. Run the latest tenant SQL setup script and refresh.";
+      }
       if (message.includes("monthly_payments")) {
         return "Supabase is connected, but the monthly_payments policies are missing or too strict. Run the payment tracking SQL setup script and refresh.";
       }
@@ -2677,6 +2924,16 @@ function formatDatabaseError(error: { code?: string; message: string }) {
       }
       return `Supabase is reachable, but app_state access is still failing.${rawDetails}`;
     case "PGRST205":
+      if (
+          message.includes("statement_import") ||
+          message.includes("payment_matching_rules") ||
+          message.includes("payment_ignore_rules") ||
+          message.includes("customer_payment_fingerprints") ||
+          message.includes("customer_credit_balances") ||
+          message.includes("payment_audit_events")
+      ) {
+        return "Supabase is connected, but the payment reconciliation tables are missing. Run the latest tenant SQL setup script and refresh.";
+      }
       if (message.includes("monthly_payments")) {
         return "Supabase is connected, but the monthly_payments table is missing. Run the payment tracking SQL setup script and refresh.";
       }
@@ -2917,6 +3174,7 @@ function getWorkflowTablesNotice(workflowTables: WorkflowTablesReady) {
     workflowTables.invoices ? null : "invoices",
     workflowTables.recurringInvoiceTemplates ? null : "recurring_invoice_templates",
     workflowTables.scheduledJobs ? null : "scheduled_jobs",
+    workflowTables.paymentReconciliation ? null : "payment reconciliation tables",
     workflowTables.commercialRams ? null : "commercial_rams_documents",
     workflowTables.customerLeads ? null : "customer_leads",
   ].filter(Boolean);
@@ -3727,6 +3985,322 @@ function mapMonthlyPaymentToWriteRow(
   };
 }
 
+const PAYMENT_RECONCILIATION_IMPORT_STATUSES: PaymentReconciliationImportStatus[] = [
+  "reviewing",
+  "imported",
+  "partially_imported",
+  "undone",
+];
+const PAYMENT_RECONCILIATION_MATCH_STATUSES: PaymentReconciliationMatchStatus[] = [
+  "matched",
+  "possible_match",
+  "needs_review",
+  "no_match",
+  "already_imported",
+  "ignored",
+];
+
+function normalizePaymentImportStatus(value: string): PaymentReconciliationImportStatus {
+  return PAYMENT_RECONCILIATION_IMPORT_STATUSES.includes(
+      value as PaymentReconciliationImportStatus
+  )
+      ? (value as PaymentReconciliationImportStatus)
+      : "reviewing";
+}
+
+function normalizePaymentMatchStatus(value: string): PaymentReconciliationMatchStatus {
+  return PAYMENT_RECONCILIATION_MATCH_STATUSES.includes(
+      value as PaymentReconciliationMatchStatus
+  )
+      ? (value as PaymentReconciliationMatchStatus)
+      : "no_match";
+}
+
+function normalizeStatementRowStatus(value: string): StatementImportRowRecord["status"] {
+  return [
+    ...PAYMENT_RECONCILIATION_MATCH_STATUSES,
+    "confirmed",
+    "imported",
+    "undone",
+  ].includes(value as StatementImportRowRecord["status"])
+      ? (value as StatementImportRowRecord["status"])
+      : "no_match";
+}
+
+function mapStatementImportRowToRecord(row: StatementImportDbRow): StatementImportRecord {
+  return {
+    id: row.id,
+    fileName: row.file_name,
+    fileType: row.file_type,
+    rowCount: Number(row.row_count ?? 0),
+    importedCount: Number(row.imported_count ?? 0),
+    skippedCount: Number(row.skipped_count ?? 0),
+    matchedCount: Number(row.matched_count ?? 0),
+    manualMatchedCount: Number(row.manual_matched_count ?? 0),
+    ignoredCount: Number(row.ignored_count ?? 0),
+    totalAmount: Number(row.total_amount ?? 0),
+    status: normalizePaymentImportStatus(row.status),
+    importedBy: row.imported_by ?? undefined,
+    undoneAt: row.undone_at ?? undefined,
+    undoneBy: row.undone_by ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at ?? undefined,
+  };
+}
+
+function mapStatementImportToRow(importRecord: StatementImportRecord): StatementImportWriteRow {
+  return {
+    id: importRecord.id,
+    file_name: importRecord.fileName,
+    file_type: importRecord.fileType,
+    row_count: importRecord.rowCount,
+    imported_count: importRecord.importedCount,
+    skipped_count: importRecord.skippedCount,
+    matched_count: importRecord.matchedCount,
+    manual_matched_count: importRecord.manualMatchedCount,
+    ignored_count: importRecord.ignoredCount,
+    total_amount: importRecord.totalAmount,
+    status: importRecord.status,
+    imported_by: importRecord.importedBy ?? null,
+    undone_at: importRecord.undoneAt ?? null,
+    undone_by: importRecord.undoneBy ?? null,
+  };
+}
+
+function mapStatementImportRowDbToRecord(
+    row: StatementImportRowDbRow
+): StatementImportRowRecord {
+  const rawRow =
+      isRecord(row.raw_row)
+          ? Object.fromEntries(
+              Object.entries(row.raw_row).map(([key, value]) => [
+                key,
+                String(value ?? ""),
+              ])
+            )
+          : {};
+
+  return {
+    id: row.id,
+    statementImportId: row.statement_import_id,
+    transactionDate: row.transaction_date,
+    description: row.description,
+    customerNameFromStatement: row.customer_name_from_statement ?? undefined,
+    amount: Number(row.amount ?? 0),
+    suggestedCustomerId: row.suggested_customer_id ?? null,
+    selectedCustomerId: row.selected_customer_id ?? null,
+    selectedVisitIds: Array.isArray(row.selected_visit_ids)
+        ? row.selected_visit_ids
+        : [],
+    selectedInvoiceIds: Array.isArray(row.selected_invoice_ids)
+        ? row.selected_invoice_ids
+        : [],
+    allocations: Array.isArray(row.allocations) ? row.allocations : [],
+    matchConfidence: Number(row.match_confidence ?? 0),
+    matchReason: row.match_reason ?? "",
+    matchStatus: normalizePaymentMatchStatus(row.match_status),
+    status: normalizeStatementRowStatus(row.status),
+    duplicateOfPaymentId: row.duplicate_of_payment_id ?? undefined,
+    createdPaymentId: row.created_payment_id ?? undefined,
+    rawRow,
+    transactionFingerprint: row.transaction_fingerprint,
+    createdAt: row.created_at,
+  };
+}
+
+function mapStatementImportRowRecordToRow(
+    row: StatementImportRowRecord
+): StatementImportRowWriteRow {
+  return {
+    id: row.id,
+    statement_import_id: row.statementImportId,
+    transaction_date: row.transactionDate,
+    description: row.description,
+    customer_name_from_statement: row.customerNameFromStatement ?? null,
+    amount: row.amount,
+    suggested_customer_id: row.suggestedCustomerId ?? null,
+    selected_customer_id: row.selectedCustomerId ?? null,
+    selected_visit_ids: row.selectedVisitIds ?? [],
+    selected_invoice_ids: row.selectedInvoiceIds ?? [],
+    allocations: row.allocations,
+    match_confidence: row.matchConfidence,
+    match_reason: row.matchReason,
+    match_status: row.matchStatus,
+    status: row.status,
+    duplicate_of_payment_id: row.duplicateOfPaymentId ?? null,
+    created_payment_id: row.createdPaymentId ?? null,
+    raw_row: row.rawRow,
+    transaction_fingerprint: row.transactionFingerprint,
+  };
+}
+
+function normalizePaymentMatchingRuleType(
+    value: string
+): PaymentMatchingRule["matchType"] {
+  return [
+    "description_contains",
+    "customer_contains",
+    "reference_contains",
+    "address_contains",
+    "postcode_contains",
+    "amount_equals",
+  ].includes(value as PaymentMatchingRule["matchType"])
+      ? (value as PaymentMatchingRule["matchType"])
+      : "description_contains";
+}
+
+function mapPaymentMatchingRuleRowToRule(row: PaymentMatchingRuleDbRow): PaymentMatchingRule {
+  return {
+    id: row.id,
+    customerId: Number(row.customer_id),
+    matchType: normalizePaymentMatchingRuleType(row.match_type),
+    matchValue: row.match_value,
+    confidenceWeight: Number(row.confidence_weight ?? 90),
+    createdBy: row.created_by ?? undefined,
+    lastUsedAt: row.last_used_at ?? undefined,
+    useCount: Number(row.use_count ?? 0),
+    isEnabled: row.is_enabled !== false,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at ?? undefined,
+  };
+}
+
+function mapPaymentMatchingRuleToRow(rule: PaymentMatchingRule): PaymentMatchingRuleWriteRow {
+  return {
+    id: rule.id,
+    customer_id: rule.customerId,
+    match_type: rule.matchType,
+    match_value: rule.matchValue,
+    confidence_weight: rule.confidenceWeight,
+    created_by: rule.createdBy ?? null,
+    last_used_at: rule.lastUsedAt ?? null,
+    use_count: rule.useCount,
+    is_enabled: rule.isEnabled,
+  };
+}
+
+function normalizePaymentIgnoreRuleType(value: string): PaymentIgnoreRule["matchType"] {
+  return [
+    "description_contains",
+    "customer_contains",
+    "amount_equals",
+  ].includes(value as PaymentIgnoreRule["matchType"])
+      ? (value as PaymentIgnoreRule["matchType"])
+      : "description_contains";
+}
+
+function mapPaymentIgnoreRuleRowToRule(row: PaymentIgnoreRuleDbRow): PaymentIgnoreRule {
+  return {
+    id: row.id,
+    matchType: normalizePaymentIgnoreRuleType(row.match_type),
+    matchValue: row.match_value,
+    createdBy: row.created_by ?? undefined,
+    isEnabled: row.is_enabled !== false,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at ?? undefined,
+  };
+}
+
+function mapPaymentIgnoreRuleToRow(rule: PaymentIgnoreRule): PaymentIgnoreRuleWriteRow {
+  return {
+    id: rule.id,
+    match_type: rule.matchType,
+    match_value: rule.matchValue,
+    created_by: rule.createdBy ?? null,
+    is_enabled: rule.isEnabled,
+  };
+}
+
+function mapCustomerPaymentFingerprintRowToFingerprint(
+    row: CustomerPaymentFingerprintDbRow
+): CustomerPaymentFingerprint {
+  return {
+    id: row.id,
+    customerId: Number(row.customer_id),
+    typicalAmount: row.typical_amount != null ? Number(row.typical_amount) : undefined,
+    typicalReference: row.typical_reference ?? undefined,
+    typicalPaymentDelayDays:
+        row.typical_payment_delay_days != null
+            ? Number(row.typical_payment_delay_days)
+            : undefined,
+    usuallyPaysMultipleVisits: row.usually_pays_multiple_visits ?? undefined,
+    lastSeenAt: row.last_seen_at ?? undefined,
+    confidenceScore: Number(row.confidence_score ?? 60),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at ?? undefined,
+  };
+}
+
+function mapCustomerPaymentFingerprintToRow(
+    fingerprint: CustomerPaymentFingerprint
+): CustomerPaymentFingerprintWriteRow {
+  return {
+    id: fingerprint.id,
+    customer_id: fingerprint.customerId,
+    typical_amount: fingerprint.typicalAmount ?? null,
+    typical_reference: fingerprint.typicalReference ?? null,
+    typical_payment_delay_days: fingerprint.typicalPaymentDelayDays ?? null,
+    usually_pays_multiple_visits: fingerprint.usuallyPaysMultipleVisits ?? null,
+    last_seen_at: fingerprint.lastSeenAt ?? null,
+    confidence_score: fingerprint.confidenceScore,
+  };
+}
+
+function mapCustomerCreditBalanceRowToCredit(
+    row: CustomerCreditBalanceDbRow
+): CustomerCreditBalance {
+  return {
+    id: row.id,
+    customerId: Number(row.customer_id),
+    amount: Number(row.amount ?? 0),
+    sourceImportRowId: row.source_import_row_id ?? undefined,
+    note: row.note ?? undefined,
+    isReversed: row.is_reversed === true,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at ?? undefined,
+  };
+}
+
+function mapCustomerCreditBalanceToRow(
+    credit: CustomerCreditBalance
+): CustomerCreditBalanceWriteRow {
+  return {
+    id: credit.id,
+    customer_id: credit.customerId,
+    amount: credit.amount,
+    source_import_row_id: credit.sourceImportRowId ?? null,
+    note: credit.note ?? null,
+    is_reversed: credit.isReversed === true,
+  };
+}
+
+function mapPaymentAuditEventRowToEvent(row: PaymentAuditEventDbRow): PaymentAuditEvent {
+  return {
+    id: row.id,
+    statementImportId: row.statement_import_id ?? undefined,
+    statementImportRowId: row.statement_import_row_id ?? undefined,
+    customerId: row.customer_id ?? null,
+    eventType: row.event_type as PaymentAuditEvent["eventType"],
+    summary: row.summary,
+    metadata: isRecord(row.metadata) ? row.metadata : undefined,
+    createdBy: row.created_by ?? undefined,
+    createdAt: row.created_at,
+  };
+}
+
+function mapPaymentAuditEventToRow(event: PaymentAuditEvent): PaymentAuditEventWriteRow {
+  return {
+    id: event.id,
+    statement_import_id: event.statementImportId ?? null,
+    statement_import_row_id: event.statementImportRowId ?? null,
+    customer_id: event.customerId ?? null,
+    event_type: event.eventType,
+    summary: event.summary,
+    metadata: event.metadata ?? {},
+    created_by: event.createdBy ?? null,
+  };
+}
+
 const NAV_SECTIONS: {
   title: string;
   items: {
@@ -3773,6 +4347,7 @@ const NAV_SECTIONS: {
     items: [
       { key: "payments", label: "Payments", icon: CreditCard },
       { key: "expenses", label: "Expenses", icon: ReceiptText },
+      { key: "paymentReconciliation", label: "Reconciliation", icon: CreditCard },
       { key: "customerProfit", label: "Profit", icon: TrendingUp },
     ],
   },
@@ -3802,6 +4377,7 @@ const NAV_TOUR_TARGETS: Partial<Record<PageKey, string>> = {
   commercialDocs: "sidebar-documents",
   payments: "sidebar-payments",
   expenses: "sidebar-expenses",
+  paymentReconciliation: "sidebar-reconciliation",
   customerProfit: "sidebar-profit",
   staff: "sidebar-staff",
   settings: "sidebar-system",
@@ -5292,6 +5868,23 @@ export default function JobsApp({
   const [customerLeads, setCustomerLeads] = useState<CustomerLead[]>([]);
   const [visitLogs, setVisitLogs] = useState<VisitLog[]>([]);
   const [monthlyPayments, setMonthlyPayments] = useState<MonthlyPayment[]>([]);
+  const [statementImports, setStatementImports] = useState<StatementImportRecord[]>([]);
+  const [statementImportRows, setStatementImportRows] = useState<
+      StatementImportRowRecord[]
+  >([]);
+  const [paymentMatchingRules, setPaymentMatchingRules] = useState<
+      PaymentMatchingRule[]
+  >([]);
+  const [paymentIgnoreRules, setPaymentIgnoreRules] = useState<
+      PaymentIgnoreRule[]
+  >([]);
+  const [customerPaymentFingerprints, setCustomerPaymentFingerprints] = useState<
+      CustomerPaymentFingerprint[]
+  >([]);
+  const [customerCreditBalances, setCustomerCreditBalances] = useState<
+      CustomerCreditBalance[]
+  >([]);
+  const [, setPaymentAuditEvents] = useState<PaymentAuditEvent[]>([]);
   const [commercialRamsDocuments, setCommercialRamsDocuments] = useState<
       CommercialRamsDocument[]
   >([]);
@@ -6462,6 +7055,13 @@ export default function JobsApp({
           invoicesResult,
           recurringInvoiceTemplatesResult,
           scheduledJobsResult,
+          statementImportsResult,
+          statementImportRowsResult,
+          paymentMatchingRulesResult,
+          paymentIgnoreRulesResult,
+          customerPaymentFingerprintsResult,
+          customerCreditBalancesResult,
+          paymentAuditEventsResult,
           appStateResult,
           staffMembersResult,
           rolePermissionsResult,
@@ -6531,6 +7131,49 @@ export default function JobsApp({
                 .select(SCHEDULED_JOB_SELECT_FIELDS)
           )
               .order("date", { ascending: true }),
+          scopeToOrganization(
+            supabase
+                .from("statement_imports")
+                .select(STATEMENT_IMPORT_SELECT_FIELDS)
+          )
+              .order("created_at", { ascending: false }),
+          scopeToOrganization(
+            supabase
+                .from("statement_import_rows")
+                .select(STATEMENT_IMPORT_ROW_SELECT_FIELDS)
+          )
+              .order("created_at", { ascending: false }),
+          scopeToOrganization(
+            supabase
+                .from("payment_matching_rules")
+                .select(PAYMENT_MATCHING_RULE_SELECT_FIELDS)
+          )
+              .order("created_at", { ascending: false }),
+          scopeToOrganization(
+            supabase
+                .from("payment_ignore_rules")
+                .select(PAYMENT_IGNORE_RULE_SELECT_FIELDS)
+          )
+              .order("created_at", { ascending: false }),
+          scopeToOrganization(
+            supabase
+                .from("customer_payment_fingerprints")
+                .select(CUSTOMER_PAYMENT_FINGERPRINT_SELECT_FIELDS)
+          )
+              .order("last_seen_at", { ascending: false, nullsFirst: false }),
+          scopeToOrganization(
+            supabase
+                .from("customer_credit_balances")
+                .select(CUSTOMER_CREDIT_BALANCE_SELECT_FIELDS)
+          )
+              .order("created_at", { ascending: false }),
+          scopeToOrganization(
+            supabase
+                .from("payment_audit_events")
+                .select(PAYMENT_AUDIT_EVENT_SELECT_FIELDS)
+          )
+              .order("created_at", { ascending: false })
+              .limit(200),
           scopeToOrganization(
             supabase
                 .from(APP_STATE_TABLE)
@@ -6754,6 +7397,29 @@ export default function JobsApp({
           throw scheduledJobsResult.error;
         }
 
+        const paymentReconciliationResults = [
+          statementImportsResult,
+          statementImportRowsResult,
+          paymentMatchingRulesResult,
+          paymentIgnoreRulesResult,
+          customerPaymentFingerprintsResult,
+          customerCreditBalancesResult,
+          paymentAuditEventsResult,
+        ];
+        for (const reconciliationResult of paymentReconciliationResults) {
+          if (
+              reconciliationResult.error &&
+              !isMissingTableError(reconciliationResult.error) &&
+              !canIgnoreDeniedTable(reconciliationResult.error, [
+                "dashboard",
+                "invoices",
+                "customers",
+              ])
+          ) {
+            throw reconciliationResult.error;
+          }
+        }
+
         if (isCancelled) {
           return;
         }
@@ -6781,6 +7447,9 @@ export default function JobsApp({
           invoices: !invoicesResult.error,
           recurringInvoiceTemplates: !recurringInvoiceTemplatesResult.error,
           scheduledJobs: !scheduledJobsResult.error,
+          paymentReconciliation: paymentReconciliationResults.every(
+              (result) => !result.error
+          ),
         };
         const nextStaffTablesReady: StaffTablesReady = {
           staffMembers: !staffMembersResult.error,
@@ -7101,6 +7770,55 @@ export default function JobsApp({
                         mapMonthlyPaymentRowToMonthlyPayment
                     )
                 )
+                : []
+        );
+        setStatementImports(
+            nextWorkflowTablesReady.paymentReconciliation
+                ? ((statementImportsResult.data ?? []) as StatementImportDbRow[]).map(
+                    mapStatementImportRowToRecord
+                  )
+                : []
+        );
+        setStatementImportRows(
+            nextWorkflowTablesReady.paymentReconciliation
+                ? (
+                    (statementImportRowsResult.data ?? []) as StatementImportRowDbRow[]
+                  ).map(mapStatementImportRowDbToRecord)
+                : []
+        );
+        setPaymentMatchingRules(
+            nextWorkflowTablesReady.paymentReconciliation
+                ? (
+                    (paymentMatchingRulesResult.data ?? []) as PaymentMatchingRuleDbRow[]
+                  ).map(mapPaymentMatchingRuleRowToRule)
+                : []
+        );
+        setPaymentIgnoreRules(
+            nextWorkflowTablesReady.paymentReconciliation
+                ? (
+                    (paymentIgnoreRulesResult.data ?? []) as PaymentIgnoreRuleDbRow[]
+                  ).map(mapPaymentIgnoreRuleRowToRule)
+                : []
+        );
+        setCustomerPaymentFingerprints(
+            nextWorkflowTablesReady.paymentReconciliation
+                ? (
+                    (customerPaymentFingerprintsResult.data ?? []) as CustomerPaymentFingerprintDbRow[]
+                  ).map(mapCustomerPaymentFingerprintRowToFingerprint)
+                : []
+        );
+        setCustomerCreditBalances(
+            nextWorkflowTablesReady.paymentReconciliation
+                ? (
+                    (customerCreditBalancesResult.data ?? []) as CustomerCreditBalanceDbRow[]
+                  ).map(mapCustomerCreditBalanceRowToCredit)
+                : []
+        );
+        setPaymentAuditEvents(
+            nextWorkflowTablesReady.paymentReconciliation
+                ? ((paymentAuditEventsResult.data ?? []) as PaymentAuditEventDbRow[]).map(
+                    mapPaymentAuditEventRowToEvent
+                  )
                 : []
         );
         setCommercialRamsDocuments(nextCommercialRamsDocuments);
@@ -8619,6 +9337,10 @@ export default function JobsApp({
     }
   }
 
+  function visitIdsMatch(leftId: VisitLog["id"], rightId: VisitLog["id"]) {
+    return String(leftId) === String(rightId);
+  }
+
   async function persistVisit(visit: VisitLog) {
     const supabase = createSupabaseClient();
     const saveVisitRow = (payload: ReturnType<typeof mapVisitToRow> | ReturnType<typeof mapVisitToLegacyRow>) =>
@@ -8661,10 +9383,10 @@ export default function JobsApp({
     };
 
     setVisitLogs((prev) => {
-      const hasExisting = prev.some((entry) => entry.id === visit.id);
+      const hasExisting = prev.some((entry) => visitIdsMatch(entry.id, visit.id));
       if (hasExisting) {
         return prev.map((entry) =>
-            entry.id === visit.id ? persistedVisit : entry
+            visitIdsMatch(entry.id, visit.id) ? persistedVisit : entry
         );
       }
 
@@ -12246,7 +12968,7 @@ export default function JobsApp({
       visitId: number | string,
       paymentDate: string | null
   ) {
-    const existingVisit = visitLogs.find((visit) => visit.id === visitId);
+    const existingVisit = visitLogs.find((visit) => visitIdsMatch(visit.id, visitId));
     if (!existingVisit) return;
 
     await persistVisit({
@@ -12264,7 +12986,7 @@ export default function JobsApp({
       cutDate: string
   ) {
     const normalizedCutDate = getInputDateValue(cutDate);
-    const existingVisit = visitLogs.find((visit) => visit.id === visitId);
+    const existingVisit = visitLogs.find((visit) => visitIdsMatch(visit.id, visitId));
     if (!existingVisit || !normalizedCutDate) return;
 
     await persistVisit({
@@ -12324,12 +13046,738 @@ export default function JobsApp({
     }
   }
 
+  function addLocalPaymentAuditEvents(events: PaymentAuditEvent[]) {
+    if (events.length === 0) {
+      return;
+    }
+
+    setPaymentAuditEvents((prev) =>
+        [...events, ...prev].sort((left, right) =>
+            right.createdAt.localeCompare(left.createdAt)
+        )
+    );
+  }
+
+  async function persistPaymentAuditEvents(events: PaymentAuditEvent[]) {
+    if (!workflowTablesReady.paymentReconciliation || events.length === 0) {
+      return;
+    }
+
+    const supabase = createSupabaseClient();
+    const { error } = await supabase
+        .from("payment_audit_events")
+        .insert(
+            events.map((event) =>
+                withCurrentOrganizationId(mapPaymentAuditEventToRow(event))
+            )
+        );
+
+    if (error) {
+      setDatabaseError(formatDatabaseError(error));
+      throw error;
+    }
+  }
+
+  async function savePaymentMatchingRule(rule: PaymentMatchingRule) {
+    const now = new Date().toISOString();
+    const nextRule = {
+      ...rule,
+      updatedAt: now,
+    };
+
+    setPaymentMatchingRules((prev) => [
+      nextRule,
+      ...prev.filter((entry) => entry.id !== nextRule.id),
+    ]);
+
+    if (!workflowTablesReady.paymentReconciliation) {
+      return;
+    }
+
+    const supabase = createSupabaseClient();
+    const { error } = await supabase
+        .from("payment_matching_rules")
+        .upsert(withCurrentOrganizationId(mapPaymentMatchingRuleToRow(nextRule)), {
+          onConflict: "id",
+        });
+
+    if (error) {
+      setDatabaseError(formatDatabaseError(error));
+      throw error;
+    }
+  }
+
+  async function deletePaymentMatchingRule(ruleId: string) {
+    setPaymentMatchingRules((prev) => prev.filter((rule) => rule.id !== ruleId));
+
+    if (!workflowTablesReady.paymentReconciliation) {
+      return;
+    }
+
+    const supabase = createSupabaseClient();
+    const { error } = await supabase
+        .from("payment_matching_rules")
+        .delete()
+        .eq("id", ruleId)
+        .eq("organization_id", getWritableOrganizationId());
+
+    if (error) {
+      setDatabaseError(formatDatabaseError(error));
+      throw error;
+    }
+  }
+
+  async function savePaymentIgnoreRule(rule: PaymentIgnoreRule) {
+    const now = new Date().toISOString();
+    const nextRule = {
+      ...rule,
+      updatedAt: now,
+    };
+
+    setPaymentIgnoreRules((prev) => [
+      nextRule,
+      ...prev.filter((entry) => entry.id !== nextRule.id),
+    ]);
+
+    if (!workflowTablesReady.paymentReconciliation) {
+      return;
+    }
+
+    const supabase = createSupabaseClient();
+    const { error } = await supabase
+        .from("payment_ignore_rules")
+        .upsert(withCurrentOrganizationId(mapPaymentIgnoreRuleToRow(nextRule)), {
+          onConflict: "id",
+        });
+
+    if (error) {
+      setDatabaseError(formatDatabaseError(error));
+      throw error;
+    }
+  }
+
+  async function deletePaymentIgnoreRule(ruleId: string) {
+    setPaymentIgnoreRules((prev) => prev.filter((rule) => rule.id !== ruleId));
+
+    if (!workflowTablesReady.paymentReconciliation) {
+      return;
+    }
+
+    const supabase = createSupabaseClient();
+    const { error } = await supabase
+        .from("payment_ignore_rules")
+        .delete()
+        .eq("id", ruleId)
+        .eq("organization_id", getWritableOrganizationId());
+
+    if (error) {
+      setDatabaseError(formatDatabaseError(error));
+      throw error;
+    }
+  }
+
+  function createCustomerPaymentFingerprintFromRow(
+      row: ReconciliationReviewRow,
+      customerId: number,
+      now: string
+  ): CustomerPaymentFingerprint | null {
+    const typicalReference =
+        normalizeStatementText(row.customerNameFromStatement || row.description)
+            .slice(0, 120) || undefined;
+
+    const alreadyExists = customerPaymentFingerprints.some(
+        (fingerprint) =>
+            fingerprint.customerId === customerId &&
+            Math.abs(Number(fingerprint.typicalAmount ?? 0) - row.amount) < 0.01 &&
+            normalizeStatementText(fingerprint.typicalReference) ===
+                normalizeStatementText(typicalReference)
+    );
+
+    if (alreadyExists) {
+      return null;
+    }
+
+    return {
+      id: crypto.randomUUID(),
+      customerId,
+      typicalAmount: row.amount,
+      typicalReference,
+      usuallyPaysMultipleVisits: row.selectedAllocations.filter(
+          (allocation) => allocation.type === "visit"
+      ).length > 1,
+      lastSeenAt: toStoredDateTime(row.transactionDate) ?? now,
+      confidenceScore: Math.max(65, Math.min(95, row.matchConfidence)),
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  function isImportableReconciliationRow(row: ReconciliationReviewRow) {
+    return (
+        row.selectedCustomerId != null &&
+        row.matchStatus !== "ignored" &&
+        row.matchStatus !== "already_imported" &&
+        row.selectedAllocations.length > 0
+    );
+  }
+
+  async function importStatementRows(
+      fileName: string,
+      reviewRows: ReconciliationReviewRow[],
+      selectedRowIds: string[]
+  ) {
+    const selectedIdSet = new Set(selectedRowIds);
+    const now = new Date().toISOString();
+    const importableRows = reviewRows.filter(
+        (row) => selectedIdSet.has(row.id) && isImportableReconciliationRow(row)
+    );
+
+    if (importableRows.length === 0) {
+      throw new Error("Select at least one matched payment row to import.");
+    }
+
+    const importId = crypto.randomUUID();
+    const createdCredits: CustomerCreditBalance[] = [];
+    const createdFingerprints: CustomerPaymentFingerprint[] = [];
+    const learnedRules: PaymentMatchingRule[] = [];
+    const updatedRulesById = new Map<string, PaymentMatchingRule>();
+    const auditEvents: PaymentAuditEvent[] = [
+      {
+        id: crypto.randomUUID(),
+        statementImportId: importId,
+        eventType: "import_created",
+        summary: `Imported ${importableRows.length} payment row${importableRows.length === 1 ? "" : "s"} from ${fileName}.`,
+        metadata: { fileName, selectedRowIds },
+        createdBy: currentUserId ?? undefined,
+        createdAt: now,
+      },
+    ];
+
+    for (const row of importableRows) {
+      const customerId = row.selectedCustomerId;
+
+      if (customerId == null) {
+        continue;
+      }
+
+      row.usedRuleIds.forEach((ruleId) => {
+        const rule = paymentMatchingRules.find((entry) => entry.id === ruleId);
+        if (!rule) {
+          return;
+        }
+
+        updatedRulesById.set(rule.id, {
+          ...rule,
+          useCount: rule.useCount + 1,
+          lastUsedAt: now,
+          updatedAt: now,
+        });
+      });
+
+      if (row.learnMatch) {
+        const nextRule = createLearnedRuleFromRow({
+          row,
+          customerId,
+          createdBy: currentUserId ?? undefined,
+        });
+        const duplicateRule = [...paymentMatchingRules, ...learnedRules].some(
+            (rule) =>
+                rule.customerId === nextRule.customerId &&
+                rule.matchType === nextRule.matchType &&
+                normalizeStatementText(rule.matchValue) ===
+                    normalizeStatementText(nextRule.matchValue)
+        );
+
+        if (!duplicateRule) {
+          learnedRules.push(nextRule);
+        }
+      }
+
+      const fingerprint = createCustomerPaymentFingerprintFromRow(row, customerId, now);
+      if (fingerprint) {
+        createdFingerprints.push(fingerprint);
+      }
+    }
+
+    const rowRecords: StatementImportRowRecord[] = [];
+
+    for (const row of reviewRows) {
+      const selectedForImport = importableRows.some((entry) => entry.id === row.id);
+      const rowId = crypto.randomUUID();
+      const selectedVisitIds = selectedForImport
+          ? row.selectedAllocations
+              .filter((allocation) => allocation.type === "visit" && allocation.targetId)
+              .map((allocation) => allocation.targetId as string)
+          : [];
+      const selectedInvoiceIds = selectedForImport
+          ? row.selectedAllocations
+              .filter((allocation) => allocation.type === "invoice" && allocation.targetId)
+              .map((allocation) => allocation.targetId as string)
+          : [];
+
+      rowRecords.push({
+        id: rowId,
+        statementImportId: importId,
+        transactionDate: row.transactionDate,
+        description: row.description,
+        customerNameFromStatement: row.customerNameFromStatement || undefined,
+        amount: row.amount,
+        suggestedCustomerId: row.suggestedCustomerId,
+        selectedCustomerId: row.selectedCustomerId,
+        selectedVisitIds,
+        selectedInvoiceIds,
+        allocations: selectedForImport ? row.selectedAllocations : [],
+        matchConfidence: row.matchConfidence,
+        matchReason: row.matchReason,
+        matchStatus: row.matchStatus,
+        status: selectedForImport ? "imported" : row.matchStatus,
+        duplicateOfPaymentId: row.duplicateOfPaymentId,
+        createdPaymentId: selectedForImport
+            ? row.selectedAllocations
+                .map((allocation) =>
+                    allocation.targetId
+                        ? `${allocation.type}:${allocation.targetId}`
+                        : allocation.type
+                )
+                .join(",")
+            : undefined,
+        rawRow: row.rawRow,
+        transactionFingerprint: row.transactionFingerprint,
+        createdAt: now,
+      });
+    }
+
+    for (const row of importableRows) {
+      const rowRecord = rowRecords.find(
+          (record) => record.transactionFingerprint === row.transactionFingerprint
+      );
+
+      for (const allocation of row.selectedAllocations) {
+        const isPartialAllocation = allocation.isPartial === true;
+
+        if (
+            allocation.type === "monthly_payment" &&
+            allocation.targetId &&
+            row.selectedCustomerId != null &&
+            !isPartialAllocation
+        ) {
+          await saveMonthlyPaymentDate(
+              row.selectedCustomerId,
+              allocation.targetId,
+              allocation.paymentDate ?? row.transactionDate
+          );
+          auditEvents.push({
+            id: crypto.randomUUID(),
+            statementImportId: importId,
+            statementImportRowId: rowRecord?.id,
+            customerId: row.selectedCustomerId,
+            eventType: "payment_created",
+            summary: `Marked ${allocation.targetLabel} paid from bank import.`,
+            metadata: { allocation },
+            createdBy: currentUserId ?? undefined,
+            createdAt: now,
+          });
+          continue;
+        }
+
+        if (allocation.type === "visit" && allocation.targetId && !isPartialAllocation) {
+          await saveVisitPaymentDate(
+              allocation.targetId,
+              allocation.paymentDate ?? row.transactionDate
+          );
+          auditEvents.push({
+            id: crypto.randomUUID(),
+            statementImportId: importId,
+            statementImportRowId: rowRecord?.id,
+            customerId: row.selectedCustomerId,
+            eventType: "payment_created",
+            summary: `Marked ${allocation.targetLabel} paid from bank import.`,
+            metadata: { allocation },
+            createdBy: currentUserId ?? undefined,
+            createdAt: now,
+          });
+          continue;
+        }
+
+        if (allocation.type === "invoice" && allocation.targetId && !isPartialAllocation) {
+          const invoice = invoices.find((entry) => entry.id === allocation.targetId);
+          if (invoice) {
+            const invoiceSaved = await saveInvoiceRecord({
+              ...invoice,
+              status: "Paid",
+              stripePaymentCompletedAt:
+                  toStoredDateTime(allocation.paymentDate ?? row.transactionDate) ??
+                  invoice.stripePaymentCompletedAt,
+            });
+
+            if (invoiceSaved) {
+              appendInvoiceHistory(
+                  invoice.id,
+                  createDocumentHistoryEntry(
+                      "updated",
+                      `Marked paid from bank reconciliation import ${fileName}.`
+                  )
+              );
+            }
+          }
+
+          auditEvents.push({
+            id: crypto.randomUUID(),
+            statementImportId: importId,
+            statementImportRowId: rowRecord?.id,
+            customerId: row.selectedCustomerId,
+            eventType: "payment_created",
+            summary: `Marked ${allocation.targetLabel} paid from bank import.`,
+            metadata: { allocation },
+            createdBy: currentUserId ?? undefined,
+            createdAt: now,
+          });
+          continue;
+        }
+
+        if (
+            row.selectedCustomerId != null &&
+            (
+                allocation.type === "credit" ||
+                allocation.type === "on_account" ||
+                isPartialAllocation
+            )
+        ) {
+          const credit: CustomerCreditBalance = {
+            id: crypto.randomUUID(),
+            customerId: row.selectedCustomerId,
+            amount: allocation.amount,
+            sourceImportRowId: rowRecord?.id,
+            note: isPartialAllocation
+                ? `Partial payment recorded against ${allocation.targetLabel}.`
+                : allocation.targetLabel,
+            isReversed: false,
+            createdAt: now,
+            updatedAt: now,
+          };
+
+          createdCredits.push(credit);
+          auditEvents.push({
+            id: crypto.randomUUID(),
+            statementImportId: importId,
+            statementImportRowId: rowRecord?.id,
+            customerId: row.selectedCustomerId,
+            eventType: "credit_created",
+            summary: `Recorded ${formatCurrencyAmount(credit.amount, appSettings.currencyCode)} as customer credit/on-account value.`,
+            metadata: { allocation },
+            createdBy: currentUserId ?? undefined,
+            createdAt: now,
+          });
+        }
+      }
+
+      auditEvents.push({
+        id: crypto.randomUUID(),
+        statementImportId: importId,
+        statementImportRowId: rowRecord?.id,
+        customerId: row.selectedCustomerId,
+        eventType:
+            row.suggestedCustomerId !== row.selectedCustomerId
+                ? "manual_match"
+                : "row_confirmed",
+        summary: `Confirmed bank row ${row.rowIndex} for reconciliation.`,
+        metadata: {
+          transactionFingerprint: row.transactionFingerprint,
+          amount: row.amount,
+        },
+        createdBy: currentUserId ?? undefined,
+        createdAt: now,
+      });
+    }
+
+    const ignoredCount = rowRecords.filter((row) => row.status === "ignored").length;
+    const skippedCount = Math.max(0, reviewRows.length - importableRows.length);
+    const importRecord: StatementImportRecord = {
+      id: importId,
+      fileName,
+      fileType: "csv",
+      rowCount: reviewRows.length,
+      importedCount: importableRows.length,
+      skippedCount,
+      matchedCount: importableRows.filter((row) => row.matchStatus === "matched").length,
+      manualMatchedCount: importableRows.filter(
+          (row) => row.selectedCustomerId !== row.suggestedCustomerId
+      ).length,
+      ignoredCount,
+      totalAmount: importableRows.reduce((total, row) => total + row.amount, 0),
+      status: skippedCount > 0 ? "partially_imported" : "imported",
+      importedBy: currentUserId ?? undefined,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const nextRules = [
+      ...Array.from(updatedRulesById.values()),
+      ...learnedRules,
+    ];
+
+    setStatementImports((prev) =>
+        [importRecord, ...prev].sort((left, right) =>
+            right.createdAt.localeCompare(left.createdAt)
+        )
+    );
+    setStatementImportRows((prev) => [...rowRecords, ...prev]);
+    setPaymentMatchingRules((prev) => {
+      const replacements = new Map(nextRules.map((rule) => [rule.id, rule]));
+      return [
+        ...nextRules,
+        ...prev.filter((rule) => !replacements.has(rule.id)),
+      ];
+    });
+    setCustomerPaymentFingerprints((prev) => [...createdFingerprints, ...prev]);
+    setCustomerCreditBalances((prev) => [...createdCredits, ...prev]);
+    addLocalPaymentAuditEvents(auditEvents);
+
+    if (workflowTablesReady.paymentReconciliation) {
+      const supabase = createSupabaseClient();
+      const importResult = await supabase
+          .from("statement_imports")
+          .upsert(withCurrentOrganizationId(mapStatementImportToRow(importRecord)), {
+            onConflict: "id",
+          });
+
+      if (importResult.error) {
+        setDatabaseError(formatDatabaseError(importResult.error));
+        throw importResult.error;
+      }
+
+      const rowsResult = await supabase
+          .from("statement_import_rows")
+          .upsert(
+              rowRecords.map((row) =>
+                  withCurrentOrganizationId(mapStatementImportRowRecordToRow(row))
+              ),
+              { onConflict: "id" }
+          );
+
+      if (rowsResult.error) {
+        setDatabaseError(formatDatabaseError(rowsResult.error));
+        throw rowsResult.error;
+      }
+
+      if (nextRules.length > 0) {
+        const rulesResult = await supabase
+            .from("payment_matching_rules")
+            .upsert(
+                nextRules.map((rule) =>
+                    withCurrentOrganizationId(mapPaymentMatchingRuleToRow(rule))
+                ),
+                { onConflict: "id" }
+            );
+
+        if (rulesResult.error) {
+          setDatabaseError(formatDatabaseError(rulesResult.error));
+          throw rulesResult.error;
+        }
+      }
+
+      if (createdFingerprints.length > 0) {
+        const fingerprintsResult = await supabase
+            .from("customer_payment_fingerprints")
+            .upsert(
+                createdFingerprints.map((fingerprint) =>
+                    withCurrentOrganizationId(
+                        mapCustomerPaymentFingerprintToRow(fingerprint)
+                    )
+                ),
+                { onConflict: "id" }
+            );
+
+        if (fingerprintsResult.error) {
+          setDatabaseError(formatDatabaseError(fingerprintsResult.error));
+          throw fingerprintsResult.error;
+        }
+      }
+
+      if (createdCredits.length > 0) {
+        const creditsResult = await supabase
+            .from("customer_credit_balances")
+            .upsert(
+                createdCredits.map((credit) =>
+                    withCurrentOrganizationId(mapCustomerCreditBalanceToRow(credit))
+                ),
+                { onConflict: "id" }
+            );
+
+        if (creditsResult.error) {
+          setDatabaseError(formatDatabaseError(creditsResult.error));
+          throw creditsResult.error;
+        }
+      }
+
+      await persistPaymentAuditEvents(auditEvents);
+    }
+
+    setDatabaseError(getDatabaseSetupNotice(workflowTablesReady, staffTablesReady));
+  }
+
+  async function undoStatementImport(importId: string) {
+    const existingImport = statementImports.find((entry) => entry.id === importId);
+
+    if (!existingImport || existingImport.status === "undone") {
+      return;
+    }
+
+    const shouldUndo = window.confirm(
+        `Undo payment import ${existingImport.fileName}? This will remove payment dates created by this import where possible and reverse customer credit entries.`
+    );
+
+    if (!shouldUndo) {
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const importRows = statementImportRows.filter(
+        (row) => row.statementImportId === importId
+    );
+    const importedRows = importRows.filter((row) => row.status === "imported");
+
+    for (const row of importedRows) {
+      for (const allocation of row.allocations) {
+        if (
+            allocation.type === "monthly_payment" &&
+            allocation.targetId &&
+            row.selectedCustomerId != null &&
+            !allocation.isPartial
+        ) {
+          await saveMonthlyPaymentDate(row.selectedCustomerId, allocation.targetId, null);
+        }
+
+        if (allocation.type === "visit" && allocation.targetId && !allocation.isPartial) {
+          const visit = visitLogs.find(
+              (entry) => String(entry.id) === String(allocation.targetId)
+          );
+          const paymentDate = allocation.paymentDate ?? row.transactionDate;
+
+          if (visit?.paidAt?.startsWith(paymentDate)) {
+            await saveVisitPaymentDate(allocation.targetId, null);
+          }
+        }
+
+        if (allocation.type === "invoice" && allocation.targetId && !allocation.isPartial) {
+          const invoice = invoices.find((entry) => entry.id === allocation.targetId);
+
+          if (invoice?.status === "Paid") {
+            await saveInvoiceRecord({
+              ...invoice,
+              status: "Unpaid",
+              stripePaymentCompletedAt: undefined,
+            });
+            appendInvoiceHistory(
+                invoice.id,
+                createDocumentHistoryEntry(
+                    "updated",
+                    `Undid bank reconciliation import ${existingImport.fileName}.`
+                )
+            );
+          }
+        }
+      }
+    }
+
+    const nextImport: StatementImportRecord = {
+      ...existingImport,
+      status: "undone",
+      undoneAt: now,
+      undoneBy: currentUserId ?? undefined,
+      updatedAt: now,
+    };
+    const nextRows = importRows.map((row) => ({
+      ...row,
+      status: "undone" as StatementImportRowRecord["status"],
+    }));
+    const nextCredits = customerCreditBalances.map((credit) =>
+        nextRows.some((row) => row.id === credit.sourceImportRowId)
+            ? { ...credit, isReversed: true, updatedAt: now }
+            : credit
+    );
+    const auditEvent: PaymentAuditEvent = {
+      id: crypto.randomUUID(),
+      statementImportId: importId,
+      eventType: "import_undone",
+      summary: `Undid payment import ${existingImport.fileName}.`,
+      metadata: { importId },
+      createdBy: currentUserId ?? undefined,
+      createdAt: now,
+    };
+
+    setStatementImports((prev) =>
+        prev.map((entry) => (entry.id === importId ? nextImport : entry))
+    );
+    setStatementImportRows((prev) =>
+        prev.map((row) => nextRows.find((entry) => entry.id === row.id) ?? row)
+    );
+    setCustomerCreditBalances(nextCredits);
+    addLocalPaymentAuditEvents([auditEvent]);
+
+    if (workflowTablesReady.paymentReconciliation) {
+      const supabase = createSupabaseClient();
+      const importResult = await supabase
+          .from("statement_imports")
+          .upsert(withCurrentOrganizationId(mapStatementImportToRow(nextImport)), {
+            onConflict: "id",
+          });
+
+      if (importResult.error) {
+        setDatabaseError(formatDatabaseError(importResult.error));
+        throw importResult.error;
+      }
+
+      if (nextRows.length > 0) {
+        const rowsResult = await supabase
+            .from("statement_import_rows")
+            .upsert(
+                nextRows.map((row) =>
+                    withCurrentOrganizationId(mapStatementImportRowRecordToRow(row))
+                ),
+                { onConflict: "id" }
+            );
+
+        if (rowsResult.error) {
+          setDatabaseError(formatDatabaseError(rowsResult.error));
+          throw rowsResult.error;
+        }
+      }
+
+      const reversedCredits = nextCredits.filter(
+          (credit) =>
+              credit.isReversed &&
+              nextRows.some((row) => row.id === credit.sourceImportRowId)
+      );
+
+      if (reversedCredits.length > 0) {
+        const creditsResult = await supabase
+            .from("customer_credit_balances")
+            .upsert(
+                reversedCredits.map((credit) =>
+                    withCurrentOrganizationId(mapCustomerCreditBalanceToRow(credit))
+                ),
+                { onConflict: "id" }
+            );
+
+        if (creditsResult.error) {
+          setDatabaseError(formatDatabaseError(creditsResult.error));
+          throw creditsResult.error;
+        }
+      }
+
+      await persistPaymentAuditEvents([auditEvent]);
+    }
+
+    setDatabaseError(getDatabaseSetupNotice(workflowTablesReady, staffTablesReady));
+  }
+
   async function removeVisit(visitId: number | string) {
-    const existingVisit = visitLogs.find((visit) => visit.id === visitId);
+    const existingVisit = visitLogs.find((visit) => visitIdsMatch(visit.id, visitId));
     if (!existingVisit) return;
 
     if (String(visitId).startsWith("temp-")) {
-      setVisitLogs((prev) => prev.filter((visit) => visit.id !== visitId));
+      setVisitLogs((prev) => prev.filter((visit) => !visitIdsMatch(visit.id, visitId)));
       return;
     }
 
@@ -12345,12 +13793,12 @@ export default function JobsApp({
       throw error;
     }
 
-    setVisitLogs((prev) => prev.filter((visit) => visit.id !== visitId));
+    setVisitLogs((prev) => prev.filter((visit) => !visitIdsMatch(visit.id, visitId)));
     setDatabaseError(getDatabaseSetupNotice(workflowTablesReady, staffTablesReady));
   }
 
   async function togglePaid(visitId: number | string) {
-    const existingVisit = visitLogs.find((visit) => visit.id === visitId);
+    const existingVisit = visitLogs.find((visit) => visitIdsMatch(visit.id, visitId));
     if (!existingVisit) return;
 
     const isPaidNow =
@@ -14207,14 +15655,29 @@ export default function JobsApp({
                   <PaymentsPage
                       customers={customers}
                       visits={visitLogs}
+                      invoices={invoices}
                       monthlyPayments={monthlyPayments}
+                      scheduledJobs={scheduledJobs}
+                      statementImports={statementImports}
+                      statementImportRows={statementImportRows}
+                      paymentMatchingRules={paymentMatchingRules}
+                      paymentIgnoreRules={paymentIgnoreRules}
+                      customerPaymentFingerprints={customerPaymentFingerprints}
+                      customerCredits={customerCreditBalances}
                       defaultRotationWeeks={defaultRotationWeeks}
                       activeRotationWeeks={activeRotationWeeks}
                       weekOptions={activeWeekOptions}
                       grassCutSeasonStart={appSettings.grassCutSeasonStart}
                       grassCutSeasonEnd={appSettings.grassCutSeasonEnd}
                       monthlyPaymentsReady={workflowTablesReady.monthlyPayments}
+                      reconciliationReady={workflowTablesReady.paymentReconciliation}
                       pendingCashPaymentDates={pendingCashPaymentDates}
+                      onImportStatementRows={importStatementRows}
+                      onUndoStatementImport={undoStatementImport}
+                      onSavePaymentMatchingRule={savePaymentMatchingRule}
+                      onDeletePaymentMatchingRule={deletePaymentMatchingRule}
+                      onSavePaymentIgnoreRule={savePaymentIgnoreRule}
+                      onDeletePaymentIgnoreRule={deletePaymentIgnoreRule}
                       onSaveMonthlyPayment={saveMonthlyPaymentDate}
                       onSaveVisitCutDate={saveVisitCutDate}
                       onCreateVisitCutDate={createVisitCutDate}
@@ -14237,6 +15700,43 @@ export default function JobsApp({
                       onSaveExpense={saveExpenseRecord}
                       onDeleteExpense={deleteExpenseRecord}
                       onAddProductToQuoteItems={addExpenseProductToQuoteItems}
+                  />
+              )}
+
+              {page === "paymentReconciliation" && (
+                  <PaymentsPage
+                      customers={customers}
+                      visits={visitLogs}
+                      invoices={invoices}
+                      monthlyPayments={monthlyPayments}
+                      scheduledJobs={scheduledJobs}
+                      statementImports={statementImports}
+                      statementImportRows={statementImportRows}
+                      paymentMatchingRules={paymentMatchingRules}
+                      paymentIgnoreRules={paymentIgnoreRules}
+                      customerPaymentFingerprints={customerPaymentFingerprints}
+                      customerCredits={customerCreditBalances}
+                      defaultRotationWeeks={defaultRotationWeeks}
+                      activeRotationWeeks={activeRotationWeeks}
+                      weekOptions={activeWeekOptions}
+                      grassCutSeasonStart={appSettings.grassCutSeasonStart}
+                      grassCutSeasonEnd={appSettings.grassCutSeasonEnd}
+                      monthlyPaymentsReady={workflowTablesReady.monthlyPayments}
+                      reconciliationReady={workflowTablesReady.paymentReconciliation}
+                      pendingCashPaymentDates={pendingCashPaymentDates}
+                      onImportStatementRows={importStatementRows}
+                      onUndoStatementImport={undoStatementImport}
+                      onSavePaymentMatchingRule={savePaymentMatchingRule}
+                      onDeletePaymentMatchingRule={deletePaymentMatchingRule}
+                      onSavePaymentIgnoreRule={savePaymentIgnoreRule}
+                      onDeletePaymentIgnoreRule={deletePaymentIgnoreRule}
+                      reconciliationOnly
+                      onSaveMonthlyPayment={saveMonthlyPaymentDate}
+                      onSaveVisitCutDate={saveVisitCutDate}
+                      onCreateVisitCutDate={createVisitCutDate}
+                      onSaveVisitPaymentDate={saveVisitPaymentDate}
+                      onDeleteVisit={removeVisit}
+                      onOpenCustomer={openCustomerProfile}
                   />
               )}
 

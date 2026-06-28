@@ -1097,6 +1097,185 @@ create table if not exists public.monthly_payments (
 create index if not exists monthly_payments_org_month_idx
 on public.monthly_payments (organization_id, payment_month asc);
 
+create table if not exists public.statement_imports (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null default public.current_organization_id()
+    references public.organizations(id) on delete cascade,
+  file_name text not null,
+  file_type text not null default 'csv',
+  row_count integer not null default 0,
+  imported_count integer not null default 0,
+  skipped_count integer not null default 0,
+  matched_count integer not null default 0,
+  manual_matched_count integer not null default 0,
+  ignored_count integer not null default 0,
+  total_amount numeric(12, 2) not null default 0,
+  status text not null default 'reviewing' check (
+    status in ('reviewing', 'imported', 'partially_imported', 'undone')
+  ),
+  imported_by uuid null references auth.users(id) on delete set null,
+  undone_at timestamptz null,
+  undone_by uuid null references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists statement_imports_org_created_idx
+on public.statement_imports (organization_id, created_at desc);
+
+create table if not exists public.statement_import_rows (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null default public.current_organization_id()
+    references public.organizations(id) on delete cascade,
+  statement_import_id uuid not null references public.statement_imports(id) on delete cascade,
+  transaction_date date not null,
+  description text not null default '',
+  customer_name_from_statement text null,
+  amount numeric(12, 2) not null default 0,
+  suggested_customer_id bigint null references public.customers(id) on delete set null,
+  selected_customer_id bigint null references public.customers(id) on delete set null,
+  selected_visit_ids jsonb not null default '[]'::jsonb,
+  selected_invoice_ids jsonb not null default '[]'::jsonb,
+  allocations jsonb not null default '[]'::jsonb,
+  match_confidence integer not null default 0,
+  match_reason text not null default '',
+  match_status text not null default 'no_match' check (
+    match_status in ('matched', 'possible_match', 'needs_review', 'no_match', 'already_imported', 'ignored')
+  ),
+  status text not null default 'no_match' check (
+    status in ('matched', 'possible_match', 'needs_review', 'no_match', 'already_imported', 'ignored', 'confirmed', 'imported', 'undone')
+  ),
+  duplicate_of_payment_id text null,
+  created_payment_id text null,
+  raw_row jsonb not null default '{}'::jsonb,
+  transaction_fingerprint text not null,
+  created_at timestamptz not null default now(),
+  check (jsonb_typeof(selected_visit_ids) = 'array'),
+  check (jsonb_typeof(selected_invoice_ids) = 'array'),
+  check (jsonb_typeof(allocations) = 'array'),
+  check (jsonb_typeof(raw_row) = 'object')
+);
+
+create index if not exists statement_import_rows_org_import_idx
+on public.statement_import_rows (organization_id, statement_import_id);
+
+create index if not exists statement_import_rows_org_customer_idx
+on public.statement_import_rows (organization_id, selected_customer_id, transaction_date desc);
+
+create unique index if not exists statement_import_rows_org_fingerprint_active_unique_idx
+on public.statement_import_rows (organization_id, transaction_fingerprint)
+where status not in ('ignored', 'undone');
+
+create table if not exists public.payment_matching_rules (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null default public.current_organization_id()
+    references public.organizations(id) on delete cascade,
+  customer_id bigint not null references public.customers(id) on delete cascade,
+  match_type text not null check (
+    match_type in (
+      'description_contains',
+      'customer_contains',
+      'reference_contains',
+      'address_contains',
+      'postcode_contains',
+      'amount_equals'
+    )
+  ),
+  match_value text not null,
+  confidence_weight integer not null default 90,
+  created_by uuid null references auth.users(id) on delete set null,
+  last_used_at timestamptz null,
+  use_count integer not null default 0,
+  is_enabled boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists payment_matching_rules_org_customer_idx
+on public.payment_matching_rules (organization_id, customer_id);
+
+create unique index if not exists payment_matching_rules_org_unique_idx
+on public.payment_matching_rules (organization_id, customer_id, match_type, lower(match_value));
+
+create table if not exists public.payment_ignore_rules (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null default public.current_organization_id()
+    references public.organizations(id) on delete cascade,
+  match_type text not null check (
+    match_type in ('description_contains', 'customer_contains', 'amount_equals')
+  ),
+  match_value text not null,
+  created_by uuid null references auth.users(id) on delete set null,
+  is_enabled boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists payment_ignore_rules_org_unique_idx
+on public.payment_ignore_rules (organization_id, match_type, lower(match_value));
+
+create table if not exists public.customer_payment_fingerprints (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null default public.current_organization_id()
+    references public.organizations(id) on delete cascade,
+  customer_id bigint not null references public.customers(id) on delete cascade,
+  typical_amount numeric(12, 2) null,
+  typical_reference text null,
+  typical_payment_delay_days integer null,
+  usually_pays_multiple_visits boolean null,
+  last_seen_at timestamptz null,
+  confidence_score integer not null default 60,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists customer_payment_fingerprints_org_customer_idx
+on public.customer_payment_fingerprints (organization_id, customer_id, last_seen_at desc);
+
+create table if not exists public.customer_credit_balances (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null default public.current_organization_id()
+    references public.organizations(id) on delete cascade,
+  customer_id bigint not null references public.customers(id) on delete cascade,
+  amount numeric(12, 2) not null default 0,
+  source_import_row_id uuid null references public.statement_import_rows(id) on delete set null,
+  note text null,
+  is_reversed boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists customer_credit_balances_org_customer_idx
+on public.customer_credit_balances (organization_id, customer_id, created_at desc);
+
+create table if not exists public.payment_audit_events (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null default public.current_organization_id()
+    references public.organizations(id) on delete cascade,
+  statement_import_id uuid null references public.statement_imports(id) on delete set null,
+  statement_import_row_id uuid null references public.statement_import_rows(id) on delete set null,
+  customer_id bigint null references public.customers(id) on delete set null,
+  event_type text not null check (
+    event_type in (
+      'import_created',
+      'row_confirmed',
+      'row_ignored',
+      'manual_match',
+      'payment_created',
+      'credit_created',
+      'import_undone'
+    )
+  ),
+  summary text not null,
+  metadata jsonb not null default '{}'::jsonb,
+  created_by uuid null references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  check (jsonb_typeof(metadata) = 'object')
+);
+
+create index if not exists payment_audit_events_org_import_idx
+on public.payment_audit_events (organization_id, statement_import_id, created_at desc);
+
 create table if not exists public.items (
   id text primary key,
   organization_id uuid not null default public.current_organization_id()
@@ -1478,6 +1657,13 @@ alter table public.visits enable row level security;
 alter table public.customer_leads enable row level security;
 alter table public.ai_receptionist_call_logs enable row level security;
 alter table public.monthly_payments enable row level security;
+alter table public.statement_imports enable row level security;
+alter table public.statement_import_rows enable row level security;
+alter table public.payment_matching_rules enable row level security;
+alter table public.payment_ignore_rules enable row level security;
+alter table public.customer_payment_fingerprints enable row level security;
+alter table public.customer_credit_balances enable row level security;
+alter table public.payment_audit_events enable row level security;
 alter table public.items enable row level security;
 alter table public.quotes enable row level security;
 alter table public.invoices enable row level security;
@@ -1932,6 +2118,174 @@ using (
 drop policy if exists "Members can write monthly payments" on public.monthly_payments;
 create policy "Members can write monthly payments"
 on public.monthly_payments
+for all
+to authenticated
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+)
+with check (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
+
+drop policy if exists "Members can read statement imports" on public.statement_imports;
+create policy "Members can read statement imports"
+on public.statement_imports
+for select
+to authenticated
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
+
+drop policy if exists "Members can write statement imports" on public.statement_imports;
+create policy "Members can write statement imports"
+on public.statement_imports
+for all
+to authenticated
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+)
+with check (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
+
+drop policy if exists "Members can read statement import rows" on public.statement_import_rows;
+create policy "Members can read statement import rows"
+on public.statement_import_rows
+for select
+to authenticated
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
+
+drop policy if exists "Members can write statement import rows" on public.statement_import_rows;
+create policy "Members can write statement import rows"
+on public.statement_import_rows
+for all
+to authenticated
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+)
+with check (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
+
+drop policy if exists "Members can read payment matching rules" on public.payment_matching_rules;
+create policy "Members can read payment matching rules"
+on public.payment_matching_rules
+for select
+to authenticated
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
+
+drop policy if exists "Members can write payment matching rules" on public.payment_matching_rules;
+create policy "Members can write payment matching rules"
+on public.payment_matching_rules
+for all
+to authenticated
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+)
+with check (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
+
+drop policy if exists "Members can read payment ignore rules" on public.payment_ignore_rules;
+create policy "Members can read payment ignore rules"
+on public.payment_ignore_rules
+for select
+to authenticated
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
+
+drop policy if exists "Members can write payment ignore rules" on public.payment_ignore_rules;
+create policy "Members can write payment ignore rules"
+on public.payment_ignore_rules
+for all
+to authenticated
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+)
+with check (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
+
+drop policy if exists "Members can read customer payment fingerprints" on public.customer_payment_fingerprints;
+create policy "Members can read customer payment fingerprints"
+on public.customer_payment_fingerprints
+for select
+to authenticated
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
+
+drop policy if exists "Members can write customer payment fingerprints" on public.customer_payment_fingerprints;
+create policy "Members can write customer payment fingerprints"
+on public.customer_payment_fingerprints
+for all
+to authenticated
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+)
+with check (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
+
+drop policy if exists "Members can read customer credit balances" on public.customer_credit_balances;
+create policy "Members can read customer credit balances"
+on public.customer_credit_balances
+for select
+to authenticated
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
+
+drop policy if exists "Members can write customer credit balances" on public.customer_credit_balances;
+create policy "Members can write customer credit balances"
+on public.customer_credit_balances
+for all
+to authenticated
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+)
+with check (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
+
+drop policy if exists "Members can read payment audit events" on public.payment_audit_events;
+create policy "Members can read payment audit events"
+on public.payment_audit_events
+for select
+to authenticated
+using (
+  public.is_organization_member(organization_id)
+  and public.can_access_operational_data(organization_id)
+);
+
+drop policy if exists "Members can write payment audit events" on public.payment_audit_events;
+create policy "Members can write payment audit events"
+on public.payment_audit_events
 for all
 to authenticated
 using (

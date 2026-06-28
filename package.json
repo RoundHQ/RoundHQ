@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test:payment-reconciliation": "node scripts/run-payment-reconciliation-tests.mjs",
     "test:scheduling": "node scripts/run-scheduling-tests.mjs",
     "test:team-permissions": "node scripts/run-team-permissions-tests.mjs",
     "test:staff-invitations": "node scripts/run-staff-invitations-tests.mjs",

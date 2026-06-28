@@ -507,6 +507,154 @@ export type MonthlyPayment = {
   updatedAt?: string;
 };
 
+export type PaymentReconciliationMatchStatus =
+  | "matched"
+  | "possible_match"
+  | "needs_review"
+  | "no_match"
+  | "already_imported"
+  | "ignored";
+
+export type PaymentReconciliationImportStatus =
+  | "reviewing"
+  | "imported"
+  | "partially_imported"
+  | "undone";
+
+export type PaymentReconciliationAllocationType =
+  | "visit"
+  | "invoice"
+  | "monthly_payment"
+  | "credit"
+  | "on_account";
+
+export type PaymentReconciliationAllocation = {
+  id: string;
+  type: PaymentReconciliationAllocationType;
+  targetId?: string;
+  targetLabel: string;
+  amount: number;
+  paymentDate?: string;
+  serviceDate?: string;
+  isPartial?: boolean;
+  isOverpayment?: boolean;
+};
+
+export type StatementImportRecord = {
+  id: string;
+  fileName: string;
+  fileType: string;
+  rowCount: number;
+  importedCount: number;
+  skippedCount: number;
+  matchedCount: number;
+  manualMatchedCount: number;
+  ignoredCount: number;
+  totalAmount: number;
+  status: PaymentReconciliationImportStatus;
+  importedBy?: string;
+  undoneAt?: string;
+  undoneBy?: string;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+export type StatementImportRowRecord = {
+  id: string;
+  statementImportId: string;
+  transactionDate: string;
+  description: string;
+  customerNameFromStatement?: string;
+  amount: number;
+  suggestedCustomerId?: number | null;
+  selectedCustomerId?: number | null;
+  selectedVisitIds?: Array<string | number>;
+  selectedInvoiceIds?: string[];
+  allocations: PaymentReconciliationAllocation[];
+  matchConfidence: number;
+  matchReason: string;
+  matchStatus: PaymentReconciliationMatchStatus;
+  status: PaymentReconciliationMatchStatus | "confirmed" | "imported" | "undone";
+  duplicateOfPaymentId?: string;
+  createdPaymentId?: string;
+  rawRow: Record<string, string>;
+  transactionFingerprint: string;
+  createdAt: string;
+};
+
+export type PaymentMatchingRule = {
+  id: string;
+  customerId: number;
+  matchType:
+    | "description_contains"
+    | "customer_contains"
+    | "reference_contains"
+    | "address_contains"
+    | "postcode_contains"
+    | "amount_equals";
+  matchValue: string;
+  confidenceWeight: number;
+  createdBy?: string;
+  lastUsedAt?: string;
+  useCount: number;
+  isEnabled: boolean;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+export type PaymentIgnoreRule = {
+  id: string;
+  matchType: "description_contains" | "customer_contains" | "amount_equals";
+  matchValue: string;
+  createdBy?: string;
+  isEnabled: boolean;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+export type CustomerPaymentFingerprint = {
+  id: string;
+  customerId: number;
+  typicalAmount?: number;
+  typicalReference?: string;
+  typicalPaymentDelayDays?: number;
+  usuallyPaysMultipleVisits?: boolean;
+  lastSeenAt?: string;
+  confidenceScore: number;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+export type CustomerCreditBalance = {
+  id: string;
+  customerId: number;
+  amount: number;
+  sourceImportRowId?: string;
+  note?: string;
+  isReversed?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+export type PaymentAuditEvent = {
+  id: string;
+  statementImportId?: string;
+  statementImportRowId?: string;
+  customerId?: number | null;
+  eventType:
+    | "import_created"
+    | "row_confirmed"
+    | "row_ignored"
+    | "manual_match"
+    | "payment_created"
+    | "credit_created"
+    | "import_undone";
+  summary: string;
+  metadata?: Record<string, unknown>;
+  createdBy?: string;
+  createdAt: string;
+};
+
 export type CommercialRamsDocument = {
   id: string;
   customerId: number | null;

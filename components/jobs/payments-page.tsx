@@ -1,11 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  type ChangeEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  AlertTriangle,
+  CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  Info,
+  Plus,
+  RotateCcw,
+  Trash2,
+  Upload,
+  X,
 } from "lucide-react";
 
 import {
@@ -31,24 +46,59 @@ import {
 } from "./rotation";
 import type {
   Customer,
+  CustomerCreditBalance,
+  CustomerPaymentFingerprint,
   DayName,
+  Invoice,
   MonthlyPayment,
+  PaymentIgnoreRule,
+  PaymentMatchingRule,
   RotationWeeks,
+  ScheduledJob,
+  StatementImportRecord,
+  StatementImportRowRecord,
   VisitLog,
   WeekNumber,
 } from "./types";
+import {
+  buildReconciliationReviewRows,
+  getImportSummary,
+  parseStatementCsv,
+  suggestAllocations,
+  type ReconciliationReviewRow,
+} from "@/lib/payments/reconciliation";
 
 type Props = {
   customers: Customer[];
   visits: VisitLog[];
+  invoices: Invoice[];
   monthlyPayments: MonthlyPayment[];
+  scheduledJobs: ScheduledJob[];
+  statementImports: StatementImportRecord[];
+  statementImportRows: StatementImportRowRecord[];
+  paymentMatchingRules: PaymentMatchingRule[];
+  paymentIgnoreRules: PaymentIgnoreRule[];
+  customerPaymentFingerprints: CustomerPaymentFingerprint[];
+  customerCredits: CustomerCreditBalance[];
   defaultRotationWeeks?: RotationWeeks;
   activeRotationWeeks?: RotationWeeks;
   weekOptions?: WeekNumber[];
   grassCutSeasonStart: string;
   grassCutSeasonEnd: string;
   monthlyPaymentsReady: boolean;
+  reconciliationReady: boolean;
   pendingCashPaymentDates: Record<string, string>;
+  onImportStatementRows: (
+    fileName: string,
+    reviewRows: ReconciliationReviewRow[],
+    selectedRowIds: string[]
+  ) => Promise<void>;
+  onUndoStatementImport: (importId: string) => Promise<void>;
+  onSavePaymentMatchingRule: (rule: PaymentMatchingRule) => Promise<void>;
+  onDeletePaymentMatchingRule: (ruleId: string) => Promise<void>;
+  onSavePaymentIgnoreRule: (rule: PaymentIgnoreRule) => Promise<void>;
+  onDeletePaymentIgnoreRule: (ruleId: string) => Promise<void>;
+  reconciliationOnly?: boolean;
   onSaveMonthlyPayment: (
     customerId: number,
     paymentMonth: string,
@@ -95,9 +145,63 @@ type OutstandingPaymentRow = {
   missingItems: string[];
   detail: string;
 };
+type ReconciliationFilter =
+  | "all"
+  | "selected"
+  | "matched"
+  | "review"
+  | "unmatched"
+  | "duplicate"
+  | "ignored";
 
 function isPayOnDayCustomer(customer: Customer) {
   return PAY_ON_DAY_PAYMENT_METHODS.has(customer.paymentMethod ?? "Monthly");
+}
+
+function getReconciliationStatusLabel(row: ReconciliationReviewRow) {
+  if (row.matchStatus === "matched") return "Matched";
+  if (row.matchStatus === "possible_match") return "Possible";
+  if (row.matchStatus === "needs_review") return "Review";
+  if (row.matchStatus === "already_imported") return "Duplicate";
+  if (row.matchStatus === "ignored") return "Ignored";
+  return "No match";
+}
+
+function getReconciliationStatusClass(row: ReconciliationReviewRow) {
+  if (row.matchStatus === "matched") {
+    return "bg-emerald-100 text-emerald-700";
+  }
+  if (row.matchStatus === "possible_match") {
+    return "bg-sky-100 text-sky-700";
+  }
+  if (row.matchStatus === "needs_review") {
+    return "bg-amber-100 text-amber-700";
+  }
+  if (row.matchStatus === "already_imported") {
+    return "bg-slate-200 text-slate-600";
+  }
+  if (row.matchStatus === "ignored") {
+    return "bg-purple-100 text-purple-700";
+  }
+  return "bg-rose-100 text-rose-700";
+}
+
+function getAllocationMode(row: ReconciliationReviewRow) {
+  if (
+    row.selectedAllocations.length > 0 &&
+    row.selectedAllocations.every((allocation) => allocation.type === "credit")
+  ) {
+    return "credit";
+  }
+
+  if (
+    row.selectedAllocations.length > 0 &&
+    row.selectedAllocations.every((allocation) => allocation.type === "on_account")
+  ) {
+    return "on_account";
+  }
+
+  return "suggested";
 }
 
 function getNormalizedQuery(query: string) {
@@ -207,14 +311,30 @@ function formatMonthLabel(monthKey: string) {
 export default function PaymentsPage({
   customers,
   visits,
+  invoices,
   monthlyPayments,
+  scheduledJobs,
+  statementImports,
+  statementImportRows,
+  paymentMatchingRules,
+  paymentIgnoreRules,
+  customerPaymentFingerprints,
+  customerCredits,
   defaultRotationWeeks = DEFAULT_ROTATION_WEEKS,
   activeRotationWeeks,
   weekOptions,
   grassCutSeasonStart,
   grassCutSeasonEnd,
   monthlyPaymentsReady,
+  reconciliationReady,
   pendingCashPaymentDates,
+  onImportStatementRows,
+  onUndoStatementImport,
+  onSavePaymentMatchingRule,
+  onDeletePaymentMatchingRule,
+  onSavePaymentIgnoreRule,
+  onDeletePaymentIgnoreRule,
+  reconciliationOnly = false,
   onSaveMonthlyPayment,
   onSaveVisitCutDate,
   onCreateVisitCutDate,
@@ -234,6 +354,23 @@ export default function PaymentsPage({
   const [removingVisitId, setRemovingVisitId] = useState<string | null>(null);
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
   const [highlightedCardKey, setHighlightedCardKey] = useState<string | null>(null);
+  const [reconciliationFileName, setReconciliationFileName] = useState("");
+  const [reconciliationRows, setReconciliationRows] = useState<
+    ReconciliationReviewRow[]
+  >([]);
+  const [selectedReconciliationRowIds, setSelectedReconciliationRowIds] =
+    useState<string[]>([]);
+  const [reconciliationWarnings, setReconciliationWarnings] = useState<string[]>(
+    []
+  );
+  const [reconciliationError, setReconciliationError] = useState<string | null>(
+    null
+  );
+  const [reconciliationFilter, setReconciliationFilter] =
+    useState<ReconciliationFilter>("all");
+  const [isImportingStatement, setIsImportingStatement] = useState(false);
+  const [rulesExpanded, setRulesExpanded] = useState(false);
+  const [newIgnoreRuleValue, setNewIgnoreRuleValue] = useState("");
   const customerCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const normalizedSearch = getNormalizedQuery(search);
@@ -243,6 +380,51 @@ export default function PaymentsPage({
   );
   const weekFilterOptions =
     weekOptions?.length ? weekOptions : getWeekOptions(routeRotationWeeks);
+  const customerById = useMemo(
+    () => new Map(customers.map((customer) => [customer.id, customer])),
+    [customers]
+  );
+  const activeCustomerCredits = useMemo(
+    () => customerCredits.filter((credit) => !credit.isReversed),
+    [customerCredits]
+  );
+  const reconciliationSummary = useMemo(
+    () => getImportSummary(reconciliationRows),
+    [reconciliationRows]
+  );
+  const selectedReconciliationRows = useMemo(
+    () =>
+      reconciliationRows.filter((row) =>
+        selectedReconciliationRowIds.includes(row.id)
+      ),
+    [reconciliationRows, selectedReconciliationRowIds]
+  );
+  const visibleReconciliationRows = useMemo(
+    () =>
+      reconciliationRows.filter((row) => {
+        if (reconciliationFilter === "selected") {
+          return selectedReconciliationRowIds.includes(row.id);
+        }
+        if (reconciliationFilter === "matched") {
+          return row.matchStatus === "matched" || row.matchStatus === "possible_match";
+        }
+        if (reconciliationFilter === "review") {
+          return row.matchStatus === "needs_review";
+        }
+        if (reconciliationFilter === "unmatched") {
+          return row.matchStatus === "no_match";
+        }
+        if (reconciliationFilter === "duplicate") {
+          return row.matchStatus === "already_imported";
+        }
+        if (reconciliationFilter === "ignored") {
+          return row.matchStatus === "ignored";
+        }
+
+        return true;
+      }),
+    [reconciliationFilter, reconciliationRows, selectedReconciliationRowIds]
+  );
 
   useEffect(() => {
     if (weekFilter !== "all" && !weekFilterOptions.includes(weekFilter)) {
@@ -257,6 +439,312 @@ export default function PaymentsPage({
       }
     };
   }, []);
+
+  function canImportReconciliationRow(row: ReconciliationReviewRow) {
+    return (
+      row.selectedCustomerId != null &&
+      row.matchStatus !== "ignored" &&
+      row.matchStatus !== "already_imported" &&
+      row.selectedAllocations.length > 0
+    );
+  }
+
+  async function handleStatementFileChange(
+    event: ChangeEvent<HTMLInputElement>
+  ) {
+    const file = event.target.files?.[0] ?? null;
+
+    if (!file) {
+      return;
+    }
+
+    setReconciliationError(null);
+    setReconciliationFileName(file.name);
+
+    try {
+      const csvText = await file.text();
+      const parsed = parseStatementCsv(csvText);
+      const reviewRows = buildReconciliationReviewRows({
+        rows: parsed.rows,
+        customers,
+        visits,
+        invoices,
+        monthlyPayments,
+        monthlyPaymentMonths: paymentYearMonths.map((month) => month.key),
+        scheduledJobs,
+        matchingRules: paymentMatchingRules,
+        ignoreRules: paymentIgnoreRules,
+        fingerprints: customerPaymentFingerprints,
+        existingImportRows: statementImportRows,
+      });
+
+      setReconciliationRows(reviewRows);
+      setReconciliationWarnings([
+        ...parsed.warnings,
+        ...(parsed.skippedOutgoingRows > 0
+          ? [
+              `${parsed.skippedOutgoingRows} outgoing debit or expense row${
+                parsed.skippedOutgoingRows === 1 ? " was" : "s were"
+              } hidden from reconciliation.`,
+            ]
+          : []),
+      ]);
+      setSelectedReconciliationRowIds(
+        reviewRows
+          .filter((row) => row.matchStatus === "matched" && canImportReconciliationRow(row))
+          .map((row) => row.id)
+      );
+      setReconciliationFilter("all");
+    } catch (error) {
+      setReconciliationRows([]);
+      setSelectedReconciliationRowIds([]);
+      setReconciliationWarnings([]);
+      setReconciliationError(
+        error instanceof Error
+          ? error.message
+          : "Unable to read the CSV statement."
+      );
+    } finally {
+      event.target.value = "";
+    }
+  }
+
+  function toggleReconciliationRow(rowId: string, selected: boolean) {
+    setSelectedReconciliationRowIds((previous) => {
+      const nextSelected = new Set(previous);
+
+      if (selected) {
+        nextSelected.add(rowId);
+      } else {
+        nextSelected.delete(rowId);
+      }
+
+      return Array.from(nextSelected);
+    });
+  }
+
+  function setReconciliationRowCustomer(rowId: string, customerId: number | null) {
+    setReconciliationRows((previous) =>
+      previous.map((row) => {
+        if (row.id !== rowId) {
+          return row;
+        }
+
+        const customer = customerId == null ? null : customerById.get(customerId) ?? null;
+        const allocations = suggestAllocations({
+          row,
+          customer,
+          visits,
+          invoices,
+          monthlyPayments,
+          monthlyPaymentMonths: paymentYearMonths.map((month) => month.key),
+        });
+
+        return {
+          ...row,
+          selectedCustomerId: customerId,
+          selectedAllocations: allocations,
+          matchStatus:
+            customerId == null
+              ? "no_match"
+              : row.matchStatus === "already_imported" || row.matchStatus === "ignored"
+              ? row.matchStatus
+              : row.suggestedCustomerId === customerId && row.matchStatus !== "no_match"
+              ? row.matchStatus
+              : "needs_review",
+          matchConfidence:
+            customerId == null
+              ? 0
+              : row.suggestedCustomerId === customerId
+              ? row.matchConfidence
+              : Math.max(row.matchConfidence, 70),
+          matchReason:
+            customerId == null
+              ? "No customer selected."
+              : row.suggestedCustomerId === customerId
+              ? row.matchReason
+              : "Manually selected customer for this statement row.",
+        };
+      })
+    );
+  }
+
+  function setReconciliationAllocationMode(
+    rowId: string,
+    mode: "suggested" | "credit" | "on_account"
+  ) {
+    setReconciliationRows((previous) =>
+      previous.map((row) => {
+        if (row.id !== rowId) {
+          return row;
+        }
+
+        if (mode === "credit") {
+          return {
+            ...row,
+            selectedAllocations: [
+              {
+                id: `credit-${row.id}`,
+                type: "credit",
+                targetLabel: "Customer credit",
+                amount: row.amount,
+                paymentDate: row.transactionDate,
+              },
+            ],
+          };
+        }
+
+        if (mode === "on_account") {
+          return {
+            ...row,
+            selectedAllocations: [
+              {
+                id: `on-account-${row.id}`,
+                type: "on_account",
+                targetLabel: "Payment on account",
+                amount: row.amount,
+                paymentDate: row.transactionDate,
+              },
+            ],
+          };
+        }
+
+        const customer =
+          row.selectedCustomerId == null
+            ? null
+            : customerById.get(row.selectedCustomerId) ?? null;
+
+        return {
+          ...row,
+          selectedAllocations: suggestAllocations({
+            row,
+            customer,
+            visits,
+            invoices,
+            monthlyPayments,
+            monthlyPaymentMonths: paymentYearMonths.map((month) => month.key),
+          }),
+        };
+      })
+    );
+  }
+
+  function selectConfidentReconciliationRows() {
+    setSelectedReconciliationRowIds(
+      reconciliationRows
+        .filter(
+          (row) =>
+            row.matchConfidence >= 90 &&
+            (row.matchStatus === "matched" || row.matchStatus === "possible_match") &&
+            canImportReconciliationRow(row)
+        )
+        .map((row) => row.id)
+    );
+  }
+
+  function clearReconciliationReview() {
+    setReconciliationFileName("");
+    setReconciliationRows([]);
+    setSelectedReconciliationRowIds([]);
+    setReconciliationWarnings([]);
+    setReconciliationError(null);
+    setReconciliationFilter("all");
+  }
+
+  function getReconciliationActionErrorMessage(error: unknown, fallback: string) {
+    if (error instanceof Error && error.message.trim()) {
+      return error.message;
+    }
+
+    if (typeof error === "string" && error.trim()) {
+      return error;
+    }
+
+    if (error && typeof error === "object") {
+      const errorDetails = error as {
+        code?: unknown;
+        details?: unknown;
+        hint?: unknown;
+        message?: unknown;
+      };
+      const messageParts = [
+        errorDetails.message,
+        errorDetails.details,
+        errorDetails.hint,
+      ]
+        .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+        .map((value) => value.trim());
+
+      if (messageParts.length > 0) {
+        return messageParts.join(" ");
+      }
+
+      if (typeof errorDetails.code === "string" && errorDetails.code.trim()) {
+        return `${fallback} (${errorDetails.code})`;
+      }
+    }
+
+    return fallback;
+  }
+
+  async function runReconciliationAction(
+    action: () => Promise<void>,
+    fallback: string
+  ) {
+    setReconciliationError(null);
+
+    try {
+      await action();
+    } catch (error) {
+      setReconciliationError(getReconciliationActionErrorMessage(error, fallback));
+    }
+  }
+
+  function removeReconciliationRow(rowId: string) {
+    setReconciliationRows((previous) => previous.filter((row) => row.id !== rowId));
+    toggleReconciliationRow(rowId, false);
+  }
+
+  async function handleImportSelectedRows() {
+    setIsImportingStatement(true);
+    setReconciliationError(null);
+
+    try {
+      await onImportStatementRows(
+        reconciliationFileName || "bank-statement.csv",
+        reconciliationRows,
+        selectedReconciliationRowIds
+      );
+      clearReconciliationReview();
+    } catch (error) {
+      setReconciliationError(
+        error instanceof Error
+          ? error.message
+          : "Unable to import the selected statement rows."
+      );
+    } finally {
+      setIsImportingStatement(false);
+    }
+  }
+
+  async function handleCreateManualIgnoreRule() {
+    const matchValue = newIgnoreRuleValue.trim();
+
+    if (!matchValue) {
+      return;
+    }
+
+    await runReconciliationAction(async () => {
+      await onSavePaymentIgnoreRule({
+        id: crypto.randomUUID(),
+        matchType: "description_contains",
+        matchValue,
+        isEnabled: true,
+        createdAt: new Date().toISOString(),
+      });
+      setNewIgnoreRuleValue("");
+    }, "Unable to add the ignore rule.");
+  }
 
   const seasonDateRange = useMemo(
     () =>
@@ -769,6 +1257,675 @@ export default function PaymentsPage({
           </button>
         </div>
       </div>
+    );
+  }
+
+  function renderReconciliationRules() {
+    if (!rulesExpanded) {
+      return null;
+    }
+
+    return (
+      <div className="mt-5 grid gap-4 lg:grid-cols-2">
+        <div className="rounded-[18px] border border-slate-200 bg-slate-50 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-black text-slate-900">
+                Matching Rules
+              </h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Rules learned from manual matches are reused on future bank
+                imports.
+              </p>
+            </div>
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+              {paymentMatchingRules.length}
+            </span>
+          </div>
+
+          <div className="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
+            {paymentMatchingRules.length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">
+                No learned matching rules yet.
+              </p>
+            ) : (
+              paymentMatchingRules.map((rule) => {
+                const customer = customerById.get(rule.customerId);
+
+                return (
+                  <div
+                    key={rule.id}
+                    className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-slate-900">
+                        {customer?.name ?? "Unknown customer"}
+                      </p>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {rule.matchType.replaceAll("_", " ")}: {rule.matchValue}
+                      </p>
+                      <p className="mt-1 text-[11px] text-slate-400">
+                        Used {rule.useCount} time{rule.useCount === 1 ? "" : "s"}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={rule.isEnabled}
+                          onChange={(event) =>
+                            void runReconciliationAction(
+                              () =>
+                                onSavePaymentMatchingRule({
+                                  ...rule,
+                                  isEnabled: event.target.checked,
+                                }),
+                              "Unable to update the matching rule."
+                            )
+                          }
+                          className="h-4 w-4 rounded border-slate-300"
+                        />
+                        Active
+                      </label>
+                      <button
+                        onClick={() =>
+                          void runReconciliationAction(
+                            () => onDeletePaymentMatchingRule(rule.id),
+                            "Unable to delete the matching rule."
+                          )
+                        }
+                        className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-rose-700 transition hover:bg-rose-100"
+                        aria-label="Delete matching rule"
+                        title="Delete matching rule"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-[18px] border border-slate-200 bg-slate-50 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-black text-slate-900">
+                Ignore Rules
+              </h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Bank fees, transfers, and non-customer entries can be ignored
+                automatically.
+              </p>
+            </div>
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+              {paymentIgnoreRules.length}
+            </span>
+          </div>
+
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <input
+              value={newIgnoreRuleValue}
+              onChange={(event) => setNewIgnoreRuleValue(event.target.value)}
+              placeholder="Description contains..."
+              className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-slate-400"
+            />
+            <button
+              onClick={() => void handleCreateManualIgnoreRule()}
+              disabled={!newIgnoreRuleValue.trim()}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Plus size={15} />
+              Add
+            </button>
+          </div>
+
+          <div className="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1">
+            {paymentIgnoreRules.length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">
+                No ignore rules yet.
+              </p>
+            ) : (
+              paymentIgnoreRules.map((rule) => (
+                <div
+                  key={rule.id}
+                  className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-slate-900">
+                      {rule.matchValue}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {rule.matchType.replaceAll("_", " ")}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={rule.isEnabled}
+                          onChange={(event) =>
+                            void runReconciliationAction(
+                              () =>
+                                onSavePaymentIgnoreRule({
+                                  ...rule,
+                                  isEnabled: event.target.checked,
+                                }),
+                              "Unable to update the ignore rule."
+                            )
+                          }
+                          className="h-4 w-4 rounded border-slate-300"
+                        />
+                      Active
+                    </label>
+                    <button
+                      onClick={() =>
+                        void runReconciliationAction(
+                          () => onDeletePaymentIgnoreRule(rule.id),
+                          "Unable to delete the ignore rule."
+                        )
+                      }
+                      className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-rose-700 transition hover:bg-rose-100"
+                      aria-label="Delete ignore rule"
+                      title="Delete ignore rule"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderReconciliationCentre() {
+    const filterOptions: Array<{ key: ReconciliationFilter; label: string }> = [
+      { key: "all", label: "All" },
+      { key: "selected", label: "Selected" },
+      { key: "matched", label: "Matched" },
+      { key: "review", label: "Review" },
+      { key: "unmatched", label: "No match" },
+      { key: "duplicate", label: "Duplicate" },
+      { key: "ignored", label: "Ignored" },
+    ];
+    const selectedImportableCount = selectedReconciliationRows.filter(
+      canImportReconciliationRow
+    ).length;
+    const importedRowCount = statementImportRows.filter(
+      (row) => row.status === "imported"
+    ).length;
+    const activeCreditTotal = activeCustomerCredits.reduce(
+      (total, credit) => total + credit.amount,
+      0
+    );
+
+    return (
+      <section className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-[#18b74f]">
+              Payment Reconciliation Centre
+            </p>
+            <h2 className="mt-1 text-2xl font-black tracking-tight text-slate-900">
+              Import bank statements and match payments
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm text-slate-500">
+              Upload a CSV statement, review suggested customer matches, split
+              payments across unpaid invoices or visits, and learn the matches
+              for next time.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap xl:justify-end">
+            <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#18b74f] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[#129640]">
+              <Upload size={16} />
+              Upload CSV
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                onChange={(event) => void handleStatementFileChange(event)}
+                className="sr-only"
+              />
+            </label>
+
+            <button
+              onClick={() => setRulesExpanded((previous) => !previous)}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              <Info size={16} />
+              Rules
+            </button>
+
+            {reconciliationRows.length > 0 && (
+              <button
+                onClick={clearReconciliationReview}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                <X size={16} />
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+
+        {!reconciliationReady && (
+          <div className="mt-4 flex gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <AlertTriangle className="mt-0.5 shrink-0" size={18} />
+            <p>
+              Reconciliation storage is not ready in Supabase yet. You can
+              still review imports in this session, but import history, rules,
+              credits, and audit events need the latest tenant SQL setup script.
+            </p>
+          </div>
+        )}
+
+        {reconciliationError && (
+          <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+            {reconciliationError}
+          </div>
+        )}
+
+        {reconciliationWarnings.length > 0 && (
+          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            {reconciliationWarnings.map((warning) => (
+              <p key={warning}>{warning}</p>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-[18px] border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Rows In Review
+            </p>
+            <p className="mt-2 text-3xl font-black text-slate-900">
+              {reconciliationSummary.totalRows}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              {reconciliationFileName || "No statement loaded"}
+            </p>
+          </div>
+
+          <div className="rounded-[18px] border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Ready To Import
+            </p>
+            <p className="mt-2 text-3xl font-black text-emerald-700">
+              {selectedImportableCount}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              {formatMoney(
+                selectedReconciliationRows
+                  .filter(canImportReconciliationRow)
+                  .reduce((total, row) => total + row.amount, 0)
+              )}{" "}
+              selected
+            </p>
+          </div>
+
+          <div className="rounded-[18px] border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Imported Rows
+            </p>
+            <p className="mt-2 text-3xl font-black text-slate-900">
+              {importedRowCount}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Across {statementImports.length} import
+              {statementImports.length === 1 ? "" : "s"}
+            </p>
+          </div>
+
+          <div className="rounded-[18px] border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Customer Credits
+            </p>
+            <p className="mt-2 text-3xl font-black text-slate-900">
+              {formatMoney(activeCreditTotal)}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              From partial, split, or overpaid imports
+            </p>
+          </div>
+        </div>
+
+        {reconciliationRows.length > 0 && (
+          <div className="mt-5">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-wrap gap-2">
+                {filterOptions.map((option) => (
+                  <button
+                    key={option.key}
+                    onClick={() => setReconciliationFilter(option.key)}
+                    className={`rounded-xl px-3 py-2 text-xs font-bold transition ${
+                      reconciliationFilter === option.key
+                        ? "bg-slate-900 text-white"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                <button
+                  onClick={selectConfidentReconciliationRows}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                >
+                  <CheckCircle2 size={16} />
+                  Select confident
+                </button>
+                <button
+                  onClick={() => void handleImportSelectedRows()}
+                  disabled={selectedImportableCount === 0 || isImportingStatement}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isImportingStatement ? "Importing..." : "Import selected"}
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 overflow-x-auto">
+              <div className="min-w-[1180px] overflow-hidden rounded-[18px] border border-slate-200">
+                <div className="grid grid-cols-[0.35fr_0.7fr_1.45fr_1.1fr_0.65fr_1.45fr_0.85fr_0.55fr] gap-3 bg-slate-50 px-4 py-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  <span>Select</span>
+                  <span>Date</span>
+                  <span>Description</span>
+                  <span>Customer</span>
+                  <span>Status</span>
+                  <span>Allocation</span>
+                  <span>Learning</span>
+                  <span>Remove</span>
+                </div>
+
+                {visibleReconciliationRows.map((row) => {
+                  const isSelected = selectedReconciliationRowIds.includes(row.id);
+                  const canSelect = canImportReconciliationRow(row);
+                  const selectedCustomer =
+                    row.selectedCustomerId == null
+                      ? null
+                      : customerById.get(row.selectedCustomerId) ?? null;
+
+                  return (
+                    <div
+                      key={row.id}
+                      className="grid grid-cols-[0.35fr_0.7fr_1.45fr_1.1fr_0.65fr_1.45fr_0.85fr_0.55fr] items-start gap-3 border-t border-slate-200 px-4 py-3 text-sm"
+                    >
+                      <label className="pt-2">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          disabled={!canSelect}
+                          onChange={(event) =>
+                            toggleReconciliationRow(row.id, event.target.checked)
+                          }
+                          className="h-4 w-4 rounded border-slate-300 disabled:opacity-40"
+                        />
+                      </label>
+
+                      <div className="pt-1 font-semibold text-slate-700">
+                        {formatStoredDate(row.transactionDate)}
+                      </div>
+
+                      <div className="min-w-0">
+                        <p className="break-words font-bold text-slate-900">
+                          {row.description || row.customerNameFromStatement || "-"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {formatMoney(row.amount)} · Row {row.rowIndex}
+                        </p>
+                        <p className="mt-1 text-[11px] text-slate-400">
+                          {row.matchReason}
+                        </p>
+                      </div>
+
+                      <div>
+                        <select
+                          value={row.selectedCustomerId ?? ""}
+                          onChange={(event) =>
+                            setReconciliationRowCustomer(
+                              row.id,
+                              event.target.value ? Number(event.target.value) : null
+                            )
+                          }
+                          disabled={row.matchStatus === "already_imported"}
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-slate-400 disabled:bg-slate-100 disabled:text-slate-400"
+                        >
+                          <option value="">No customer</option>
+                          {customers.map((customer) => (
+                            <option key={customer.id} value={customer.id}>
+                              {customer.name}
+                            </option>
+                          ))}
+                        </select>
+                        {selectedCustomer && (
+                          <p className="mt-1 text-[11px] text-slate-400">
+                            {getCustomerDisplayAddress(selectedCustomer)}
+                          </p>
+                        )}
+                      </div>
+
+                      <div>
+                        <span
+                          className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${getReconciliationStatusClass(row)}`}
+                        >
+                          {getReconciliationStatusLabel(row)}
+                        </span>
+                        <p className="mt-1 text-[11px] font-semibold text-slate-400">
+                          {row.matchConfidence}% confidence
+                        </p>
+                      </div>
+
+                      <div>
+                        <select
+                          value={getAllocationMode(row)}
+                          onChange={(event) => {
+                            setReconciliationAllocationMode(
+                              row.id,
+                              event.target.value as "suggested" | "credit" | "on_account"
+                            );
+                          }}
+                          disabled={!row.selectedCustomerId}
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-slate-400 disabled:bg-slate-100 disabled:text-slate-400"
+                        >
+                          <option value="suggested">Suggested split</option>
+                          <option value="credit">Customer credit</option>
+                          <option value="on_account">On account</option>
+                        </select>
+
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {row.selectedAllocations.length === 0 ? (
+                            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-500">
+                              No allocation
+                            </span>
+                          ) : (
+                            row.selectedAllocations.map((allocation) => (
+                              <span
+                                key={allocation.id}
+                                className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                                  allocation.isPartial
+                                    ? "bg-amber-100 text-amber-700"
+                                    : allocation.type === "credit" ||
+                                      allocation.type === "on_account"
+                                    ? "bg-sky-100 text-sky-700"
+                                    : "bg-emerald-100 text-emerald-700"
+                                }`}
+                                title={allocation.targetLabel}
+                              >
+                                {allocation.targetLabel}:{" "}
+                                {formatMoney(allocation.amount)}
+                                {allocation.isPartial ? " partial" : ""}
+                              </span>
+                            ))
+                          )}
+                        </div>
+                      </div>
+
+                      <label className="flex items-center gap-2 pt-2 text-xs font-semibold text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={row.learnMatch}
+                          disabled={!row.selectedCustomerId}
+                          onChange={(event) =>
+                            setReconciliationRows((previous) =>
+                              previous.map((entry) =>
+                                entry.id === row.id
+                                  ? { ...entry, learnMatch: event.target.checked }
+                                  : entry
+                              )
+                            )
+                          }
+                          className="h-4 w-4 rounded border-slate-300"
+                        />
+                        Learn
+                      </label>
+
+                      <button
+                        onClick={() => removeReconciliationRow(row.id)}
+                        disabled={row.matchStatus === "already_imported"}
+                        className="rounded-lg border border-slate-200 bg-white p-2 text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        aria-label="Remove transaction from review"
+                        title="Remove transaction from review"
+                      >
+                        <X size={15} />
+                      </button>
+                    </div>
+                  );
+                })}
+
+                {visibleReconciliationRows.length === 0 && (
+                  <div className="border-t border-slate-200 px-4 py-8 text-center text-sm font-semibold text-slate-500">
+                    No rows match this filter.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {renderReconciliationRules()}
+
+        <div className="mt-5 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+          <div className="rounded-[18px] border border-slate-200 bg-slate-50 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-black text-slate-900">
+                  Import History
+                </h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  Undo an import if a statement was matched incorrectly.
+                </p>
+              </div>
+              <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+                {statementImports.length}
+              </span>
+            </div>
+
+            <div className="mt-3 space-y-2">
+              {statementImports.slice(0, 5).length === 0 ? (
+                <p className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">
+                  No statement imports yet.
+                </p>
+              ) : (
+                statementImports.slice(0, 5).map((importRecord) => {
+                  const rowCount = statementImportRows.filter(
+                    (row) => row.statementImportId === importRecord.id
+                  ).length;
+
+                  return (
+                    <div
+                      key={importRecord.id}
+                      className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div>
+                        <p className="text-sm font-bold text-slate-900">
+                          {importRecord.fileName}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {formatStoredDate(importRecord.createdAt)} ·{" "}
+                          {importRecord.importedCount} imported · {rowCount} rows
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-bold ${
+                            importRecord.status === "undone"
+                              ? "bg-slate-200 text-slate-600"
+                              : "bg-emerald-100 text-emerald-700"
+                          }`}
+                        >
+                          {importRecord.status.replaceAll("_", " ")}
+                        </span>
+                        <button
+                          onClick={() =>
+                            void onUndoStatementImport(importRecord.id)
+                          }
+                          disabled={importRecord.status === "undone"}
+                          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <RotateCcw size={14} />
+                          Undo
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-[18px] border border-slate-200 bg-slate-50 p-4">
+            <h3 className="text-sm font-black text-slate-900">
+              Customer Credits
+            </h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Credits are created for overpayments, on-account values, and
+              partial payments that cannot fully close a visit or invoice yet.
+            </p>
+
+            <div className="mt-3 max-h-56 space-y-2 overflow-y-auto pr-1">
+              {activeCustomerCredits.length === 0 ? (
+                <p className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">
+                  No active customer credits.
+                </p>
+              ) : (
+                activeCustomerCredits.slice(0, 8).map((credit) => {
+                  const customer = customerById.get(credit.customerId);
+
+                  return (
+                    <div
+                      key={credit.id}
+                      className="rounded-2xl border border-slate-200 bg-white p-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-bold text-slate-900">
+                            {customer?.name ?? "Unknown customer"}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {credit.note ?? "Customer credit"}
+                          </p>
+                        </div>
+                        <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-bold text-sky-700">
+                          {formatMoney(credit.amount)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
     );
   }
 
@@ -1533,6 +2690,10 @@ export default function PaymentsPage({
         </div>
       </section>
     );
+  }
+
+  if (reconciliationOnly) {
+    return <div className="space-y-6">{renderReconciliationCentre()}</div>;
   }
 
   return (
