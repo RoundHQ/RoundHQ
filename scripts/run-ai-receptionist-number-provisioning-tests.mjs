@@ -40,6 +40,7 @@ require.extensions[".ts"] = function compileTypescript(module, filename) {
 const {
   TelnyxPlatformApiError,
   createTelnyxNumberOrder,
+  findExactAvailableTelnyxPhoneNumber,
   getMissingTelnyxPlatformSettings,
   getOrCreateTelnyxNumberOrder,
   getTelnyxPlatformConfig,
@@ -168,6 +169,52 @@ assert.equal(
   "+44121"
 );
 
+await assert.rejects(
+  searchAvailableTelnyxPhoneNumbers({
+    config,
+    fetchImpl: async () =>
+      jsonResponse({
+        data: [
+          {
+            phone_number: "+44115-------",
+            features: [{ name: "voice" }],
+          },
+        ],
+      }),
+  }),
+  (error) =>
+    error instanceof TelnyxPlatformApiError &&
+    error.status === 503 &&
+    /not active yet/i.test(error.message)
+);
+let exactSearchUrl = "";
+const exactMatch = await findExactAvailableTelnyxPhoneNumber({
+  config,
+  phoneNumber: "+44 121 555 1111",
+  fetchImpl: async (url) => {
+    exactSearchUrl = String(url);
+    return jsonResponse({
+      data: [
+        {
+          phone_number: "+4412155511119",
+          features: [{ name: "voice" }],
+        },
+        {
+          phone_number: "+441215551111",
+          features: [{ name: "voice" }],
+        },
+      ],
+    });
+  },
+});
+assert.equal(exactMatch?.phoneNumber, "+441215551111");
+assert.equal(
+  new URL(exactSearchUrl).searchParams.get(
+    "filter[phone_number][starts_with]"
+  ),
+  "+441215551111"
+);
+
 let recoveredRequestCount = 0;
 const recoveredOrder = await getOrCreateTelnyxNumberOrder({
   config,
@@ -272,6 +319,7 @@ assert.match(routeSource, /isCustomerFeatureEnabled/);
 assert.match(routeSource, /adminSupabase/);
 assert.match(routeSource, /telnyx_provisioning_reference/);
 assert.match(routeSource, /findTelnyxNumberOrderByReference/);
+assert.match(routeSource, /findExactAvailableTelnyxPhoneNumber/);
 
 const migrationSource = fs.readFileSync(
   path.join(projectRoot, "supabase", "ai_receptionist_managed_numbers.sql"),

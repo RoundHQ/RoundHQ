@@ -130,6 +130,9 @@ async function telnyxPlatformRequest(options: {
   return responseBody;
 }
 
+function isCompleteE164PhoneNumber(value: string) {
+  return /^\+[1-9]\d{7,14}$/.test(value);
+}
 function normalizeUkPhoneSearchPrefix(value: string) {
   const compact = value.replace(/[^\d+]/g, "");
 
@@ -225,9 +228,23 @@ export async function searchAvailableTelnyxPhoneNumbers(options: {
   );
   const data = Array.isArray(body.data) ? body.data : [];
 
-  return data
+  const voiceNumbers = data
     .map(getObject)
-    .filter((number) => getText(number.phone_number) && hasVoiceFeature(number.features))
+    .filter(
+      (number) => getText(number.phone_number) && hasVoiceFeature(number.features)
+    );
+  const completeNumbers = voiceNumbers.filter((number) =>
+    isCompleteE164PhoneNumber(getText(number.phone_number))
+  );
+
+  if (voiceNumbers.length > 0 && completeNumbers.length === 0) {
+    throw new TelnyxPlatformApiError(
+      "RoundHQ phone provisioning is not active yet. Please contact RoundHQ support.",
+      503
+    );
+  }
+
+  return completeNumbers
     .slice(0, limit)
     .map((number): TelnyxAvailablePhoneNumber => {
       const cost = getObject(number.cost_information);
@@ -240,6 +257,42 @@ export async function searchAvailableTelnyxPhoneNumbers(options: {
         currency: getText(cost.currency),
       };
     });
+}
+
+function normalizePhoneNumberForComparison(value: string) {
+  return value.replace(/\D/g, "");
+}
+
+export async function findExactAvailableTelnyxPhoneNumber(options: {
+  config?: TelnyxPlatformConfig;
+  phoneNumber: string;
+  fetchImpl?: typeof fetch;
+}) {
+  const requestedPhoneNumber = normalizePhoneNumberForComparison(
+    options.phoneNumber
+  );
+
+  if (
+    !requestedPhoneNumber ||
+    !isCompleteE164PhoneNumber(options.phoneNumber.replace(/\s/g, ""))
+  ) {
+    return null;
+  }
+
+  const matches = await searchAvailableTelnyxPhoneNumbers({
+    config: options.config,
+    query: options.phoneNumber,
+    limit: 8,
+    fetchImpl: options.fetchImpl,
+  });
+
+  return (
+    matches.find(
+      (number) =>
+        normalizePhoneNumberForComparison(number.phoneNumber) ===
+        requestedPhoneNumber
+    ) ?? null
+  );
 }
 
 function normalizeTelnyxNumberOrder(

@@ -12,6 +12,7 @@ import { readRequestTextWithLimit } from "@/lib/ai-receptionist/request-limits";
 import {
   TelnyxPlatformApiError,
   createTelnyxNumberOrder,
+  findExactAvailableTelnyxPhoneNumber,
   findTelnyxNumberOrderByReference,
   getMissingTelnyxPlatformSettings,
   getTelnyxPlatformConfig,
@@ -65,10 +66,6 @@ type AuthorizationResult =
 
 function getText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function normalizePhone(value: string) {
-  return value.replace(/[^\d+]/g, "");
 }
 
 function normalizeProvisioningStatus(
@@ -475,19 +472,20 @@ export async function POST(request: NextRequest) {
         config,
         limit: 8,
       });
-      phoneNumberToOrder = availableNumbers[0]?.phoneNumber ?? "";
+      const candidatePhoneNumber = availableNumbers[0]?.phoneNumber ?? "";
+      const exactMatch = candidatePhoneNumber
+        ? await findExactAvailableTelnyxPhoneNumber({
+            config,
+            phoneNumber: candidatePhoneNumber,
+          })
+        : null;
+      phoneNumberToOrder = exactMatch?.phoneNumber ?? "";
     } else {
-      const exactMatches = await searchAvailableTelnyxPhoneNumbers({
+      const exactMatch = await findExactAvailableTelnyxPhoneNumber({
         config,
-        query: selectedPhoneNumber,
-        limit: 8,
+        phoneNumber: selectedPhoneNumber,
       });
-      phoneNumberToOrder =
-        exactMatches.find(
-          (number) =>
-            normalizePhone(number.phoneNumber) ===
-            normalizePhone(selectedPhoneNumber)
-        )?.phoneNumber ?? "";
+      phoneNumberToOrder = exactMatch?.phoneNumber ?? "";
     }
 
     if (!phoneNumberToOrder) {
