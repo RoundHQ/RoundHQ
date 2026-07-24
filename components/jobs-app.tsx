@@ -612,6 +612,7 @@ type PendingQuoteSchedule = {
   quoteNumber: string;
   title: string;
   customerName: string;
+  customerEmail?: string;
   notes?: string;
   scheduledDate?: string;
   startTime?: string;
@@ -11720,6 +11721,8 @@ export default function JobsApp({
     }
 
     const { quote, existingJob } = context;
+    const customer =
+        quote.customerId != null ? customerMap.get(quote.customerId) ?? null : null;
     const defaultQuoteAssignment = getDefaultJobAssignment();
 
     if (!navigateToPage("schedule")) {
@@ -11731,6 +11734,7 @@ export default function JobsApp({
       quoteNumber: quote.quoteNumber,
       title: existingJob?.title?.trim() || `Quoted Work - ${quote.customerName}`,
       customerName: quote.customerName,
+      customerEmail: customer ? getCustomerEmailAddresses(customer)[0] : undefined,
       notes: quote.notes ?? existingJob?.notes ?? "",
       scheduledDate: existingJob?.date,
       startTime: existingJob?.startTime,
@@ -11885,7 +11889,8 @@ export default function JobsApp({
 
   async function sendSchedulingNotifications(
       quote: Quote,
-      decision: SchedulingDecision
+      decision: SchedulingDecision,
+      options: { sendCustomer?: boolean; sendOperator?: boolean } = {}
   ) {
     const result: {
       customerEmailSent: boolean;
@@ -11896,6 +11901,8 @@ export default function JobsApp({
       customerEmailSent: false,
       operatorEmailSent: false,
     };
+    const sendCustomer = options.sendCustomer !== false;
+    const sendOperator = options.sendOperator !== false;
     const customer =
         quote.customerId != null ? customerMap.get(quote.customerId) ?? null : null;
     const customerRecipient = customer
@@ -11920,7 +11927,7 @@ export default function JobsApp({
       businessPhone: appSettings.businessPhone,
     });
 
-    if (customerRecipient) {
+    if (sendCustomer && customerRecipient) {
       try {
         await sendCustomerEmailMessage({
           recipient: customerRecipient,
@@ -11934,11 +11941,11 @@ export default function JobsApp({
             ? error.message
             : "Unable to send customer scheduling email.";
       }
-    } else {
+    } else if (sendCustomer) {
       result.customerEmailError = "No customer email address saved.";
     }
 
-    if (operatorRecipient) {
+    if (sendOperator && operatorRecipient) {
       try {
         await sendCustomerEmailMessage({
           recipient: operatorRecipient,
@@ -11952,7 +11959,7 @@ export default function JobsApp({
             ? error.message
             : "Unable to send operator scheduling email.";
       }
-    } else {
+    } else if (sendOperator) {
       result.operatorEmailError = "No operator email address configured.";
     }
 
@@ -12542,12 +12549,14 @@ export default function JobsApp({
       startTime,
       finishTime,
       assignedStaffId,
+      sendCustomerConfirmation,
     }: {
       quoteId: string;
       date: string;
       startTime: string;
       finishTime: string;
       assignedStaffId?: number | null;
+      sendCustomerConfirmation: boolean;
     }) {
     const context = getQuoteSchedulingContext(quoteId);
 
@@ -12569,6 +12578,74 @@ export default function JobsApp({
                         : undefined,
               }
             : getDefaultJobAssignment();
+    const manualDecision: SchedulingDecision = {
+      status: "scheduled",
+      effectiveMode: "suggest",
+      reason: "next_available",
+      reasonLabel: "scheduled manually",
+      slot: {
+        date,
+        startTime: trimmedStartTime,
+        finishTime: trimmedFinishTime,
+      },
+      estimatedDurationMinutes: quote.estimatedDurationMinutes ?? null,
+      workType: quote.workType,
+      postcode: getSchedulingQuotePostcode(quote),
+      rejectedCandidates: [],
+    };
+    const customer =
+        quote.customerId != null ? customerMap.get(quote.customerId) ?? null : null;
+    const customerRecipient = customer
+        ? getCustomerEmailAddresses(customer)[0]
+        : undefined;
+
+    async function finishManualQuoteScheduling() {
+      const emailStatus = sendCustomerConfirmation
+          ? await sendSchedulingNotifications(quote, manualDecision, {
+              sendCustomer: true,
+              sendOperator: false,
+            })
+          : undefined;
+
+      appendQuoteHistory(
+          quote.id,
+          createDocumentHistoryEntry(
+              "updated",
+              `Scheduled quote ${quote.quoteNumber} for ${date} ${trimmedStartTime}-${trimmedFinishTime}.`
+          )
+      );
+
+      if (emailStatus?.customerEmailSent) {
+        appendQuoteHistory(
+            quote.id,
+            createDocumentHistoryEntry(
+                "sent",
+                `Sent schedule confirmation by email${
+                    customerRecipient ? ` to ${customerRecipient}` : ""
+                }.`,
+                { method: "email", recipient: customerRecipient }
+            )
+        );
+      }
+
+      addSchedulingAuditLog(
+          buildSchedulingAuditLog(quote, manualDecision, emailStatus)
+      );
+      setPendingQuoteSchedule(null);
+
+      if (sendCustomerConfirmation) {
+        window.alert(
+            emailStatus?.customerEmailSent
+                ? "Job scheduled and the customer confirmation email was sent."
+                : `Job scheduled, but the customer confirmation email was not sent. ${
+                    emailStatus?.customerEmailError ||
+                    "Check the customer email and email settings."
+                }`
+        );
+      }
+
+      return true;
+    }
 
     if (existingJob) {
       const updatedJob: ScheduledJob = {
@@ -12613,8 +12690,7 @@ export default function JobsApp({
         return false;
       }
 
-      setPendingQuoteSchedule(null);
-      return true;
+      return finishManualQuoteScheduling();
     }
 
     const newJob: ScheduledJob = {
@@ -12657,8 +12733,7 @@ export default function JobsApp({
       return false;
     }
 
-    setPendingQuoteSchedule(null);
-    return true;
+    return finishManualQuoteScheduling();
   }
 
   async function acceptSchedulingRecommendation(recommendationId: string) {
