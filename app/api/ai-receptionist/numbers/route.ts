@@ -472,14 +472,7 @@ export async function POST(request: NextRequest) {
         config,
         limit: 8,
       });
-      const candidatePhoneNumber = availableNumbers[0]?.phoneNumber ?? "";
-      const exactMatch = candidatePhoneNumber
-        ? await findExactAvailableTelnyxPhoneNumber({
-            config,
-            phoneNumber: candidatePhoneNumber,
-          })
-        : null;
-      phoneNumberToOrder = exactMatch?.phoneNumber ?? "";
+      phoneNumberToOrder = availableNumbers[0]?.phoneNumber ?? "";
     } else {
       const exactMatch = await findExactAvailableTelnyxPhoneNumber({
         config,

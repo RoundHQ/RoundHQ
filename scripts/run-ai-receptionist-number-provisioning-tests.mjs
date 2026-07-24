@@ -320,6 +320,10 @@ assert.match(routeSource, /adminSupabase/);
 assert.match(routeSource, /telnyx_provisioning_reference/);
 assert.match(routeSource, /findTelnyxNumberOrderByReference/);
 assert.match(routeSource, /findExactAvailableTelnyxPhoneNumber/);
+assert.match(
+  routeSource,
+  /setupMode === "call_forwarding"[\s\S]*?phoneNumberToOrder = availableNumbers\[0\]\?\.phoneNumber/
+);
 
 const migrationSource = fs.readFileSync(
   path.join(projectRoot, "supabase", "ai_receptionist_managed_numbers.sql"),
