@@ -79,56 +79,106 @@ export type AiReceptionistCallLogRow = {
   updated_at?: string | null;
 };
 
-function getText(value: string | undefined) {
+function getText(value: string | null | undefined) {
   return value?.trim() || null;
 }
 
 function mapCallLogWriteToRow(
   organizationId: string,
   value: AiReceptionistCallLogWrite
-): AiReceptionistCallLogRow {
-  return {
+): Record<string, unknown> {
+  const row: Record<string, unknown> = {
     organization_id: organizationId,
-    provider: getText(value.provider) || "twilio",
-    provider_event_id: getText(value.providerEventId),
     call_sid: value.callSid,
-    account_sid: getText(value.accountSid),
-    caller_number: getText(value.callerNumber),
-    twilio_phone_number: getText(value.twilioPhoneNumber),
-    call_type: getText(value.callType) || "voicemail",
-    session_id: getText(value.sessionId),
-    recording_url: getText(value.recordingUrl),
-    duration_seconds:
+  };
+
+  const textFields: Array<[
+    keyof AiReceptionistCallLogWrite,
+    string,
+    string | undefined,
+  ]> = [
+    ["provider", "provider", "twilio"],
+    ["providerEventId", "provider_event_id", undefined],
+    ["accountSid", "account_sid", undefined],
+    ["callerNumber", "caller_number", undefined],
+    ["twilioPhoneNumber", "twilio_phone_number", undefined],
+    ["callType", "call_type", "voicemail"],
+    ["sessionId", "session_id", undefined],
+    ["recordingUrl", "recording_url", undefined],
+    ["transcript", "transcript", undefined],
+    ["callStatus", "call_status", undefined],
+    ["outcome", "outcome", undefined],
+    ["priority", "priority", "normal"],
+    ["answeredAt", "answered_at", undefined],
+    ["endedAt", "ended_at", undefined],
+    ["notificationStatus", "notification_status", undefined],
+    ["notificationError", "notification_error", undefined],
+  ];
+
+  textFields.forEach(([sourceKey, destinationKey, fallback]) => {
+    const sourceValue = value[sourceKey];
+
+    if (sourceValue !== undefined) {
+      row[destinationKey] =
+        getText(typeof sourceValue === "string" ? sourceValue : null) ??
+        fallback ??
+        null;
+    }
+  });
+
+  if (value.durationSeconds !== undefined) {
+    row.duration_seconds =
       typeof value.durationSeconds === "number" &&
       Number.isFinite(value.durationSeconds)
         ? Math.max(0, Math.round(value.durationSeconds))
-        : null,
-    transcript: getText(value.transcript),
-    transcript_entries: Array.isArray(value.transcriptEntries)
+        : null;
+  }
+
+  if (value.transcriptEntries !== undefined) {
+    row.transcript_entries = Array.isArray(value.transcriptEntries)
       ? value.transcriptEntries
-      : null,
-    structured_data: value.structuredData ?? null,
-    ai_summaries: value.aiSummaries ?? null,
-    lead_id: value.leadId ?? null,
-    call_status: getText(value.callStatus),
-    outcome: getText(value.outcome),
-    priority: getText(value.priority) || "normal",
-    emergency_detected:
-      typeof value.emergencyDetected === "boolean"
-        ? value.emergencyDetected
-        : null,
-    emergency_keywords: Array.isArray(value.emergencyKeywords)
+      : [];
+  }
+
+  if (value.structuredData !== undefined) {
+    row.structured_data = value.structuredData;
+  }
+
+  if (value.aiSummaries !== undefined) {
+    row.ai_summaries = value.aiSummaries;
+  }
+
+  if (value.leadId !== undefined) {
+    row.lead_id = value.leadId || null;
+  }
+
+  if (value.emergencyDetected !== undefined) {
+    row.emergency_detected = Boolean(value.emergencyDetected);
+  }
+
+  if (value.emergencyKeywords !== undefined) {
+    row.emergency_keywords = Array.isArray(value.emergencyKeywords)
       ? value.emergencyKeywords
-      : null,
-    answered_at: getText(value.answeredAt ?? undefined),
-    ended_at: getText(value.endedAt ?? undefined),
-    drop_off: typeof value.dropOff === "boolean" ? value.dropOff : null,
-    escalated: typeof value.escalated === "boolean" ? value.escalated : null,
-    ai_success: typeof value.aiSuccess === "boolean" ? value.aiSuccess : null,
-    notification_status: getText(value.notificationStatus),
-    notification_error: getText(value.notificationError ?? undefined),
-    raw_payload: value.rawPayload ?? {},
-  };
+      : [];
+  }
+
+  if (value.dropOff !== undefined) {
+    row.drop_off = Boolean(value.dropOff);
+  }
+
+  if (value.escalated !== undefined) {
+    row.escalated = Boolean(value.escalated);
+  }
+
+  if (value.aiSuccess !== undefined) {
+    row.ai_success = Boolean(value.aiSuccess);
+  }
+
+  if (value.rawPayload !== undefined) {
+    row.raw_payload = value.rawPayload;
+  }
+
+  return row;
 }
 
 export async function getAiReceptionistCallLog(
@@ -183,30 +233,9 @@ export async function updateAiReceptionistCallLog(
   });
   const payload = Object.fromEntries(
     Object.entries(row).filter(
-      ([key, entry]) =>
-        !["organization_id", "call_sid"].includes(key) && entry !== null
+      ([key]) => !["organization_id", "call_sid"].includes(key)
     )
   );
-
-  if (value.provider === undefined) {
-    delete payload.provider;
-  }
-
-  if (value.providerEventId === undefined) {
-    delete payload.provider_event_id;
-  }
-
-  if (value.callType === undefined) {
-    delete payload.call_type;
-  }
-
-  if (value.priority === undefined) {
-    delete payload.priority;
-  }
-
-  if (value.rawPayload === undefined) {
-    delete payload.raw_payload;
-  }
 
   if (Object.keys(payload).length === 0) {
     return getAiReceptionistCallLog(supabase, organizationId, callSid);

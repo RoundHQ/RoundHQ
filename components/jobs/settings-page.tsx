@@ -34,7 +34,7 @@ import AiReceptionistCallHistory from "@/components/ai-receptionist/ai-reception
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import type { AiReceptionistSettings } from "@/lib/ai-receptionist-settings";
 import type { AiReceptionistCallHistoryItem } from "@/lib/ai-receptionist/call-logs";
-import { SHOW_AI_RECEPTIONIST_UI } from "@/lib/ai-receptionist/ui-visibility";
+
 import {
     DEFAULT_GRASS_CUT_SEASON_END,
     DEFAULT_GRASS_CUT_SEASON_START,
@@ -1507,8 +1507,7 @@ export default function SettingsPage({
         () => getFullDataExportCounts(resolvedExportData),
         [resolvedExportData]
     );
-    const showAiReceptionistSettings =
-        SHOW_AI_RECEPTIONIST_UI && canManageAiReceptionistSettings;
+    const showAiReceptionistSettings = canManageAiReceptionistSettings;
 
     useEffect(() => {
         const root = document.documentElement;

@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
         error:
           error instanceof Error && error.message.trim()
             ? error.message
-            : "Unable to handle the Telnyx incoming call webhook.",
+            : "Unable to handle the Telnyx webhook.",
       },
       { status: 500 }
     );

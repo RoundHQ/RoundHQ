@@ -5,10 +5,10 @@ import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
-  getPlanFeatureAccess,
   getSubscriptionPlan,
   normalizePlanKey,
 } from "@/lib/billing/plans";
+import { getDefaultCustomerFeatureAccess } from "@/lib/customer-features";
 import {
   isMissingSubscriptionAddonColumn,
   isMissingSubscriptionPlanColumn,
@@ -334,7 +334,7 @@ async function seedManualCustomerWorkspace({
         organization_id: organizationId,
         account_status: "active",
         disabled_reason: "",
-        feature_access: getPlanFeatureAccess(plan, 0),
+        feature_access: getDefaultCustomerFeatureAccess(),
         internal_notes: "",
         support_priority: "standard",
         updated_at: new Date().toISOString(),

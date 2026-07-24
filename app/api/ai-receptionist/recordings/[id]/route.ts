@@ -8,6 +8,7 @@ import {
 } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { ensureWorkspace } from "@/lib/workspace";
+import { isCustomerFeatureEnabled } from "@/lib/customer-account";
 
 export const runtime = "nodejs";
 
@@ -26,6 +27,16 @@ export async function GET(
   }
 
   const organizationId = await ensureWorkspace(supabase, user);
+  const featureEnabled = await isCustomerFeatureEnabled(
+    supabase,
+    organizationId,
+    "aiReceptionist"
+  );
+
+  if (!featureEnabled) {
+    return NextResponse.json({ error: "Not found." }, { status: 404 });
+  }
+
   const dataClient = isSupabaseServiceRoleConfigured()
     ? createServiceRoleClient()
     : supabase;

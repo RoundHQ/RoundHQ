@@ -15,7 +15,7 @@ import {
   getAiReceptionistCallHistory,
   getAiReceptionistDashboardStats,
 } from "@/lib/ai-receptionist/call-logs";
-import { SHOW_AI_RECEPTIONIST_UI } from "@/lib/ai-receptionist/ui-visibility";
+
 import type { SubscriptionPlanKey } from "@/lib/billing/plans";
 import { isStripeConfigured } from "@/lib/stripe/server";
 import { ensureWorkspace } from "@/lib/workspace";
@@ -200,7 +200,9 @@ export default async function DashboardPage({
       ? organizations[0].name.trim()
       : "RoundHQ Workspace";
   const accountSettings = await getCustomerAccountSettings(supabase, organizationId);
-  const canManageAiReceptionistSettings = SHOW_AI_RECEPTIONIST_UI
+  const aiReceptionistPilotEnabled =
+    accountSettings.featureAccess.aiReceptionist;
+  const canManageAiReceptionistSettings = aiReceptionistPilotEnabled
     ? await getWorkspaceAdminAccess(supabase, organizationId, user)
     : false;
   const aiReceptionistSettings = canManageAiReceptionistSettings

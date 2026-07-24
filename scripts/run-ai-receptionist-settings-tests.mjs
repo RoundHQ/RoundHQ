@@ -229,16 +229,16 @@ assert.match(
   /at least one question/i
 );
 
-const partialTwilioValidation = validateAiReceptionistSettings(
+const legacyTwilioFieldsValidation = validateAiReceptionistSettings(
   normalizeAiReceptionistSettings({
     ...defaultSettings,
     twilioAccountSid: "AC1234567890abcdef",
   })
 );
-assert.equal(partialTwilioValidation.ok, false);
-assert.match(
-  partialTwilioValidation.errors.join(" "),
-  /Account SID, Auth Token, and phone number/i
+assert.equal(
+  legacyTwilioFieldsValidation.ok,
+  true,
+  "hidden legacy provider fields should not block managed Telnyx setup"
 );
 
 const telnyxOnlyValidation = validateAiReceptionistSettings(
@@ -261,16 +261,17 @@ assert.equal(
   "Twilio should not be required for production voicemail-to-lead mode"
 );
 
-const partialTelnyxValidation = validateAiReceptionistSettings(
+const enabledWithoutManagedNumberValidation = validateAiReceptionistSettings(
   normalizeAiReceptionistSettings({
     ...defaultSettings,
-    telnyxPhoneNumber: "+441215551111",
+    enabled: true,
+    businessName: "RoundHQ Test Co",
   })
 );
-assert.equal(partialTelnyxValidation.ok, false);
+assert.equal(enabledWithoutManagedNumberValidation.ok, false);
 assert.match(
-  partialTelnyxValidation.errors.join(" "),
-  /Telnyx phone number, API key, and public key/i
+  enabledWithoutManagedNumberValidation.errors.join(" "),
+  /finish setting up the receptionist phone number/i
 );
 
 const normalizedQuestions = normalizeAiReceptionistList(
@@ -346,10 +347,12 @@ assert.match(renderedFormHtml, /Questions/);
 assert.match(renderedFormHtml, /Business Hours/);
 assert.match(renderedFormHtml, /Emergency Keywords/);
 assert.match(renderedFormHtml, /Phone Connection/);
-assert.match(renderedFormHtml, /Telnyx Phone Number/);
-assert.match(renderedFormHtml, /Telnyx API Key/);
-assert.match(renderedFormHtml, /Telnyx Public Key/);
-assert.match(renderedFormHtml, /Voicemail-to-Lead mode/);
+assert.match(renderedFormHtml, /Your receptionist number/);
+assert.match(renderedFormHtml, /RoundHQ manages the secure phone connection/);
+assert.doesNotMatch(renderedFormHtml, /Telnyx API Key/);
+assert.doesNotMatch(renderedFormHtml, /Telnyx Public Key/);
+assert.doesNotMatch(renderedFormHtml, /Connection \/ App ID/);
+assert.match(renderedFormHtml, /creates a lead after Telnyx transcription/);
 assert.doesNotMatch(
   renderedFormHtml,
   /Realtime voice receptionist/,
@@ -357,8 +360,22 @@ assert.doesNotMatch(
 );
 assert.match(
   renderedFormHtml,
-  /AI Receptionist is enabled and connected to Telnyx/
+  /Voicemail-to-lead is enabled on \+44 121 555 1001/
 );
+
+const unconfiguredFormHtml = renderToStaticMarkup(
+  React.createElement(AiReceptionistSettingsForm, {
+    initialSettings: normalizeAiReceptionistSettings({
+      ...defaultSettings,
+      businessName: "RoundHQ Test Co",
+      phoneSetupMode: "call_forwarding",
+    }),
+    workspaceName: "RoundHQ Test Co",
+  })
+);
+assert.match(unconfiguredFormHtml, /Keep my existing number/);
+assert.match(unconfiguredFormHtml, /Choose a new number/);
+assert.match(unconfiguredFormHtml, /Set up call forwarding/);
 
 const renderedSettingsPageHtml = renderToStaticMarkup(
   React.createElement(SettingsPage, {

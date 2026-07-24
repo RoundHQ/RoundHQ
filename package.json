@@ -10,11 +10,13 @@
     "test:payment-reconciliation": "node scripts/run-payment-reconciliation-tests.mjs",
     "test:scheduling": "node scripts/run-scheduling-tests.mjs",
     "test:team-permissions": "node scripts/run-team-permissions-tests.mjs",
+    "test:customer-feature-access": "node scripts/run-customer-feature-access-tests.mjs",
     "test:staff-invitations": "node scripts/run-staff-invitations-tests.mjs",
     "test:ai-receptionist": "node scripts/run-ai-receptionist-tests.mjs",
     "test:ai-receptionist-settings": "node scripts/run-ai-receptionist-settings-tests.mjs",
     "test:ai-receptionist-twilio": "node scripts/run-ai-receptionist-twilio-tests.mjs",
     "test:ai-receptionist-telnyx": "node scripts/run-ai-receptionist-telnyx-tests.mjs",
+    "test:ai-receptionist-number-provisioning": "node scripts/run-ai-receptionist-number-provisioning-tests.mjs",
     "test:ai-receptionist-realtime": "node scripts/run-ai-receptionist-realtime-tests.mjs"
   },
   "dependencies": {

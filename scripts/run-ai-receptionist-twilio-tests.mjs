@@ -59,7 +59,7 @@ const {
 } = require(path.join(projectRoot, "lib", "ai-receptionist", "call-logs.ts"));
 const {
   getAiReceptionistPrivateSettings,
-} = require(path.join(projectRoot, "lib", "ai-receptionist-settings.ts"));
+} = require(path.join(projectRoot, "lib", "ai-receptionist-private-settings.ts"));
 
 const organizationAId = "00000000-0000-4000-8000-000000000001";
 const organizationBId = "00000000-0000-4000-8000-000000000002";
@@ -93,6 +93,16 @@ function buildSettingsRow(organization_id, twilio_phone_number, business_name) {
 
 function createTables() {
   return {
+    customer_account_settings: [
+      {
+        organization_id: organizationAId,
+        feature_access: { aiReceptionist: true },
+      },
+      {
+        organization_id: organizationBId,
+        feature_access: { aiReceptionist: true },
+      },
+    ],
     ai_receptionist_settings: [
       buildSettingsRow(organizationAId, twilioPhoneNumber, "RoundHQ Test Co A"),
       buildSettingsRow(organizationBId, twilioPhoneNumberB, "RoundHQ Test Co B"),

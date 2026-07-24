@@ -187,7 +187,7 @@ import type {
   AiReceptionistCallHistoryItem,
   AiReceptionistDashboardStats,
 } from "@/lib/ai-receptionist/call-logs";
-import { SHOW_AI_RECEPTIONIST_UI } from "@/lib/ai-receptionist/ui-visibility";
+
 import {
   ADMIN_ONLY_STAFF_PAGE_KEYS,
   DEFAULT_ROLE_PAGE_ACCESS,
@@ -15440,7 +15440,7 @@ export default function JobsApp({
                       showUnpaidWidget={appSettings.showUnpaidWidget}
                       showRecentActivityWidget={appSettings.showRecentActivityWidget}
                       aiReceptionistStats={
-                        SHOW_AI_RECEPTIONIST_UI && canManageAiReceptionistSettings
+                        canManageAiReceptionistSettings
                           ? aiReceptionistStats
                           : null
                       }
@@ -15840,6 +15840,9 @@ export default function JobsApp({
                       customers={customers}
                       leadsReady={workflowTablesReady.customerLeads}
                       businessName={getBusinessDisplayName(appSettings)}
+                      showAiAssistantDetails={
+                        customerFeatureAccess.aiReceptionist
+                      }
                       onRefresh={refreshCustomerLeads}
                       onSendEmailReply={sendCustomerLeadEmailReply}
                       onConvertToCustomer={convertCustomerLeadToCustomer}
@@ -16169,15 +16172,9 @@ export default function JobsApp({
                       accountEmail={currentUserEmail}
                       showGrowthSettings={hasGrowthPlan}
                       workspaceName={supportAccess?.workspaceName ?? workspaceName}
-                      aiReceptionistSettings={
-                          SHOW_AI_RECEPTIONIST_UI ? aiReceptionistSettings : null
-                      }
-                      canManageAiReceptionistSettings={
-                          SHOW_AI_RECEPTIONIST_UI && canManageAiReceptionistSettings
-                      }
-                      aiReceptionistCallHistory={
-                          SHOW_AI_RECEPTIONIST_UI ? aiReceptionistCallHistory : null
-                      }
+                      aiReceptionistSettings={aiReceptionistSettings}
+                      canManageAiReceptionistSettings={canManageAiReceptionistSettings}
+                      aiReceptionistCallHistory={aiReceptionistCallHistory}
                       exportData={{
                         customers,
                         quotes,

@@ -25,7 +25,7 @@ import {
   formatAiReceptionistCallDuration,
   getAiReceptionistCallMetadata,
 } from "@/lib/ai-receptionist-leads";
-import { SHOW_AI_RECEPTIONIST_UI } from "@/lib/ai-receptionist/ui-visibility";
+
 import { buildCustomerDraftFromLead } from "@/lib/customer-leads";
 import type {
   CustomerLead,
@@ -54,6 +54,7 @@ type Props = {
   customers: Customer[];
   leadsReady: boolean;
   businessName: string;
+  showAiAssistantDetails?: boolean;
   onRefresh: () => Promise<void> | void;
   onSendEmailReply: (
     leadId: string,
@@ -353,7 +354,10 @@ function getStatusLabel(status: CustomerLeadStatus) {
   return STATUS_META[status].label;
 }
 
-export function getSourceLabel(source: CustomerLead["source"]) {
+export function getSourceLabel(
+  source: CustomerLead["source"],
+  showAiAssistantDetails = true
+) {
   switch (source) {
     case "facebook":
       return "Facebook";
@@ -362,7 +366,7 @@ export function getSourceLabel(source: CustomerLead["source"]) {
     case "email":
       return "Email";
     case "ai_receptionist":
-      return SHOW_AI_RECEPTIONIST_UI ? "AI Receptionist" : "Phone enquiry";
+      return showAiAssistantDetails ? "AI Receptionist" : "Phone";
     case "manual":
       return "Manual";
     default:
@@ -388,15 +392,23 @@ function getLeadSearchText(
   );
 }
 
-function getLeadTimeline(lead: CustomerLead): LeadTimelineItem[] {
-  const activityItems = lead.activityHistory.map((entry) => ({
-    id: entry.id,
-    occurredAt: entry.occurredAt,
-    type: entry.type,
-    title: entry.title,
-    detail: entry.detail,
-    metadata: entry.metadata,
-  }));
+function getLeadTimeline(
+  lead: CustomerLead,
+  showAiAssistantDetails: boolean
+): LeadTimelineItem[] {
+  const activityItems = lead.activityHistory
+    .filter(
+      (entry) =>
+        showAiAssistantDetails || entry.type !== "ai_receptionist_call"
+    )
+    .map((entry) => ({
+      id: entry.id,
+      occurredAt: entry.occurredAt,
+      type: entry.type,
+      title: entry.title,
+      detail: entry.detail,
+      metadata: entry.metadata,
+    }));
   const replyActivityIds = new Set(
     lead.activityHistory
       .filter((entry) => entry.type === "reply" && entry.relatedId)
@@ -420,7 +432,10 @@ function getLeadTimeline(lead: CustomerLead): LeadTimelineItem[] {
       occurredAt: lead.submittedAt,
       type: "received" as const,
       title: "Lead received",
-      detail: `${getSourceLabel(lead.source)} enquiry submitted.`,
+      detail: `${getSourceLabel(
+        lead.source,
+        showAiAssistantDetails
+      )} enquiry submitted.`,
     },
   ].sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
 }
@@ -664,7 +679,7 @@ function AiReceptionistActivityContent({
       ) : null}
 
       <AiReceptionistActivityField label="Created By">
-        {SHOW_AI_RECEPTIONIST_UI ? metadata.created_by : "Phone intake"}
+        {metadata.created_by}
       </AiReceptionistActivityField>
     </div>
   );
@@ -672,10 +687,7 @@ function AiReceptionistActivityContent({
 
 function ActivityTimelineEntry({ entry }: { entry: LeadTimelineItem }) {
   const isAiReceptionistCall = entry.type === "ai_receptionist_call";
-  const activityTitle =
-    isAiReceptionistCall && !SHOW_AI_RECEPTIONIST_UI
-      ? "Phone call"
-      : entry.title;
+  const activityTitle = entry.title;
 
   return (
     <article className="flex gap-3">
@@ -687,7 +699,7 @@ function ActivityTimelineEntry({ entry }: { entry: LeadTimelineItem }) {
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-sm font-bold text-slate-900">{activityTitle}</p>
-          {isAiReceptionistCall && SHOW_AI_RECEPTIONIST_UI ? (
+          {isAiReceptionistCall ? (
             <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-200">
               [AI Receptionist]
             </span>
@@ -716,6 +728,7 @@ export default function CustomerLeadsPage({
   customers,
   leadsReady,
   businessName,
+  showAiAssistantDetails = false,
   onRefresh,
   onSendEmailReply,
   onConvertToCustomer,
@@ -821,12 +834,18 @@ export default function CustomerLeadsPage({
     ? duplicateMatchesByLeadId.get(selectedLead.id) ?? []
     : [];
   const selectedLeadTimeline = useMemo(
-    () => (selectedLead ? getLeadTimeline(selectedLead) : []),
-    [selectedLead]
+    () =>
+      selectedLead
+        ? getLeadTimeline(selectedLead, showAiAssistantDetails)
+        : [],
+    [selectedLead, showAiAssistantDetails]
   );
   const selectedLeadAiAlert = useMemo(
-    () => (selectedLead ? getAiReceptionistLeadAlert(selectedLead) : null),
-    [selectedLead]
+    () =>
+      selectedLead && showAiAssistantDetails
+        ? getAiReceptionistLeadAlert(selectedLead)
+        : null,
+    [selectedLead, showAiAssistantDetails]
   );
   const inboxStats = useMemo(
     () => [
@@ -1164,7 +1183,12 @@ export default function CustomerLeadsPage({
                               <Clock size={13} />
                               {formatLeadDate(lead.submittedAt)}
                             </span>
-                            <span>{getSourceLabel(lead.source)}</span>
+                            <span>
+                              {getSourceLabel(
+                                lead.source,
+                                showAiAssistantDetails
+                              )}
+                            </span>
                             <span>{getLeadContactLine(lead)}</span>
                             {duplicateMatches.length > 0 ? (
                               <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 font-semibold text-amber-700 ring-1 ring-amber-200">
@@ -1203,7 +1227,10 @@ export default function CustomerLeadsPage({
                         </p>
                         <p className="mt-1 text-xs text-slate-400">
                           {formatLeadDate(selectedLead.submittedAt)} | Source:{" "}
-                          {getSourceLabel(selectedLead.source)}
+                          {getSourceLabel(
+                            selectedLead.source,
+                            showAiAssistantDetails
+                          )}
                         </p>
                       </div>
                     </div>

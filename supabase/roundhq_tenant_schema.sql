@@ -136,7 +136,7 @@ create table if not exists public.customer_account_settings (
   organization_id uuid primary key references public.organizations(id) on delete cascade,
   account_status text not null default 'active' check (account_status in ('active', 'disabled')),
   disabled_reason text null,
-  feature_access jsonb not null default '{}'::jsonb,
+  feature_access jsonb not null default '{"aiReceptionist": false}'::jsonb,
   internal_notes text not null default '',
   support_priority text not null default 'standard' check (
     support_priority in ('standard', 'priority', 'watch')
@@ -144,6 +144,10 @@ create table if not exists public.customer_account_settings (
   updated_at timestamptz not null default now(),
   check (jsonb_typeof(feature_access) = 'object')
 );
+
+alter table public.customer_account_settings
+alter column feature_access
+set default '{"aiReceptionist": false}'::jsonb;
 
 insert into public.customer_account_settings (organization_id)
 select id from public.organizations
@@ -163,6 +167,13 @@ create table if not exists public.ai_receptionist_settings (
   telnyx_messaging_profile_id text not null default '',
   telnyx_public_key text not null default '',
   telnyx_phone_number text not null default '',
+  phone_setup_mode text not null default 'new_number',
+  existing_business_phone_number text not null default '',
+  telnyx_phone_number_id text not null default '',
+  telnyx_number_order_id text not null default '',
+  telnyx_provisioning_status text not null default 'not_configured',
+  telnyx_provisioning_reference text not null default '',
+  telnyx_provisioning_error text not null default '',
   twilio_account_sid text not null default '',
   twilio_auth_token text not null default '',
   twilio_phone_number text not null default '',
@@ -202,7 +213,18 @@ create table if not exists public.ai_receptionist_settings (
   check (jsonb_typeof(business_hours) = 'object'),
   check (jsonb_typeof(questions_to_ask) = 'array'),
   check (jsonb_typeof(emergency_keywords) = 'array'),
-  check (telephony_provider in ('telnyx', 'twilio'))
+  check (telephony_provider in ('telnyx', 'twilio')),
+  check (phone_setup_mode in ('new_number', 'call_forwarding')),
+  check (
+    telnyx_provisioning_status in (
+      'not_configured',
+      'ordering',
+      'pending',
+      'action_required',
+      'active',
+      'failed'
+    )
+  )
 );
 
 alter table public.ai_receptionist_settings
@@ -217,6 +239,13 @@ alter table public.ai_receptionist_settings
   add column if not exists telnyx_messaging_profile_id text not null default '',
   add column if not exists telnyx_public_key text not null default '',
   add column if not exists telnyx_phone_number text not null default '',
+  add column if not exists phone_setup_mode text not null default 'new_number',
+  add column if not exists existing_business_phone_number text not null default '',
+  add column if not exists telnyx_phone_number_id text not null default '',
+  add column if not exists telnyx_number_order_id text not null default '',
+  add column if not exists telnyx_provisioning_status text not null default 'not_configured',
+  add column if not exists telnyx_provisioning_reference text not null default '',
+  add column if not exists telnyx_provisioning_error text not null default '',
   add column if not exists twilio_account_sid text not null default '',
   add column if not exists twilio_auth_token text not null default '',
   add column if not exists twilio_phone_number text not null default '',
@@ -1056,6 +1085,14 @@ on public.ai_receptionist_settings (
 )
 where btrim(telnyx_phone_number) <> '';
 
+create unique index if not exists ai_receptionist_settings_provisioning_reference_unique_idx
+on public.ai_receptionist_settings (telnyx_provisioning_reference)
+where btrim(telnyx_provisioning_reference) <> '';
+
+create unique index if not exists ai_receptionist_settings_telnyx_number_order_unique_idx
+on public.ai_receptionist_settings (telnyx_number_order_id)
+where btrim(telnyx_number_order_id) <> '';
+
 create unique index if not exists ai_receptionist_settings_twilio_phone_number_unique_idx
 on public.ai_receptionist_settings (
   (regexp_replace(twilio_phone_number, '[^0-9+]', '', 'g'))
@@ -1789,6 +1826,55 @@ create trigger set_ai_receptionist_settings_updated_at
 before update on public.ai_receptionist_settings
 for each row
 execute function public.touch_ai_receptionist_settings_updated_at();
+
+create or replace function public.protect_ai_receptionist_managed_number_fields()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if auth.role() = 'service_role' then
+    return new;
+  end if;
+
+  if tg_op = 'INSERT' then
+    if btrim(new.telnyx_phone_number) <> ''
+      or btrim(new.telnyx_phone_number_id) <> ''
+      or btrim(new.telnyx_number_order_id) <> ''
+      or btrim(new.telnyx_provisioning_reference) <> ''
+      or new.telnyx_provisioning_status <> 'not_configured'
+      or btrim(new.telnyx_provisioning_error) <> ''
+      or new.phone_setup_mode <> 'new_number'
+      or btrim(new.existing_business_phone_number) <> '' then
+      raise exception 'AI Receptionist phone allocation is managed by RoundHQ.'
+        using errcode = '42501';
+    end if;
+
+    return new;
+  end if;
+
+  if new.telnyx_phone_number is distinct from old.telnyx_phone_number
+    or new.telnyx_phone_number_id is distinct from old.telnyx_phone_number_id
+    or new.telnyx_number_order_id is distinct from old.telnyx_number_order_id
+    or new.telnyx_provisioning_reference is distinct from old.telnyx_provisioning_reference
+    or new.telnyx_provisioning_status is distinct from old.telnyx_provisioning_status
+    or new.telnyx_provisioning_error is distinct from old.telnyx_provisioning_error
+    or new.phone_setup_mode is distinct from old.phone_setup_mode
+    or new.existing_business_phone_number is distinct from old.existing_business_phone_number then
+    raise exception 'AI Receptionist phone allocation is managed by RoundHQ.'
+      using errcode = '42501';
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists protect_ai_receptionist_managed_number_fields
+on public.ai_receptionist_settings;
+create trigger protect_ai_receptionist_managed_number_fields
+before insert or update on public.ai_receptionist_settings
+for each row
+execute function public.protect_ai_receptionist_managed_number_fields();
 
 drop policy if exists "Admins can read AI Receptionist call logs" on public.ai_receptionist_call_logs;
 create policy "Admins can read AI Receptionist call logs"

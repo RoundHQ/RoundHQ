@@ -7,7 +7,6 @@ import {
   ChevronUp,
   Clock,
   Phone,
-  PhoneForwarded,
   Plus,
   Save,
   Send,
@@ -23,6 +22,9 @@ import {
   updateAiReceptionistSettingsAction,
   type AiReceptionistSettingsActionState,
 } from "@/app/settings/ai-receptionist/actions";
+import AiReceptionistPhoneSetup, {
+  type AiReceptionistPhoneSetupState,
+} from "@/components/ai-receptionist/ai-receptionist-phone-setup";
 
 type Props = {
   initialSettings: AiReceptionistSettings;
@@ -173,29 +175,13 @@ export default function AiReceptionistSettingsForm({
   const [fallbackPhoneNumber, setFallbackPhoneNumber] = useState(
     initialSettings.fallbackPhoneNumber
   );
-  const [telephonyProvider, setTelephonyProvider] = useState(
-    initialSettings.telephonyProvider
-  );
-  const [telnyxPhoneNumber, setTelnyxPhoneNumber] = useState(
-    initialSettings.telnyxPhoneNumber
-  );
-  const [telnyxConnectionId, setTelnyxConnectionId] = useState(
-    initialSettings.telnyxConnectionId
-  );
-  const [telnyxMessagingProfileId, setTelnyxMessagingProfileId] = useState(
-    initialSettings.telnyxMessagingProfileId
-  );
-  const [telnyxPublicKey, setTelnyxPublicKey] = useState(
-    initialSettings.telnyxPublicKey
-  );
-  const [telnyxApiKey, setTelnyxApiKey] = useState("");
-  const [twilioAccountSid, setTwilioAccountSid] = useState(
-    initialSettings.twilioAccountSid
-  );
-  const [twilioPhoneNumber, setTwilioPhoneNumber] = useState(
-    initialSettings.twilioPhoneNumber
-  );
-  const [twilioAuthToken, setTwilioAuthToken] = useState("");
+  const [phoneSetup, setPhoneSetup] = useState<AiReceptionistPhoneSetupState>({
+    phoneNumber: initialSettings.telnyxPhoneNumber,
+    setupMode: initialSettings.phoneSetupMode,
+    existingBusinessPhoneNumber: initialSettings.existingBusinessPhoneNumber,
+    provisioningStatus: initialSettings.phoneProvisioningStatus,
+    provisioningError: initialSettings.phoneProvisioningError,
+  });
   const [newLeadSmsEnabled, setNewLeadSmsEnabled] = useState(
     initialSettings.newLeadSmsEnabled
   );
@@ -244,22 +230,9 @@ export default function AiReceptionistSettingsForm({
   const normalizedQuestions = normalizeDraftList(questions);
   const normalizedKeywords = normalizeDraftList(emergencyKeywords);
   const statusLabel = enabled ? "Enabled" : "Disabled";
-  const telnyxApiKeyConfigured =
-    initialSettings.telnyxApiKeyConfigured || Boolean(telnyxApiKey.trim());
-  const telnyxConnected = Boolean(
-    telnyxPhoneNumber.trim() &&
-      telnyxPublicKey.trim() &&
-      telnyxApiKeyConfigured
+  const providerConnected = Boolean(
+    phoneSetup.phoneNumber.trim() && phoneSetup.provisioningStatus === "active"
   );
-  const twilioAuthTokenConfigured =
-    initialSettings.twilioAuthTokenConfigured || Boolean(twilioAuthToken.trim());
-  const twilioConnected = Boolean(
-    twilioAccountSid.trim() &&
-      twilioPhoneNumber.trim() &&
-      twilioAuthTokenConfigured
-  );
-  const providerConnected =
-    telephonyProvider === "twilio" ? twilioConnected : telnyxConnected;
 
   function updateBusinessHours(
     day: AiReceptionistDayKey,
@@ -313,16 +286,7 @@ export default function AiReceptionistSettingsForm({
         name="emergency_keywords_json"
         value={JSON.stringify(normalizedKeywords)}
       />
-      <input
-        type="hidden"
-        name="twilio_auth_token_configured"
-        value={twilioAuthTokenConfigured ? "true" : "false"}
-      />
-      <input
-        type="hidden"
-        name="telnyx_api_key_configured"
-        value={telnyxApiKeyConfigured ? "true" : "false"}
-      />
+
       <input type="hidden" name="realtime_enabled" value="false" />
 
       {actionState.message ? (
@@ -348,7 +312,7 @@ export default function AiReceptionistSettingsForm({
               onChange={(event) => setEnabled(event.target.checked)}
               className="size-5 accent-[#19c653]"
             />
-            Enable AI Receptionist
+            Enable voicemail-to-lead
           </label>
           <span
             className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-xs font-black uppercase tracking-wide ${
@@ -363,19 +327,19 @@ export default function AiReceptionistSettingsForm({
 
         <div className="mt-4 flex gap-3 rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-900">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          AI Receptionist is currently running in Voicemail-to-Lead mode. Live AI conversations will be added later.
+          This pilot answers with a fixed greeting, records the caller after the beep, and creates a lead after Telnyx transcription. It is not a live AI conversation.
         </div>
 
         {enabled && !providerConnected ? (
           <div className="mt-4 flex gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
             <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-            AI Receptionist is enabled, but no phone provider is connected yet.
+            AI Receptionist is enabled, but the receptionist phone number is not ready yet.
           </div>
         ) : null}
 
         {enabled && providerConnected ? (
           <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
-            AI Receptionist is enabled and connected to {telephonyProvider === "twilio" ? "Twilio legacy" : "Telnyx"}.
+            Voicemail-to-lead is enabled on {phoneSetup.phoneNumber}. Place a test call before routing live business calls.
           </div>
         ) : null}
       </Section>
@@ -398,7 +362,7 @@ export default function AiReceptionistSettingsForm({
             placeholder="office@example.co.uk"
           />
           <TextField
-            label="Fallback phone number"
+            label="Fallback phone number (future live calls)"
             name="fallback_phone_number"
             value={fallbackPhoneNumber}
             onChange={setFallbackPhoneNumber}
@@ -407,7 +371,7 @@ export default function AiReceptionistSettingsForm({
         </div>
         <div className="mt-5">
           <TextField
-            label="Lead source label"
+            label="Lead source label (future live calls)"
             name="lead_source_label"
             value={leadSourceLabel}
             onChange={setLeadSourceLabel}
@@ -437,6 +401,10 @@ export default function AiReceptionistSettingsForm({
       </Section>
 
       <Section title="Questions">
+        <p className="mb-4 text-sm font-semibold text-slate-500">
+          Reserved for the later live-conversation phase. These questions do not
+          change the voicemail prompt used by this pilot.
+        </p>
         <div className="space-y-3">
           {questions.map((question, index) => (
             <div
@@ -504,6 +472,10 @@ export default function AiReceptionistSettingsForm({
       </Section>
 
       <Section title="Business Hours">
+        <p className="mb-4 text-sm font-semibold text-slate-500">
+          Reserved for the later live-conversation phase. The voicemail pilot
+          currently answers at all times when enabled.
+        </p>
         <label className="mb-4 flex items-center gap-3 text-sm font-bold text-slate-700">
           <input
             type="checkbox"
@@ -560,6 +532,10 @@ export default function AiReceptionistSettingsForm({
       </Section>
 
       <Section title="Emergency Keywords">
+        <p className="mb-4 text-sm font-semibold text-slate-500">
+          Reserved for the later live-conversation phase. Voicemail leads are
+          not automatically escalated from these keywords in this pilot.
+        </p>
         <div className="flex flex-wrap gap-2">
           {emergencyKeywords.map((keyword, index) => (
             <span
@@ -617,166 +593,75 @@ export default function AiReceptionistSettingsForm({
                   className={`inline-flex rounded-full px-3 py-1 text-xs font-black uppercase tracking-wide ${
                     providerConnected
                       ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
-                      : "bg-slate-100 text-slate-600 ring-1 ring-slate-200"
+                      : phoneSetup.provisioningStatus === "ordering" ||
+                          phoneSetup.provisioningStatus === "pending"
+                        ? "bg-sky-50 text-sky-700 ring-1 ring-sky-200"
+                        : "bg-slate-100 text-slate-600 ring-1 ring-slate-200"
                   }`}
                 >
-                  {providerConnected ? "Connected" : "Not connected"}
+                  {providerConnected
+                    ? "Ready"
+                    : phoneSetup.provisioningStatus === "ordering" ||
+                        phoneSetup.provisioningStatus === "pending"
+                      ? "Setting up"
+                      : "Not configured"}
                 </span>
               </div>
-              <p className="mt-2 text-sm font-semibold text-slate-500">
-                Telnyx is the preferred provider for voicemail-to-lead and SMS.
-                API keys are encrypted server-side and never shown again.
+              <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">
+                Keep your existing business number with call forwarding, or choose a new UK number for the receptionist.
               </p>
 
-              <label className="mt-5 block">
-                <span className="mb-2 block text-sm font-bold text-slate-700">
-                  Provider
-                </span>
-                <select
-                  name="telephony_provider"
-                  value={telephonyProvider}
-                  onChange={(event) =>
-                    setTelephonyProvider(
-                      event.target.value === "twilio" ? "twilio" : "telnyx"
-                    )
-                  }
-                  className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
-                >
-                  <option value="telnyx">Telnyx</option>
-                  <option value="twilio">Twilio legacy</option>
-                </select>
-              </label>
-
-              {telephonyProvider === "telnyx" ? (
-                <div className="mt-5 grid gap-4 md:grid-cols-2">
-                  <TextField
-                    label="Telnyx Phone Number"
-                    name="telnyx_phone_number"
-                    value={telnyxPhoneNumber}
-                    onChange={setTelnyxPhoneNumber}
-                    placeholder="+447712345678"
-                  />
-                  <TextField
-                    label="Telnyx API Key"
-                    name="telnyx_api_key"
-                    type="password"
-                    value={telnyxApiKey}
-                    onChange={setTelnyxApiKey}
-                    placeholder={
-                      initialSettings.telnyxApiKeyConfigured
-                        ? "Saved - enter a new key to replace"
-                        : "Enter API key"
-                    }
-                  />
-                  <TextField
-                    label="Telnyx Connection / App ID"
-                    name="telnyx_connection_id"
-                    value={telnyxConnectionId}
-                    onChange={setTelnyxConnectionId}
-                    placeholder="Call Control app or connection ID"
-                  />
-                  <TextField
-                    label="Telnyx Messaging Profile ID"
-                    name="telnyx_messaging_profile_id"
-                    value={telnyxMessagingProfileId}
-                    onChange={setTelnyxMessagingProfileId}
-                    placeholder="Messaging profile ID"
-                  />
-                  <div className="md:col-span-2">
-                    <TextAreaField
-                      label="Telnyx Public Key"
-                      name="telnyx_public_key"
-                      value={telnyxPublicKey}
-                      onChange={setTelnyxPublicKey}
-                      maxLength={1200}
-                      rows={4}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="mt-5 rounded-md border border-amber-200 bg-amber-50 p-4">
-                  <p className="text-sm font-bold text-amber-900">
-                    Twilio is legacy for AI Receptionist launch. Production
-                    voicemail-to-lead should use Telnyx.
-                  </p>
-                  <div className="mt-4 grid gap-4 md:grid-cols-3">
-                    <TextField
-                      label="Twilio Account SID"
-                      name="twilio_account_sid"
-                      value={twilioAccountSid}
-                      onChange={setTwilioAccountSid}
-                      placeholder="AC..."
-                    />
-                    <TextField
-                      label="Twilio Auth Token"
-                      name="twilio_auth_token"
-                      type="password"
-                      value={twilioAuthToken}
-                      onChange={setTwilioAuthToken}
-                      placeholder={
-                        initialSettings.twilioAuthTokenConfigured
-                          ? "Saved - enter a new token to replace"
-                          : "Enter auth token"
-                      }
-                    />
-                    <TextField
-                      label="Twilio Phone Number"
-                      name="twilio_phone_number"
-                      value={twilioPhoneNumber}
-                      onChange={setTwilioPhoneNumber}
-                      placeholder="+447712345678"
-                    />
-                  </div>
-                </div>
-              )}
+              <AiReceptionistPhoneSetup
+                value={phoneSetup}
+                onChange={setPhoneSetup}
+              />
 
               <div className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4">
-                <div className="flex items-start gap-3">
-                  <PhoneForwarded className="mt-0.5 size-5 shrink-0 text-slate-500" />
-                  <div className="grid min-w-0 flex-1 gap-4 md:grid-cols-2">
-                    <label className="flex items-center gap-3 text-sm font-bold text-slate-700">
-                      <input
-                        type="checkbox"
-                        name="new_lead_sms_enabled"
-                        checked={newLeadSmsEnabled}
-                        onChange={(event) =>
-                          setNewLeadSmsEnabled(event.target.checked)
-                        }
-                        className="size-5 accent-[#19c653]"
-                      />
-                      Send new lead SMS
-                    </label>
-                    <TextField
-                      label="New lead SMS number"
-                      name="new_lead_sms_phone_number"
-                      value={newLeadSmsPhoneNumber}
-                      onChange={setNewLeadSmsPhoneNumber}
-                      placeholder="+447700900123"
+                <div className="grid min-w-0 gap-4 md:grid-cols-2">
+                  <label className="flex items-center gap-3 text-sm font-bold text-slate-700">
+                    <input
+                      type="checkbox"
+                      name="new_lead_sms_enabled"
+                      checked={newLeadSmsEnabled}
+                      onChange={(event) =>
+                        setNewLeadSmsEnabled(event.target.checked)
+                      }
+                      disabled={!providerConnected}
+                      className="size-5 accent-[#19c653] disabled:opacity-50"
                     />
-                    <TextField
-                      label="Test SMS number"
-                      name="test_sms_number"
-                      value={testSmsNumber}
-                      onChange={setTestSmsNumber}
-                      placeholder="+447700900123"
-                    />
-                    <button
-                      type="submit"
-                      name="action_intent"
-                      value="send_test_sms"
-                      disabled={isPending || !testSmsNumber.trim()}
-                      className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <Send className="size-4" />
-                      Send test SMS
-                    </button>
-                  </div>
+                    Send new lead SMS
+                  </label>
+                  <TextField
+                    label="New lead SMS number"
+                    name="new_lead_sms_phone_number"
+                    value={newLeadSmsPhoneNumber}
+                    onChange={setNewLeadSmsPhoneNumber}
+                    placeholder="+447700900123"
+                  />
+                  <TextField
+                    label="Test SMS number"
+                    name="test_sms_number"
+                    value={testSmsNumber}
+                    onChange={setTestSmsNumber}
+                    placeholder="+447700900123"
+                  />
+                  <button
+                    type="submit"
+                    name="action_intent"
+                    value="send_test_sms"
+                    disabled={
+                      isPending || !providerConnected || !testSmsNumber.trim()
+                    }
+                    className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Send className="size-4" />
+                    Send test SMS
+                  </button>
                 </div>
               </div>
             </div>
           </div>
         </section>
-
         <button
           type="submit"
           disabled={isPending}

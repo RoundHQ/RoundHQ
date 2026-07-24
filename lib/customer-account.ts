@@ -3,6 +3,7 @@ import {
   getDefaultCustomerFeatureAccess,
   normalizeCustomerFeatureAccess,
   type CustomerFeatureAccess,
+  type CustomerFeatureKey,
 } from "@/lib/customer-features";
 
 export type CustomerAccountStatus = "active" | "disabled";
@@ -100,4 +101,14 @@ export async function getCustomerAccountSettings(
   }
 
   return mapCustomerAccountSettingsRow(data as CustomerAccountSettingsRow | null);
+}
+export async function isCustomerFeatureEnabled(
+  supabase: SupabaseClient,
+  organizationId: string,
+  feature: CustomerFeatureKey
+) {
+
+  const settings = await getCustomerAccountSettings(supabase, organizationId);
+
+  return settings.schemaReady && settings.featureAccess[feature];
 }

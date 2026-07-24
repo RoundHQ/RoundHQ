@@ -5,6 +5,7 @@ import {
 } from "@/lib/supabase/admin";
 import { getAiReceptionistPrivateSettings } from "@/lib/ai-receptionist-private-settings";
 import { readRequestTextWithLimit } from "@/lib/ai-receptionist/request-limits";
+import { isCustomerFeatureEnabled } from "@/lib/customer-account";
 
 const AI_RECEPTIONIST_REALTIME_MAX_BODY_BYTES = 512 * 1024;
 
@@ -95,6 +96,22 @@ export async function getRealtimeRouteContext(
   }
 
   const supabase = createServiceRoleClient();
+  const featureEnabled = await isCustomerFeatureEnabled(
+    supabase,
+    organizationId,
+    "aiReceptionist"
+  );
+
+  if (!featureEnabled) {
+    return {
+      ok: false as const,
+      response: NextResponse.json(
+        { error: "AI Receptionist is not enabled for this workspace." },
+        { status: 403 }
+      ),
+    };
+  }
+
   const settings = await getAiReceptionistPrivateSettings(
     supabase,
     organizationId

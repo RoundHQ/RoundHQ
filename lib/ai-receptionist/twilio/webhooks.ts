@@ -19,6 +19,7 @@ import {
 import type {
   AiReceptionistPrivateSettings,
 } from "@/lib/ai-receptionist-settings";
+import { isCustomerFeatureEnabled } from "@/lib/customer-account";
 import {
   buildIncomingCallTwiML,
   buildRealtimeIncomingCallTwiML,
@@ -102,10 +103,17 @@ async function getValidatedSettings(context: TwilioWebhookContext) {
     };
   }
 
+  const featureEnabled = await isCustomerFeatureEnabled(
+    context.supabase,
+    settings.organizationId,
+    "aiReceptionist"
+  );
+
   return {
     ok: true as const,
     params,
     settings,
+    featureEnabled,
   };
 }
 
@@ -138,7 +146,7 @@ export async function handleIncomingCallWebhook(
 
   const callStatus = normalizeTwilioCallStatusCallback(validated.params);
 
-  if (!validated.settings.enabled) {
+  if (!validated.featureEnabled || !validated.settings.enabled) {
     return xmlResponse(
       getUnavailableTwiML("AI Receptionist is not enabled for this business."),
       200
@@ -344,6 +352,13 @@ export async function handleRecordingCompleteWebhook(
     return validated.response;
   }
 
+  if (!validated.featureEnabled) {
+    return jsonResponse(
+      { error: "AI Receptionist is not enabled for this workspace." },
+      403
+    );
+  }
+
   const recording = normalizeTwilioRecordingCallback(validated.params);
 
   if (!recording.callSid) {
@@ -487,6 +502,13 @@ export async function handleCallStatusWebhook(
 
   if (!validated.ok) {
     return validated.response;
+  }
+
+  if (!validated.featureEnabled) {
+    return jsonResponse(
+      { error: "AI Receptionist is not enabled for this workspace." },
+      403
+    );
   }
 
   const status = normalizeTwilioCallStatusCallback(validated.params);
