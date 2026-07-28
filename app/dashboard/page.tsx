@@ -15,6 +15,7 @@ import {
   getAiReceptionistCallHistory,
   getAiReceptionistDashboardStats,
 } from "@/lib/ai-receptionist/call-logs";
+import { getOpenAiRealtimeSipReadiness } from "@/lib/ai-receptionist/realtime/openai-sip";
 
 import type { SubscriptionPlanKey } from "@/lib/billing/plans";
 import { isStripeConfigured } from "@/lib/stripe/server";
@@ -214,6 +215,9 @@ export default async function DashboardPage({
   const aiReceptionistCallHistory = canManageAiReceptionistSettings
     ? await getAiReceptionistCallHistory(supabase, organizationId)
     : null;
+  const aiReceptionistRealtimeReadiness = canManageAiReceptionistSettings
+    ? getOpenAiRealtimeSipReadiness()
+    : null;
 
   if (!supportAccess && accountSettings.accountStatus === "disabled") {
     return (
@@ -253,6 +257,7 @@ export default async function DashboardPage({
       subscriptionTrialEndsAt={subscription.trial_ends_at}
       workspaceName={workspaceName}
       aiReceptionistSettings={aiReceptionistSettings}
+      aiReceptionistRealtimeReadiness={aiReceptionistRealtimeReadiness}
       canManageAiReceptionistSettings={canManageAiReceptionistSettings}
       aiReceptionistStats={aiReceptionistStats}
       aiReceptionistCallHistory={aiReceptionistCallHistory}

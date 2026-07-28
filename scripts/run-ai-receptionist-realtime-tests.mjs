@@ -61,6 +61,7 @@ const {
   decodeRoundHqCallReference,
   encodeRoundHqCallReference,
   getOpenAiRealtimeSipConfig,
+  getOpenAiRealtimeSipReadiness,
   getRoundHqCallReferenceFromSipHeaders,
   normalizeOpenAiRealtimeIncomingCall,
 } = require(
@@ -340,6 +341,26 @@ const sipConfig = getOpenAiRealtimeSipConfig({
   OPENAI_PROJECT_ID: "proj_roundhq_test",
   OPENAI_WEBHOOK_SECRET: "whsec_test",
 });
+const readySipConfiguration = getOpenAiRealtimeSipReadiness({
+  OPENAI_API_KEY: "sk-test",
+  OPENAI_PROJECT_ID: "proj_roundhq_test",
+  OPENAI_WEBHOOK_SECRET: "whsec_test",
+});
+assert.equal(readySipConfiguration.ready, true);
+assert.deepEqual(
+  getOpenAiRealtimeSipReadiness({
+    OPENAI_API_KEY: "key_tracking_id",
+    OPENAI_PROJECT_ID: "project-name",
+  }),
+  {
+    ready: false,
+    apiKeyConfigured: true,
+    apiKeyValid: false,
+    projectIdConfigured: true,
+    projectIdValid: false,
+    webhookSecretConfigured: false,
+  }
+);
 assert.equal(sipConfig.projectId, "proj_roundhq_test");
 assert.equal(sipConfig.model, "gpt-realtime-2.1");
 assert.equal(

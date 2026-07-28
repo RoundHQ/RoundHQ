@@ -506,6 +506,7 @@ assert.match(liveApiCalls[2].url, /\/transfer$/);
 const liveRecordBody = JSON.parse(liveApiCalls[1].options.body);
 assert.equal(liveRecordBody.recording_track, "both");
 assert.equal(liveRecordBody.channels, "dual");
+assert.equal(liveRecordBody.play_beep, false);
 assert.equal(liveRecordBody.transcription, true);
 
 const liveTransferBody = JSON.parse(liveApiCalls[2].options.body);
@@ -570,6 +571,10 @@ assert.deepEqual(greetedOpenAiCalls, ["rtc_live_a"]);
 assert.deepEqual(rejectedOpenAiCalls, []);
 assert.equal(liveTables.ai_receptionist_call_logs[0].session_id, "rtc_live_a");
 assert.equal(liveTables.ai_receptionist_call_logs[0].call_status, "openai-accepted");
+assert.equal(
+  liveTables.ai_receptionist_call_logs[0].ai_summaries.live_ai_status,
+  "openai_accepted"
+);
 
 const duplicateOpenAiResponse = await handleOpenAiRealtimeIncomingCall(
   openAiIncomingOptions
@@ -599,6 +604,37 @@ const liveTargetResponse = await handleTelnyxWebhook(
 assert.equal(liveTargetResponse.status, 200);
 assert.equal(liveTables.ai_receptionist_call_logs.length, 1);
 assert.equal(liveTables.ai_receptionist_call_logs[0].call_sid, "call-live-a");
+
+const acceptFailureTables = structuredClone(liveTables);
+acceptFailureTables.ai_receptionist_call_logs[0].session_id = null;
+acceptFailureTables.ai_receptionist_call_logs[0].ai_summaries = {};
+await assert.rejects(
+  handleOpenAiRealtimeIncomingCall({
+    ...openAiIncomingOptions,
+    supabase: createFakeSupabase(acceptFailureTables),
+    data: {
+      ...openAiIncomingOptions.data,
+      call_id: "rtc_live_accept_failure",
+    },
+    acceptCall: async () => {
+      throw new Error("OpenAI accept test failure.");
+    },
+    sendInitialGreeting: undefined,
+  }),
+  /OpenAI accept test failure/
+);
+assert.equal(
+  acceptFailureTables.ai_receptionist_call_logs[0].call_status,
+  "openai-accept-failed"
+);
+assert.equal(
+  acceptFailureTables.ai_receptionist_call_logs[0].ai_summaries.live_ai_status,
+  "openai_accept_failed"
+);
+assert.match(
+  acceptFailureTables.ai_receptionist_call_logs[0].ai_summaries.live_ai_error,
+  /OpenAI accept test failure/
+);
 
 
 const liveFallbackTables = createTables();
@@ -656,6 +692,14 @@ assert.match(fallbackApiCalls[0].url, /call-live-fallback\/actions\/answer$/);
 assert.match(fallbackApiCalls[1].url, /call-live-fallback\/actions\/speak$/);
 assert.equal(liveFallbackTables.ai_receptionist_call_logs[0].call_type, "voicemail");
 assert.equal(liveFallbackTables.ai_receptionist_call_logs[0].call_status, "live-ai-fallback");
+assert.equal(
+  liveFallbackTables.ai_receptionist_call_logs[0].ai_summaries.live_ai_status,
+  "openai_not_accepted"
+);
+assert.equal(
+  liveFallbackTables.ai_receptionist_call_logs[0].ai_summaries.telnyx_hangup_cause,
+  ""
+);
 assert.equal(liveFallbackTables.ai_receptionist_call_logs[0].ended_at, null);
 if (previousOpenAiApiKey === undefined) {
   delete process.env.OPENAI_API_KEY;

@@ -25,9 +25,11 @@ import {
 import AiReceptionistPhoneSetup, {
   type AiReceptionistPhoneSetupState,
 } from "@/components/ai-receptionist/ai-receptionist-phone-setup";
+import type { OpenAiRealtimeSipReadiness } from "@/lib/ai-receptionist/realtime/openai-sip";
 
 type Props = {
   initialSettings: AiReceptionistSettings;
+  realtimeReadiness?: OpenAiRealtimeSipReadiness | null;
   workspaceName: string;
 };
 
@@ -165,6 +167,7 @@ function moveListItem(values: string[], index: number, direction: -1 | 1) {
 
 export default function AiReceptionistSettingsForm({
   initialSettings,
+  realtimeReadiness,
   workspaceName,
 }: Props) {
   const [enabled, setEnabled] = useState(initialSettings.enabled);
@@ -392,6 +395,55 @@ export default function AiReceptionistSettingsForm({
             ? "Live AI is a testing feature. Calls are recorded and transcribed, and the working voicemail flow is used if the live transfer cannot start."
             : "Voicemail mode answers with a fixed greeting, records the caller after the beep, and creates a lead after transcription."}
         </div>
+
+        {realtimeEnabled && realtimeReadiness && !realtimeReadiness.ready ? (
+          <div
+            role="alert"
+            className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+          >
+            <div className="flex gap-3 font-bold">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+              Live AI is unavailable on the RoundHQ server, so calls are using
+              voicemail.
+            </div>
+            <ul className="mt-3 space-y-1 pl-7 font-semibold">
+              <li>
+                OpenAI API key:{" "}
+                {realtimeReadiness.apiKeyConfigured &&
+                realtimeReadiness.apiKeyValid
+                  ? "Ready"
+                  : realtimeReadiness.apiKeyConfigured
+                    ? "Present, but not a secret key beginning sk-"
+                    : "Missing"}
+              </li>
+              <li>
+                OpenAI project ID:{" "}
+                {realtimeReadiness.projectIdConfigured &&
+                realtimeReadiness.projectIdValid
+                  ? "Ready"
+                  : realtimeReadiness.projectIdConfigured
+                    ? "Present, but it must begin proj_"
+                    : "Missing"}
+              </li>
+              <li>
+                OpenAI webhook signing secret:{" "}
+                {realtimeReadiness.webhookSecretConfigured
+                  ? "Ready"
+                  : "Missing"}
+              </li>
+            </ul>
+            <p className="mt-3 pl-7 font-semibold">
+              Correct the item above in the Production environment and redeploy
+              before placing another test call.
+            </p>
+          </div>
+        ) : null}
+
+        {realtimeEnabled && realtimeReadiness?.ready ? (
+          <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+            Live AI server configuration is ready.
+          </div>
+        ) : null}
 
         {enabled && !providerConnected ? (
           <div className="mt-4 flex gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">

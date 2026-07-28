@@ -20,6 +20,7 @@ import {
   buildOpenAiRealtimeSipUri,
   encodeRoundHqCallReference,
   getOpenAiRealtimeSipConfig,
+  getOpenAiRealtimeSipReadiness,
 } from "@/lib/ai-receptionist/realtime/openai-sip";
 import type {
   IncomingCallResult,
@@ -454,7 +455,23 @@ async function telnyxApiRequest(options: {
   );
 
   if (!response.ok) {
-    throw new Error(`Telnyx API returned ${response.status}.`);
+    const errorBody = await response.text();
+    let detail = errorBody.trim();
+
+    try {
+      const parsed = JSON.parse(errorBody) as {
+        errors?: Array<{ detail?: unknown; title?: unknown }>;
+      };
+      const providerError = parsed.errors?.[0];
+      detail = getText(providerError?.detail) || getText(providerError?.title) || detail;
+    } catch {
+      // Keep the provider's plain-text response when it is not JSON.
+    }
+
+    const safeDetail = detail.replace(/\s+/g, " ").slice(0, 500);
+    throw new Error(
+      `Telnyx API returned ${response.status}${safeDetail ? `: ${safeDetail}` : "."}`
+    );
   }
 
   return response;
@@ -572,7 +589,7 @@ async function startTelnyxRealtimeConversation(options: {
       format: "mp3",
       channels: "dual",
       recording_track: "both",
-      play_beep: true,
+      play_beep: false,
       max_length: 600,
       timeout_secs: 12,
       trim: "trim-silence",
@@ -779,8 +796,9 @@ export async function handleTelnyxIncomingCall(
   }
 
   const call = normalizeTelnyxCall(validated.event);
+  const liveAiReadiness = getOpenAiRealtimeSipReadiness();
   const liveAiConfigured = Boolean(
-    validated.settings.realtimeEnabled && getOpenAiRealtimeSipConfig()
+    validated.settings.realtimeEnabled && liveAiReadiness.ready
   );
 
   if (!call.callControlId) {
@@ -799,6 +817,13 @@ export async function handleTelnyxIncomingCall(
       twilioPhoneNumber: call.calledNumber,
       callType: liveAiConfigured ? "realtime" : "voicemail",
       callStatus: call.callStatus || "incoming",
+      aiSummaries:
+        validated.settings.realtimeEnabled && !liveAiReadiness.ready
+          ? {
+              live_ai_status: "configuration_unavailable",
+              live_ai_readiness: liveAiReadiness,
+            }
+          : undefined,
       rawPayload: call.rawPayload,
     }
   );
@@ -847,6 +872,13 @@ export async function handleTelnyxIncomingCall(
             callType: "voicemail",
             callStatus: "live-ai-fallback",
             outcome: "transcription_pending",
+            aiSummaries: {
+              live_ai_status: "transfer_failed",
+              live_ai_error:
+                error instanceof Error && error.message.trim()
+                  ? error.message
+                  : "Unable to transfer the call to OpenAI Realtime.",
+            },
           }
         );
         return jsonResult({ ok: true, fallback: "voicemail" });
@@ -1186,6 +1218,20 @@ export async function handleTelnyxCallStatus(
           callStatus: "live-ai-fallback",
           outcome: "transcription_pending",
           endedAt: null,
+          aiSummaries: {
+            live_ai_status: "openai_not_accepted",
+            live_ai_error:
+              "OpenAI did not accept the transferred SIP call before the target leg ended.",
+            telnyx_hangup_cause: getFirstText(call.rawPayload, [
+              "hangup_cause",
+            ]),
+            telnyx_hangup_source: getFirstText(call.rawPayload, [
+              "hangup_source",
+            ]),
+            telnyx_sip_hangup_cause: getFirstText(call.rawPayload, [
+              "sip_hangup_cause",
+            ]),
+          },
         }
       );
       return jsonResult({ ok: true, fallback: "voicemail" });

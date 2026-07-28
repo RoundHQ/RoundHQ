@@ -107,10 +107,31 @@ export async function handleOpenAiRealtimeIncomingCall(
     });
   }
 
-  await options.acceptCall(
-    incomingCall.callId,
-    buildOpenAiRealtimeCallAcceptPayload(settings, options.config)
-  );
+  try {
+    await options.acceptCall(
+      incomingCall.callId,
+      buildOpenAiRealtimeCallAcceptPayload(settings, options.config)
+    );
+  } catch (error) {
+    await updateAiReceptionistCallLog(
+      options.supabase,
+      settings.organizationId,
+      telnyxCallControlId,
+      {
+        callType: "realtime",
+        callStatus: "openai-accept-failed",
+        outcome: "conversation_failed",
+        aiSummaries: {
+          live_ai_status: "openai_accept_failed",
+          live_ai_error:
+            error instanceof Error && error.message.trim()
+              ? error.message.slice(0, 500)
+              : "OpenAI rejected the live call acceptance request.",
+        },
+      }
+    );
+    throw error;
+  }
 
   await updateAiReceptionistCallLog(
     options.supabase,
@@ -122,6 +143,9 @@ export async function handleOpenAiRealtimeIncomingCall(
       callStatus: "openai-accepted",
       answeredAt: new Date().toISOString(),
       outcome: "conversation_in_progress",
+      aiSummaries: {
+        live_ai_status: "openai_accepted",
+      },
     }
   );
 

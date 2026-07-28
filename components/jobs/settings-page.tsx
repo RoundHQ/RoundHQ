@@ -34,6 +34,7 @@ import AiReceptionistCallHistory from "@/components/ai-receptionist/ai-reception
 import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import type { AiReceptionistSettings } from "@/lib/ai-receptionist-settings";
 import type { AiReceptionistCallHistoryItem } from "@/lib/ai-receptionist/call-logs";
+import type { OpenAiRealtimeSipReadiness } from "@/lib/ai-receptionist/realtime/openai-sip";
 
 import {
     DEFAULT_GRASS_CUT_SEASON_END,
@@ -230,6 +231,7 @@ type Props = {
     onSave?: (settings: SettingsData) => Promise<void> | void;
     workspaceName?: string;
     aiReceptionistSettings?: AiReceptionistSettings | null;
+    aiReceptionistRealtimeReadiness?: OpenAiRealtimeSipReadiness | null;
     aiReceptionistCallHistory?: {
         items: AiReceptionistCallHistoryItem[];
         schemaReady: boolean;
@@ -1447,6 +1449,7 @@ export default function SettingsPage({
                                          onSave,
                                          workspaceName,
                                          aiReceptionistSettings,
+                                         aiReceptionistRealtimeReadiness,
                                          aiReceptionistCallHistory,
                                          canManageAiReceptionistSettings = false,
                                      }: Props) {
@@ -4401,6 +4404,9 @@ export default function SettingsPage({
 
                                 <AiReceptionistSettingsForm
                                     initialSettings={aiReceptionistSettings}
+                                    realtimeReadiness={
+                                        aiReceptionistRealtimeReadiness
+                                    }
                                     workspaceName={
                                         workspaceName?.trim() ||
                                         settings.tradingName.trim() ||

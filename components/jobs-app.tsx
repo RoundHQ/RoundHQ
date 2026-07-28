@@ -184,6 +184,7 @@ import {
   type PlatformAnnouncementRow,
 } from "@/lib/platform-announcements";
 import type { AiReceptionistSettings } from "@/lib/ai-receptionist-settings";
+import type { OpenAiRealtimeSipReadiness } from "@/lib/ai-receptionist/realtime/openai-sip";
 import type {
   AiReceptionistCallHistoryItem,
   AiReceptionistDashboardStats,
@@ -5646,6 +5647,7 @@ type JobsAppProps = {
   subscriptionTrialEndsAt?: string | null;
   workspaceName?: string;
   aiReceptionistSettings?: AiReceptionistSettings | null;
+  aiReceptionistRealtimeReadiness?: OpenAiRealtimeSipReadiness | null;
   canManageAiReceptionistSettings?: boolean;
   aiReceptionistStats?: AiReceptionistDashboardStats | null;
   aiReceptionistCallHistory?: {
@@ -5789,6 +5791,7 @@ export default function JobsApp({
   subscriptionTrialEndsAt,
   workspaceName,
   aiReceptionistSettings,
+  aiReceptionistRealtimeReadiness,
   canManageAiReceptionistSettings = false,
   aiReceptionistStats,
   aiReceptionistCallHistory,
@@ -16263,6 +16266,9 @@ export default function JobsApp({
                       showGrowthSettings={hasGrowthPlan}
                       workspaceName={supportAccess?.workspaceName ?? workspaceName}
                       aiReceptionistSettings={aiReceptionistSettings}
+                      aiReceptionistRealtimeReadiness={
+                        aiReceptionistRealtimeReadiness
+                      }
                       canManageAiReceptionistSettings={canManageAiReceptionistSettings}
                       aiReceptionistCallHistory={aiReceptionistCallHistory}
                       exportData={{

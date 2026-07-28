@@ -17,6 +17,15 @@ export type OpenAiRealtimeSipConfig = {
   voice: string;
 };
 
+export type OpenAiRealtimeSipReadiness = {
+  ready: boolean;
+  apiKeyConfigured: boolean;
+  apiKeyValid: boolean;
+  projectIdConfigured: boolean;
+  projectIdValid: boolean;
+  webhookSecretConfigured: boolean;
+};
+
 export type OpenAiRealtimeIncomingCall = {
   callId: string;
   sipHeaders: Array<{
@@ -29,14 +38,42 @@ function getText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+export function getOpenAiRealtimeSipReadiness(
+  environment: NodeJS.ProcessEnv = process.env
+): OpenAiRealtimeSipReadiness {
+  const apiKey = getText(environment.OPENAI_API_KEY);
+  const projectId = getText(environment.OPENAI_PROJECT_ID);
+  const webhookSecret = getText(environment.OPENAI_WEBHOOK_SECRET);
+  const apiKeyConfigured = Boolean(apiKey);
+  const apiKeyValid = apiKey.startsWith("sk-");
+  const projectIdConfigured = Boolean(projectId);
+  const projectIdValid = projectId.startsWith("proj_");
+  const webhookSecretConfigured = Boolean(webhookSecret);
+
+  return {
+    ready:
+      apiKeyConfigured &&
+      apiKeyValid &&
+      projectIdConfigured &&
+      projectIdValid &&
+      webhookSecretConfigured,
+    apiKeyConfigured,
+    apiKeyValid,
+    projectIdConfigured,
+    projectIdValid,
+    webhookSecretConfigured,
+  };
+}
+
 export function getOpenAiRealtimeSipConfig(
   environment: NodeJS.ProcessEnv = process.env
 ): OpenAiRealtimeSipConfig | null {
   const apiKey = getText(environment.OPENAI_API_KEY);
   const projectId = getText(environment.OPENAI_PROJECT_ID);
   const webhookSecret = getText(environment.OPENAI_WEBHOOK_SECRET);
+  const readiness = getOpenAiRealtimeSipReadiness(environment);
 
-  if (!apiKey || !projectId.startsWith("proj_") || !webhookSecret) {
+  if (!readiness.ready) {
     return null;
   }
 
