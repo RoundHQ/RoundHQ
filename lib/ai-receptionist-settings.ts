@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-const AI_RECEPTIONIST_PUBLIC_SETTINGS_COLUMNS = [
+const AI_RECEPTIONIST_LEGACY_PUBLIC_SETTINGS_COLUMNS = [
   "organization_id",
   "enabled",
   "business_name",
@@ -28,6 +28,11 @@ const AI_RECEPTIONIST_PUBLIC_SETTINGS_COLUMNS = [
   "updated_at",
 ] as const;
 
+const AI_RECEPTIONIST_PUBLIC_SETTINGS_COLUMNS = [
+  ...AI_RECEPTIONIST_LEGACY_PUBLIC_SETTINGS_COLUMNS,
+  "voice_accent",
+] as const;
+
 const AI_RECEPTIONIST_MANAGED_NUMBER_COLUMNS = [
   "phone_setup_mode",
   "existing_business_phone_number",
@@ -39,7 +44,7 @@ const AI_RECEPTIONIST_MANAGED_NUMBER_COLUMNS = [
 ] as const;
 
 export const AI_RECEPTIONIST_LEGACY_SETTINGS_SELECT =
-  AI_RECEPTIONIST_PUBLIC_SETTINGS_COLUMNS.join(",");
+  AI_RECEPTIONIST_LEGACY_PUBLIC_SETTINGS_COLUMNS.join(",");
 
 export const AI_RECEPTIONIST_SETTINGS_SELECT = [
   ...AI_RECEPTIONIST_PUBLIC_SETTINGS_COLUMNS,
@@ -47,7 +52,7 @@ export const AI_RECEPTIONIST_SETTINGS_SELECT = [
 ].join(",");
 
 export const AI_RECEPTIONIST_PRIVATE_LEGACY_SETTINGS_SELECT = [
-  ...AI_RECEPTIONIST_PUBLIC_SETTINGS_COLUMNS,
+  ...AI_RECEPTIONIST_LEGACY_PUBLIC_SETTINGS_COLUMNS,
   "telnyx_api_key",
   "twilio_auth_token",
 ].join(",");
@@ -99,6 +104,7 @@ export type AiReceptionistBusinessHours = Record<
   AiReceptionistDayKey,
   AiReceptionistBusinessHour
 >;
+export type AiReceptionistVoiceAccent = "scottish" | "british" | "neutral";
 
 export type AiReceptionistTelephonyProvider = "telnyx" | "twilio";
 export type AiReceptionistPhoneSetupMode = "new_number" | "call_forwarding";
@@ -130,6 +136,7 @@ export type AiReceptionistSettings = {
   twilioPhoneNumber: string;
   twilioAuthTokenConfigured: boolean;
   realtimeEnabled: boolean;
+  voiceAccent: AiReceptionistVoiceAccent;
   transferToNumber: string;
   newLeadSmsEnabled: boolean;
   newLeadSmsPhoneNumber: string;
@@ -176,6 +183,7 @@ export type AiReceptionistSettingsRow = {
   twilio_phone_number?: string | null;
   realtime_enabled?: boolean | null;
   transfer_to_number?: string | null;
+  voice_accent?: string | null;
   new_lead_sms_enabled?: boolean | null;
   new_lead_sms_phone_number?: string | null;
   business_hours_enabled: boolean | null;
@@ -268,6 +276,18 @@ function normalizePhoneProvisioningStatus(
   return phoneNumber ? "active" : "not_configured";
 }
 
+export function normalizeAiReceptionistVoiceAccent(
+  value: unknown
+): AiReceptionistVoiceAccent {
+  const accent = getText(value).toLowerCase();
+
+  if (accent === "british" || accent === "neutral") {
+    return accent;
+  }
+
+  return "scottish";
+}
+
 export function normalizeAiReceptionistList(
   value: unknown,
   fallback: string[]
@@ -344,6 +364,7 @@ export function getDefaultAiReceptionistSettings(
     twilioPhoneNumber: "",
     twilioAuthTokenConfigured: false,
     realtimeEnabled: false,
+    voiceAccent: "scottish",
     transferToNumber: "",
     newLeadSmsEnabled: false,
     newLeadSmsPhoneNumber: "",
@@ -406,6 +427,7 @@ export function normalizeAiReceptionistSettings(
     twilioPhoneNumber: getText(value?.twilioPhoneNumber),
     twilioAuthTokenConfigured: Boolean(value?.twilioAuthTokenConfigured),
     realtimeEnabled: Boolean(value?.realtimeEnabled),
+    voiceAccent: normalizeAiReceptionistVoiceAccent(value?.voiceAccent),
     transferToNumber: getText(value?.transferToNumber),
     newLeadSmsEnabled: Boolean(value?.newLeadSmsEnabled),
     newLeadSmsPhoneNumber: getText(value?.newLeadSmsPhoneNumber),
@@ -456,6 +478,7 @@ export function mapAiReceptionistSettingsRow(
     twilioPhoneNumber: row.twilio_phone_number ?? "",
     twilioAuthTokenConfigured: Boolean(row.twilio_auth_token?.trim()),
     realtimeEnabled: Boolean(row.realtime_enabled),
+    voiceAccent: normalizeAiReceptionistVoiceAccent(row.voice_accent),
     transferToNumber: row.transfer_to_number ?? "",
     newLeadSmsEnabled: Boolean(row.new_lead_sms_enabled),
     newLeadSmsPhoneNumber: row.new_lead_sms_phone_number ?? "",
@@ -501,6 +524,7 @@ export function mapAiReceptionistSettingsToRow(
     twilio_account_sid: settings.twilioAccountSid,
     twilio_phone_number: settings.twilioPhoneNumber,
     realtime_enabled: settings.realtimeEnabled,
+    voice_accent: settings.voiceAccent,
     transfer_to_number: settings.transferToNumber,
     new_lead_sms_enabled: settings.newLeadSmsEnabled,
     new_lead_sms_phone_number: settings.newLeadSmsPhoneNumber,

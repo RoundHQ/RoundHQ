@@ -207,11 +207,12 @@ export function buildOpenAiRealtimeCallAcceptPayload(
       input: {
         turn_detection: {
           type: "server_vad" as const,
-          threshold: 0.5,
-          silence_duration_ms: 500,
+          threshold: 0.7,
+          prefix_padding_ms: 300,
+          silence_duration_ms: 800,
           create_response: true,
-          interrupt_response: true,
-          idle_timeout_ms: 10_000,
+          interrupt_response: false,
+          idle_timeout_ms: 15_000,
         },
       },
       output: {

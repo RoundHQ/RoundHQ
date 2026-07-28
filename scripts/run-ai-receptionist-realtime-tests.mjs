@@ -397,8 +397,16 @@ assert.equal(acceptPayload.model, "gpt-realtime-2.1");
 assert.deepEqual(acceptPayload.output_modalities, ["audio"]);
 assert.equal(acceptPayload.audio.output.voice, "marin");
 assert.equal(acceptPayload.audio.input.turn_detection.create_response, true);
+assert.equal(acceptPayload.audio.input.turn_detection.threshold, 0.7);
+assert.equal(acceptPayload.audio.input.turn_detection.prefix_padding_ms, 300);
+assert.equal(acceptPayload.audio.input.turn_detection.silence_duration_ms, 800);
+assert.equal(
+  acceptPayload.audio.input.turn_detection.interrupt_response,
+  false
+);
 assert.match(acceptPayload.instructions, /AI virtual receptionist/i);
 
+assert.match(acceptPayload.instructions, /natural Scottish accent/i);
 const realtimeTwiML = buildRealtimeIncomingCallTwiML({
   settings,
   mediaStreamUrl:

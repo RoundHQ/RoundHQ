@@ -17,6 +17,7 @@ import {
   type AiReceptionistBusinessHours,
   type AiReceptionistDayKey,
   type AiReceptionistSettings,
+  type AiReceptionistVoiceAccent,
 } from "@/lib/ai-receptionist-settings";
 import {
   updateAiReceptionistSettingsAction,
@@ -173,6 +174,9 @@ export default function AiReceptionistSettingsForm({
   const [enabled, setEnabled] = useState(initialSettings.enabled);
   const [realtimeEnabled, setRealtimeEnabled] = useState(
     initialSettings.realtimeEnabled
+  );
+  const [voiceAccent, setVoiceAccent] = useState<AiReceptionistVoiceAccent>(
+    initialSettings.voiceAccent
   );
   const [businessName, setBusinessName] = useState(initialSettings.businessName);
   const [notificationEmail, setNotificationEmail] = useState(
@@ -444,6 +448,32 @@ export default function AiReceptionistSettingsForm({
             Live AI server configuration is ready.
           </div>
         ) : null}
+
+        {realtimeEnabled ? (
+          <label className="mt-5 block max-w-md">
+            <span className="mb-2 block text-sm font-black text-slate-800">
+              Voice accent
+            </span>
+            <select
+              name="voice_accent"
+              value={voiceAccent}
+              onChange={(event) =>
+                setVoiceAccent(event.target.value as AiReceptionistVoiceAccent)
+              }
+              className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
+            >
+              <option value="scottish">Scottish</option>
+              <option value="british">British</option>
+              <option value="neutral">Voice default</option>
+            </select>
+            <span className="mt-2 block text-xs font-semibold leading-5 text-slate-500">
+              Scottish uses a natural, clear Scottish speaking style rather than
+              an exaggerated regional character.
+            </span>
+          </label>
+        ) : (
+          <input type="hidden" name="voice_accent" value={voiceAccent} />
+        )}
 
         {enabled && !providerConnected ? (
           <div className="mt-4 flex gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">

@@ -178,6 +178,7 @@ create table if not exists public.ai_receptionist_settings (
   twilio_auth_token text not null default '',
   twilio_phone_number text not null default '',
   realtime_enabled boolean not null default false,
+  voice_accent text not null default 'scottish',
   transfer_to_number text not null default '',
   new_lead_sms_enabled boolean not null default false,
   new_lead_sms_phone_number text not null default '',
@@ -214,6 +215,7 @@ create table if not exists public.ai_receptionist_settings (
   check (jsonb_typeof(questions_to_ask) = 'array'),
   check (jsonb_typeof(emergency_keywords) = 'array'),
   check (telephony_provider in ('telnyx', 'twilio')),
+  check (voice_accent in ('scottish', 'british', 'neutral')),
   check (phone_setup_mode in ('new_number', 'call_forwarding')),
   check (
     telnyx_provisioning_status in (
@@ -250,6 +252,7 @@ alter table public.ai_receptionist_settings
   add column if not exists twilio_auth_token text not null default '',
   add column if not exists twilio_phone_number text not null default '',
   add column if not exists realtime_enabled boolean not null default false,
+  add column if not exists voice_accent text not null default 'scottish',
   add column if not exists transfer_to_number text not null default '',
   add column if not exists new_lead_sms_enabled boolean not null default false,
   add column if not exists new_lead_sms_phone_number text not null default '',

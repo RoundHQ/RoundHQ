@@ -35,6 +35,15 @@ export type AiReceptionistSummarySet = {
   detailed: string;
 };
 
+const VOICE_ACCENT_INSTRUCTIONS = {
+  scottish:
+    "Speak throughout in a warm, natural Scottish accent using clear UK English. Keep it easy to understand, and never exaggerate the accent or use stereotypes.",
+  british:
+    "Speak throughout in a warm, natural British accent using clear UK English.",
+  neutral:
+    "Use the selected voice's natural accent and speak clearly and warmly.",
+} as const;
+
 export type AiReceptionistRealtimeSessionConfig = {
   type: "realtime";
   model: string;
@@ -180,6 +189,8 @@ export function buildAiReceptionistRealtimeSystemPrompt(
 
   return [
     `You are the AI virtual receptionist for ${businessName}.`,
+    VOICE_ACCENT_INSTRUCTIONS[settings.voiceAccent] ??
+      VOICE_ACCENT_INSTRUCTIONS.scottish,
     "",
     "Your job is to:",
     "- Greet callers warmly and professionally, and clearly identify yourself as an AI virtual receptionist in your first turn.",

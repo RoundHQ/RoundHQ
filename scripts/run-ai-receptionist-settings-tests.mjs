@@ -77,6 +77,7 @@ assert.deepEqual(
 );
 assert.equal(defaultSettings.businessHours.monday.start, "08:00");
 assert.equal(defaultSettings.businessHours.saturday.enabled, false);
+assert.equal(defaultSettings.voiceAccent, "scottish");
 assert.equal(defaultSettings.leadSourceLabel, "AI Receptionist");
 assert.equal(defaultSettings.telephonyProvider, "telnyx");
 assert.equal(defaultSettings.realtimeEnabled, false);
@@ -157,6 +158,7 @@ const updatedSettings = normalizeAiReceptionistSettings({
   telnyxConnectionId: "telnyx-app-1",
   telnyxMessagingProfileId: "messaging-profile-1",
   greetingMessage: "Thanks for calling RoundHQ Test Co.",
+  voiceAccent: "british",
   realtimeEnabled: true,
   consentMessage: "This call may be recorded.",
   businessHoursEnabled: true,
@@ -187,6 +189,7 @@ assert.equal(writeRow.telnyx_phone_number, "+44 121 555 1001");
 assert.equal(writeRow.telnyx_connection_id, "telnyx-app-1");
 assert.equal(writeRow.telnyx_messaging_profile_id, "messaging-profile-1");
 assert.equal(writeRow.telnyx_public_key, "public-key");
+assert.equal(writeRow.voice_accent, "british");
 assert.equal(writeRow.realtime_enabled, true);
 assert.equal(writeRow.lead_source_label, "AI Receptionist");
 assert.deepEqual(writeRow.questions_to_ask, ["Name?", "Service required?"]);
@@ -356,6 +359,8 @@ assert.doesNotMatch(renderedFormHtml, /Connection \/ App ID/);
 assert.match(renderedFormHtml, /Answering mode/);
 assert.match(renderedFormHtml, /Voicemail to lead/);
 assert.match(renderedFormHtml, /Live AI conversation/);
+assert.match(renderedFormHtml, /Voice accent/);
+assert.match(renderedFormHtml, /Scottish/);
 assert.match(
   renderedFormHtml,
   /Live AI is enabled on \+44 121 555 1001/

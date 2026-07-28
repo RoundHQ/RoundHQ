@@ -5,6 +5,7 @@ import {
   getDefaultAiReceptionistSettings,
   getOrCreateAiReceptionistSettings,
   mapAiReceptionistSettingsToRow,
+  normalizeAiReceptionistVoiceAccent,
   normalizeAiReceptionistBusinessHours,
   normalizeAiReceptionistList,
   normalizeAiReceptionistSettings,
@@ -55,6 +56,9 @@ function buildAiReceptionistSettingsFromFormData(
     telephonyProvider: "telnyx",
     realtimeEnabled:
       ["true", "on"].includes(getText(formData, "realtime_enabled")),
+    voiceAccent: normalizeAiReceptionistVoiceAccent(
+      getText(formData, "voice_accent")
+    ),
     transferToNumber: getText(formData, "transfer_to_number"),
     newLeadSmsEnabled: formData.get("new_lead_sms_enabled") === "on",
     newLeadSmsPhoneNumber: getText(formData, "new_lead_sms_phone_number"),
