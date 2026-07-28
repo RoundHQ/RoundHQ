@@ -1,7 +1,4 @@
-import {
-  getTelnyxRecordingPlaybackHeaders,
-  telnyxProvider,
-} from "@/lib/ai-receptionist/providers/telnyx";
+import { telnyxProvider } from "@/lib/ai-receptionist/providers/telnyx";
 import { twilioProvider } from "@/lib/ai-receptionist/providers/twilio";
 import type {
   SendAiReceptionistSmsOptions,
@@ -16,7 +13,7 @@ export type {
   TelephonyProviderName,
 } from "@/lib/ai-receptionist/providers/types";
 
-export { telnyxProvider, twilioProvider, getTelnyxRecordingPlaybackHeaders };
+export { telnyxProvider, twilioProvider };
 
 export function getTelephonyProvider(
   providerName: string | null | undefined

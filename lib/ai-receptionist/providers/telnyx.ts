@@ -1098,16 +1098,6 @@ export const telnyxProvider: TelephonyProvider = {
   },
 };
 
-export function getTelnyxRecordingPlaybackHeaders(
-  settings: AiReceptionistPrivateSettings
-): Record<string, string> {
-  return settings.telnyxApiKey
-    ? {
-        "authorization": `Bearer ${settings.telnyxApiKey}`,
-      }
-    : {};
-}
-
 export function formatTelnyxLeadNotification(options: {
   caller: string;
   summary: string;

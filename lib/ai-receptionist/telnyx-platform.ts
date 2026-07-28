@@ -417,3 +417,57 @@ export async function getOrCreateTelnyxNumberOrder(options: {
 
   return createTelnyxNumberOrder(options);
 }
+
+export async function getTelnyxRecordingDownloadUrl(options: {
+  config?: TelnyxPlatformConfig;
+  recordingId: string;
+  fetchImpl?: typeof fetch;
+}) {
+  const config = options.config ?? getTelnyxPlatformConfig();
+  const recordingId = options.recordingId.trim();
+
+  if (!config.apiKey) {
+    throw new TelnyxPlatformApiError(
+      "RoundHQ recording playback is not configured yet.",
+      503
+    );
+  }
+
+  if (!recordingId) {
+    throw new TelnyxPlatformApiError("The recording identifier is missing.", 400);
+  }
+
+  const response = getObject(
+    await telnyxPlatformRequest({
+      config,
+      path: `/recordings/${encodeURIComponent(recordingId)}`,
+      fetchImpl: options.fetchImpl,
+    })
+  );
+  const downloadUrls = getObject(getObject(response.data).download_urls);
+  const candidates = [
+    getText(downloadUrls.mp3),
+    getText(downloadUrls.wav),
+    ...Object.values(downloadUrls).map(getText),
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+
+    try {
+      const url = new URL(candidate);
+
+      if (url.protocol === "https:" || url.protocol === "http:") {
+        return url.toString();
+      }
+    } catch {
+      // Try the next provider URL.
+    }
+  }
+
+  throw new TelnyxPlatformApiError(
+    "The phone provider did not return a recording download link."
+  );
+}

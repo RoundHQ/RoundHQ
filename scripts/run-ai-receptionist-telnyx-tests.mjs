@@ -57,7 +57,11 @@ const {
 } = require(path.join(projectRoot, "lib", "ai-receptionist-leads.ts"));
 const {
   getAiReceptionistRecordingForPlayback,
+  getTelnyxRecordingIdFromCallLog,
 } = require(path.join(projectRoot, "lib", "ai-receptionist", "recordings.ts"));
+const {
+  getTelnyxRecordingDownloadUrl,
+} = require(path.join(projectRoot, "lib", "ai-receptionist", "telnyx-platform.ts"));
 const {
   handleTelnyxCallStatus,
   handleTelnyxIncomingCall,
@@ -98,6 +102,52 @@ assert.equal(
   decryptAiReceptionistSecretFromStorage(encryptedTelnyxApiKey),
   telnyxApiKey,
   "Telnyx API key should be encrypted at rest and decryptable server-side"
+);
+
+assert.equal(
+  getTelnyxRecordingIdFromCallLog({
+    provider: "telnyx",
+    raw_payload: { recording_id: "recording-from-webhook" },
+  }),
+  "recording-from-webhook"
+);
+
+const recordingApiRequests = [];
+const refreshedRecordingUrl = await getTelnyxRecordingDownloadUrl({
+  config: {
+    apiKey: telnyxApiKey,
+    publicKey: telnyxPublicKey,
+    connectionId: "telnyx-app-1",
+    messagingProfileId: "messaging-profile-1",
+    billingGroupId: "",
+  },
+  recordingId: "recording-from-webhook",
+  fetchImpl: async (url, options) => {
+    recordingApiRequests.push({ url: String(url), options });
+    return new Response(
+      JSON.stringify({
+        data: {
+          id: "recording-from-webhook",
+          download_urls: {
+            mp3: "https://recordings.example.test/fresh.mp3?signature=current",
+          },
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  },
+});
+assert.equal(
+  refreshedRecordingUrl,
+  "https://recordings.example.test/fresh.mp3?signature=current"
+);
+assert.equal(
+  recordingApiRequests[0].url,
+  "https://api.telnyx.com/v2/recordings/recording-from-webhook"
+);
+assert.equal(
+  recordingApiRequests[0].options.headers.authorization,
+  `Bearer ${telnyxApiKey}`
 );
 
 function buildSettingsRow(organization_id, telnyx_phone_number, business_name) {
@@ -638,6 +688,25 @@ const recordingBFromA = await getAiReceptionistRecordingForPlayback(
 );
 assert.equal(recordingA.recording_url, "https://api.telnyx.com/recordings/a.mp3");
 assert.equal(recordingBFromA, null, "customer A should not access customer B recordings");
+
+recordingAccessTables.ai_receptionist_call_logs.push({
+  id: "log-c",
+  organization_id: organizationAId,
+  provider: "telnyx",
+  call_sid: "recording-access-c",
+  recording_url: null,
+  raw_payload: { recording_id: "provider-recording-c" },
+});
+const recordingC = await getAiReceptionistRecordingForPlayback(
+  createFakeSupabase(recordingAccessTables),
+  organizationAId,
+  "recording-access-c"
+);
+assert.equal(
+  getTelnyxRecordingIdFromCallLog(recordingC),
+  "provider-recording-c",
+  "playback should work from a stored Telnyx recording ID even without a webhook URL"
+);
 
 const smsTables = createTables();
 const smsCalls = [];
