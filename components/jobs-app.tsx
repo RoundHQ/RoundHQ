@@ -111,6 +111,7 @@ import {
 } from "@/components/jobs/document-delivery";
 import {
   createLearnedRuleFromRow,
+  getAcceptedProfilePaymentDateUpdate,
   normalizeStatementText,
   type ReconciliationReviewRow,
 } from "@/lib/payments/reconciliation";
@@ -9117,10 +9118,15 @@ export default function JobsApp({
     }
 
     const normalizedMonth = getInputDateValue(paymentMonth);
+    const normalizedPaymentDate = paymentDate ? getInputDateValue(paymentDate) : null;
     const supabase = createSupabaseClient();
 
     if (!normalizedMonth) {
-      return;
+      throw new Error("Unable to save the payment because its payment month is invalid.");
+    }
+
+    if (paymentDate && !normalizedPaymentDate) {
+      throw new Error("Unable to save the payment because its payment date is invalid.");
     }
 
     if (!paymentDate) {
@@ -9156,7 +9162,7 @@ export default function JobsApp({
                 mapMonthlyPaymentToWriteRow({
                   customerId,
                   paymentMonth: normalizedMonth,
-                  paymentDate,
+                  paymentDate: normalizedPaymentDate,
                 })
             ),
             {
@@ -13044,13 +13050,23 @@ export default function JobsApp({
       paymentDate: string | null
   ) {
     const existingVisit = visitLogs.find((visit) => visitIdsMatch(visit.id, visitId));
-    if (!existingVisit) return;
+    const normalizedPaymentDate = paymentDate ? getInputDateValue(paymentDate) : null;
+
+    if (!existingVisit) {
+      throw new Error(
+          "Unable to attach the accepted statement payment because its visit could not be found."
+      );
+    }
+
+    if (paymentDate && !normalizedPaymentDate) {
+      throw new Error("Unable to save the visit payment because its payment date is invalid.");
+    }
 
     await persistVisit({
       ...existingVisit,
-      paymentStatus: paymentDate ? "Paid" : "Not Paid",
-      paidAt: paymentDate ? toStoredDateTime(paymentDate) : null,
-      paid: Boolean(paymentDate),
+      paymentStatus: normalizedPaymentDate ? "Paid" : "Not Paid",
+      paidAt: normalizedPaymentDate ? toStoredDateTime(normalizedPaymentDate) : null,
+      paid: Boolean(normalizedPaymentDate),
     });
 
     setPendingCashPayment(existingVisit.customerId, false);
@@ -13429,17 +13445,16 @@ export default function JobsApp({
 
       for (const allocation of row.selectedAllocations) {
         const isPartialAllocation = allocation.isPartial === true;
+        const profilePaymentDateUpdate = getAcceptedProfilePaymentDateUpdate(
+            row,
+            allocation
+        );
 
-        if (
-            allocation.type === "monthly_payment" &&
-            allocation.targetId &&
-            row.selectedCustomerId != null &&
-            !isPartialAllocation
-        ) {
+        if (profilePaymentDateUpdate?.type === "monthly_payment") {
           await saveMonthlyPaymentDate(
-              row.selectedCustomerId,
-              allocation.targetId,
-              allocation.paymentDate ?? row.transactionDate
+              profilePaymentDateUpdate.customerId,
+              profilePaymentDateUpdate.targetId,
+              profilePaymentDateUpdate.paymentDate
           );
           auditEvents.push({
             id: crypto.randomUUID(),
@@ -13455,10 +13470,10 @@ export default function JobsApp({
           continue;
         }
 
-        if (allocation.type === "visit" && allocation.targetId && !isPartialAllocation) {
+        if (profilePaymentDateUpdate?.type === "visit") {
           await saveVisitPaymentDate(
-              allocation.targetId,
-              allocation.paymentDate ?? row.transactionDate
+              profilePaymentDateUpdate.targetId,
+              profilePaymentDateUpdate.paymentDate
           );
           auditEvents.push({
             id: crypto.randomUUID(),

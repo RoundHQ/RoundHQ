@@ -64,6 +64,40 @@ export type ConfirmedReconciliationRow = ReconciliationReviewRow & {
   selectedAllocations: PaymentReconciliationAllocation[];
 };
 
+export type AcceptedProfilePaymentDateUpdate = {
+  type: "monthly_payment" | "visit";
+  customerId: number;
+  targetId: string;
+  paymentDate: string;
+};
+
+export function getAcceptedProfilePaymentDateUpdate(
+  row: ReconciliationReviewRow,
+  allocation: PaymentReconciliationAllocation
+): AcceptedProfilePaymentDateUpdate | null {
+  if (
+    row.selectedCustomerId == null ||
+    allocation.isPartial === true ||
+    !allocation.targetId ||
+    (allocation.type !== "monthly_payment" && allocation.type !== "visit")
+  ) {
+    return null;
+  }
+
+  const paymentDate = getDateOnly(allocation.paymentDate ?? row.transactionDate);
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(paymentDate)) {
+    return null;
+  }
+
+  return {
+    type: allocation.type,
+    customerId: row.selectedCustomerId,
+    targetId: allocation.targetId,
+    paymentDate,
+  };
+}
+
 type StatementColumnKey =
   | keyof Omit<ParsedStatementRow, "id" | "rowIndex" | "rawRow" | "transactionFingerprint">
   | "debitAmount"
