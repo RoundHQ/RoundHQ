@@ -168,6 +168,9 @@ export default function AiReceptionistSettingsForm({
   workspaceName,
 }: Props) {
   const [enabled, setEnabled] = useState(initialSettings.enabled);
+  const [realtimeEnabled, setRealtimeEnabled] = useState(
+    initialSettings.realtimeEnabled
+  );
   const [businessName, setBusinessName] = useState(initialSettings.businessName);
   const [notificationEmail, setNotificationEmail] = useState(
     initialSettings.notificationEmail
@@ -287,8 +290,6 @@ export default function AiReceptionistSettingsForm({
         value={JSON.stringify(normalizedKeywords)}
       />
 
-      <input type="hidden" name="realtime_enabled" value="false" />
-
       {actionState.message ? (
         <div
           role="status"
@@ -312,7 +313,7 @@ export default function AiReceptionistSettingsForm({
               onChange={(event) => setEnabled(event.target.checked)}
               className="size-5 accent-[#19c653]"
             />
-            Enable voicemail-to-lead
+            Enable AI Receptionist
           </label>
           <span
             className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-xs font-black uppercase tracking-wide ${
@@ -325,9 +326,71 @@ export default function AiReceptionistSettingsForm({
           </span>
         </div>
 
+        <fieldset className="mt-5">
+          <legend className="text-sm font-black text-slate-800">
+            Answering mode
+          </legend>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <label
+              className={`cursor-pointer rounded-md border p-4 transition ${
+                !realtimeEnabled
+                  ? "border-[#19c653] bg-emerald-50 ring-2 ring-[#19c653]/15"
+                  : "border-slate-200 bg-white hover:border-slate-300"
+              }`}
+            >
+              <span className="flex items-start gap-3">
+                <input
+                  type="radio"
+                  name="realtime_enabled"
+                  value="false"
+                  checked={!realtimeEnabled}
+                  onChange={() => setRealtimeEnabled(false)}
+                  className="mt-1 size-4 accent-[#19c653]"
+                />
+                <span>
+                  <span className="block text-sm font-black text-slate-950">
+                    Voicemail to lead
+                  </span>
+                  <span className="mt-1 block text-sm font-semibold leading-5 text-slate-500">
+                    Plays a greeting, records a message, and creates a lead from the transcript.
+                  </span>
+                </span>
+              </span>
+            </label>
+            <label
+              className={`cursor-pointer rounded-md border p-4 transition ${
+                realtimeEnabled
+                  ? "border-[#19c653] bg-emerald-50 ring-2 ring-[#19c653]/15"
+                  : "border-slate-200 bg-white hover:border-slate-300"
+              }`}
+            >
+              <span className="flex items-start gap-3">
+                <input
+                  type="radio"
+                  name="realtime_enabled"
+                  value="true"
+                  checked={realtimeEnabled}
+                  onChange={() => setRealtimeEnabled(true)}
+                  className="mt-1 size-4 accent-[#19c653]"
+                />
+                <span>
+                  <span className="block text-sm font-black text-slate-950">
+                    Live AI conversation
+                  </span>
+                  <span className="mt-1 block text-sm font-semibold leading-5 text-slate-500">
+                    The AI speaks with the caller, asks your questions, and creates a lead after the call.
+                  </span>
+                </span>
+              </span>
+            </label>
+          </div>
+        </fieldset>
+
         <div className="mt-4 flex gap-3 rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-900">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          This pilot answers with a fixed greeting, records the caller after the beep, and creates a lead after Telnyx transcription. It is not a live AI conversation.
+          {realtimeEnabled
+            ? "Live AI is a testing feature. Calls are recorded and transcribed, and the working voicemail flow is used if the live transfer cannot start."
+            : "Voicemail mode answers with a fixed greeting, records the caller after the beep, and creates a lead after transcription."}
         </div>
 
         {enabled && !providerConnected ? (
@@ -339,7 +402,9 @@ export default function AiReceptionistSettingsForm({
 
         {enabled && providerConnected ? (
           <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
-            Voicemail-to-lead is enabled on {phoneSetup.phoneNumber}. Place a test call before routing live business calls.
+            {realtimeEnabled ? "Live AI" : "Voicemail-to-lead"} is enabled on{" "}
+            {phoneSetup.phoneNumber}. Place a test call before routing live business
+            calls.
           </div>
         ) : null}
       </Section>
@@ -362,7 +427,7 @@ export default function AiReceptionistSettingsForm({
             placeholder="office@example.co.uk"
           />
           <TextField
-            label="Fallback phone number (future live calls)"
+            label="Fallback phone number"
             name="fallback_phone_number"
             value={fallbackPhoneNumber}
             onChange={setFallbackPhoneNumber}
@@ -371,7 +436,7 @@ export default function AiReceptionistSettingsForm({
         </div>
         <div className="mt-5">
           <TextField
-            label="Lead source label (future live calls)"
+            label="Lead source label"
             name="lead_source_label"
             value={leadSourceLabel}
             onChange={setLeadSourceLabel}
@@ -402,8 +467,8 @@ export default function AiReceptionistSettingsForm({
 
       <Section title="Questions">
         <p className="mb-4 text-sm font-semibold text-slate-500">
-          Reserved for the later live-conversation phase. These questions do not
-          change the voicemail prompt used by this pilot.
+          Live AI asks these questions naturally when the caller has not already
+          provided the answer. Voicemail mode continues to use its standard prompt.
         </p>
         <div className="space-y-3">
           {questions.map((question, index) => (
@@ -473,8 +538,8 @@ export default function AiReceptionistSettingsForm({
 
       <Section title="Business Hours">
         <p className="mb-4 text-sm font-semibold text-slate-500">
-          Reserved for the later live-conversation phase. The voicemail pilot
-          currently answers at all times when enabled.
+          Live AI uses these hours to explain whether the office is open. Both
+          answering modes continue to accept calls whenever the receptionist is enabled.
         </p>
         <label className="mb-4 flex items-center gap-3 text-sm font-bold text-slate-700">
           <input
@@ -533,8 +598,8 @@ export default function AiReceptionistSettingsForm({
 
       <Section title="Emergency Keywords">
         <p className="mb-4 text-sm font-semibold text-slate-500">
-          Reserved for the later live-conversation phase. Voicemail leads are
-          not automatically escalated from these keywords in this pilot.
+          Live AI watches for these words and marks the resulting lead as high priority.
+          It will never promise an emergency response or replace emergency services.
         </p>
         <div className="flex flex-wrap gap-2">
           {emergencyKeywords.map((keyword, index) => (

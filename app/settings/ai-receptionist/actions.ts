@@ -53,7 +53,8 @@ function buildAiReceptionistSettingsFromFormData(
     fallbackPhoneNumber: getText(formData, "fallback_phone_number"),
     notificationEmail: getText(formData, "notification_email"),
     telephonyProvider: "telnyx",
-    realtimeEnabled: false,
+    realtimeEnabled:
+      ["true", "on"].includes(getText(formData, "realtime_enabled")),
     transferToNumber: getText(formData, "transfer_to_number"),
     newLeadSmsEnabled: formData.get("new_lead_sms_enabled") === "on",
     newLeadSmsPhoneNumber: getText(formData, "new_lead_sms_phone_number"),

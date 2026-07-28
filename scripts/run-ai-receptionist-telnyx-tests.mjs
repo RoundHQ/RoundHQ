@@ -75,6 +75,26 @@ const {
   "telnyx.ts"
 ));
 const {
+  decodeRoundHqCallReference,
+} = require(path.join(
+  projectRoot,
+  "lib",
+  "ai-receptionist",
+  "realtime",
+  "openai-sip.ts"
+));
+const {
+  handleOpenAiRealtimeIncomingCall,
+} = require(path.join(
+  projectRoot,
+  "lib",
+  "ai-receptionist",
+  "realtime",
+  "openai-sip-handler.ts"
+));
+
+
+const {
   sendAiReceptionistSms,
 } = require(path.join(
   projectRoot,
@@ -448,6 +468,210 @@ const incomingBResponse = await handleTelnyxIncomingCall(
 );
 assert.equal(incomingBResponse.status, 200);
 assert.equal(incomingBTables.ai_receptionist_call_logs[0].organization_id, organizationBId);
+
+const previousOpenAiApiKey = process.env.OPENAI_API_KEY;
+const previousOpenAiProjectId = process.env.OPENAI_PROJECT_ID;
+const previousOpenAiWebhookSecret = process.env.OPENAI_WEBHOOK_SECRET;
+process.env.OPENAI_API_KEY = "sk-roundhq-test";
+process.env.OPENAI_PROJECT_ID = "proj_roundhq_test";
+process.env.OPENAI_WEBHOOK_SECRET = "whsec_roundhq_test";
+
+const liveTables = createTables();
+liveTables.ai_receptionist_settings[0].realtime_enabled = true;
+const liveApiCalls = [];
+const liveIncomingBody = buildTelnyxBody("call.initiated", "event-live-a", {
+  call_control_id: "call-live-a",
+  call_session_id: "session-live-a",
+  from: "+447700900099",
+  to: telnyxPhoneNumberA,
+  call_status: "initiated",
+});
+const liveIncomingResponse = await handleTelnyxWebhook(
+  context({
+    tables: liveTables,
+    rawBody: liveIncomingBody,
+    fetchImpl: async (url, options) => {
+      liveApiCalls.push({ url: String(url), options });
+      return okJsonResponse();
+    },
+  })
+);
+assert.equal(liveIncomingResponse.status, 200);
+assert.equal(liveIncomingResponse.body.mode, "realtime");
+assert.equal(liveApiCalls.length, 3);
+assert.match(liveApiCalls[0].url, /\/answer$/);
+assert.match(liveApiCalls[1].url, /\/record_start$/);
+assert.match(liveApiCalls[2].url, /\/transfer$/);
+
+const liveRecordBody = JSON.parse(liveApiCalls[1].options.body);
+assert.equal(liveRecordBody.recording_track, "both");
+assert.equal(liveRecordBody.channels, "dual");
+assert.equal(liveRecordBody.transcription, true);
+
+const liveTransferBody = JSON.parse(liveApiCalls[2].options.body);
+assert.equal(
+  liveTransferBody.to,
+  "sip:proj_roundhq_test@sip.api.openai.com;transport=tls"
+);
+assert.equal(liveTransferBody.sip_transport_protocol, "TLS");
+assert.equal(liveTransferBody.media_encryption, "SRTP");
+assert.equal(
+  decodeRoundHqCallReference(liveTransferBody.sip_headers[0].value),
+  "call-live-a"
+);
+const liveTargetState = JSON.parse(
+  Buffer.from(liveTransferBody.target_leg_client_state, "base64").toString(
+    "utf8"
+  )
+);
+assert.equal(liveTargetState.parent_call_control_id, "call-live-a");
+assert.equal(liveTargetState.called_number, telnyxPhoneNumberA);
+assert.equal(liveTables.ai_receptionist_call_logs[0].call_type, "realtime");
+assert.equal(
+  liveTables.ai_receptionist_call_logs[0].call_status,
+  "realtime-transfer-requested"
+);
+
+const acceptedOpenAiCalls = [];
+const rejectedOpenAiCalls = [];
+const greetedOpenAiCalls = [];
+const openAiIncomingOptions = {
+  supabase: createFakeSupabase(liveTables),
+  data: {
+    call_id: "rtc_live_a",
+    sip_headers: liveTransferBody.sip_headers,
+  },
+  config: {
+    apiKey: "sk-roundhq-test",
+    projectId: "proj_roundhq_test",
+    webhookSecret: "whsec_roundhq_test",
+    model: "gpt-realtime-2.1",
+    voice: "marin",
+  },
+  acceptCall: async (callId, payload) => {
+    acceptedOpenAiCalls.push({ callId, payload });
+  },
+  rejectCall: async (callId, statusCode) => {
+    rejectedOpenAiCalls.push({ callId, statusCode });
+  },
+  sendInitialGreeting: async (callId) => {
+    greetedOpenAiCalls.push(callId);
+  },
+};
+const openAiIncomingResponse = await handleOpenAiRealtimeIncomingCall(
+  openAiIncomingOptions
+);
+assert.equal(openAiIncomingResponse.status, 200);
+assert.equal(openAiIncomingResponse.body.accepted, true);
+assert.equal(acceptedOpenAiCalls.length, 1);
+assert.equal(acceptedOpenAiCalls[0].callId, "rtc_live_a");
+assert.equal(acceptedOpenAiCalls[0].payload.model, "gpt-realtime-2.1");
+assert.deepEqual(greetedOpenAiCalls, ["rtc_live_a"]);
+assert.deepEqual(rejectedOpenAiCalls, []);
+assert.equal(liveTables.ai_receptionist_call_logs[0].session_id, "rtc_live_a");
+assert.equal(liveTables.ai_receptionist_call_logs[0].call_status, "openai-accepted");
+
+const duplicateOpenAiResponse = await handleOpenAiRealtimeIncomingCall(
+  openAiIncomingOptions
+);
+assert.equal(duplicateOpenAiResponse.body.duplicate, true);
+assert.equal(acceptedOpenAiCalls.length, 1);
+
+const liveTargetLegBody = buildTelnyxBody(
+  "call.initiated",
+  "event-live-target",
+  {
+    call_control_id: "call-live-target",
+    call_session_id: "session-live-target",
+    client_state: liveTransferBody.target_leg_client_state,
+    state: "parked",
+  }
+);
+const liveTargetResponse = await handleTelnyxWebhook(
+  context({
+    tables: liveTables,
+    rawBody: liveTargetLegBody,
+    fetchImpl: async () => {
+      throw new Error("The transferred target leg must not start another call flow.");
+    },
+  })
+);
+assert.equal(liveTargetResponse.status, 200);
+assert.equal(liveTables.ai_receptionist_call_logs.length, 1);
+assert.equal(liveTables.ai_receptionist_call_logs[0].call_sid, "call-live-a");
+
+
+const liveFallbackTables = createTables();
+liveFallbackTables.ai_receptionist_settings[0].realtime_enabled = true;
+const liveFallbackSetupCalls = [];
+const liveFallbackIncomingBody = buildTelnyxBody(
+  "call.initiated",
+  "event-live-fallback",
+  {
+    call_control_id: "call-live-fallback",
+    call_session_id: "session-live-fallback",
+    from: "+447700900098",
+    to: telnyxPhoneNumberA,
+    call_status: "initiated",
+  }
+);
+await handleTelnyxWebhook(
+  context({
+    tables: liveFallbackTables,
+    rawBody: liveFallbackIncomingBody,
+    fetchImpl: async (url, options) => {
+      liveFallbackSetupCalls.push({ url: String(url), options });
+      return okJsonResponse();
+    },
+  })
+);
+const fallbackTransferBody = JSON.parse(
+  liveFallbackSetupCalls[2].options.body
+);
+const failedTargetBody = buildTelnyxBody(
+  "call.hangup",
+  "event-live-fallback-target",
+  {
+    call_control_id: "call-live-fallback-target",
+    call_session_id: "session-live-fallback-target",
+    client_state: fallbackTransferBody.target_leg_client_state,
+    call_status: "hangup",
+  }
+);
+const fallbackApiCalls = [];
+const failedTargetResponse = await handleTelnyxWebhook(
+  context({
+    tables: liveFallbackTables,
+    rawBody: failedTargetBody,
+    fetchImpl: async (url, options) => {
+      fallbackApiCalls.push({ url: String(url), options });
+      return okJsonResponse();
+    },
+  })
+);
+assert.equal(failedTargetResponse.status, 200);
+assert.equal(failedTargetResponse.body.fallback, "voicemail");
+assert.equal(fallbackApiCalls.length, 2);
+assert.match(fallbackApiCalls[0].url, /call-live-fallback\/actions\/answer$/);
+assert.match(fallbackApiCalls[1].url, /call-live-fallback\/actions\/speak$/);
+assert.equal(liveFallbackTables.ai_receptionist_call_logs[0].call_type, "voicemail");
+assert.equal(liveFallbackTables.ai_receptionist_call_logs[0].call_status, "live-ai-fallback");
+assert.equal(liveFallbackTables.ai_receptionist_call_logs[0].ended_at, null);
+if (previousOpenAiApiKey === undefined) {
+  delete process.env.OPENAI_API_KEY;
+} else {
+  process.env.OPENAI_API_KEY = previousOpenAiApiKey;
+}
+if (previousOpenAiProjectId === undefined) {
+  delete process.env.OPENAI_PROJECT_ID;
+} else {
+  process.env.OPENAI_PROJECT_ID = previousOpenAiProjectId;
+}
+if (previousOpenAiWebhookSecret === undefined) {
+  delete process.env.OPENAI_WEBHOOK_SECRET;
+} else {
+  process.env.OPENAI_WEBHOOK_SECRET = previousOpenAiWebhookSecret;
+}
 
 const unknownTables = createTables();
 const unknownBody = buildTelnyxBody("call.initiated", "event-unknown", {

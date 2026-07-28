@@ -56,6 +56,23 @@ const {
   path.join(projectRoot, "lib", "ai-receptionist", "realtime", "openai.ts")
 );
 const {
+  buildOpenAiRealtimeCallAcceptPayload,
+  buildOpenAiRealtimeSipUri,
+  decodeRoundHqCallReference,
+  encodeRoundHqCallReference,
+  getOpenAiRealtimeSipConfig,
+  getRoundHqCallReferenceFromSipHeaders,
+  normalizeOpenAiRealtimeIncomingCall,
+} = require(
+  path.join(
+    projectRoot,
+    "lib",
+    "ai-receptionist",
+    "realtime",
+    "openai-sip.ts"
+  )
+);
+const {
   buildOpenAiAudioAppendEventFromTwilio,
   buildTwilioMediaEventFromOpenAiDelta,
   normalizeTwilioMediaStreamEvent,
@@ -317,6 +334,49 @@ const openAiEvent = buildOpenAiRealtimeSessionUpdateEvent(sessionConfig);
 assert.equal(openAiEvent.type, "session.update");
 assert.equal(openAiEvent.session.audio.input.format.type, "audio/pcmu");
 assert.match(openAiEvent.session.instructions, /structured data live/);
+
+const sipConfig = getOpenAiRealtimeSipConfig({
+  OPENAI_API_KEY: "sk-test",
+  OPENAI_PROJECT_ID: "proj_roundhq_test",
+  OPENAI_WEBHOOK_SECRET: "whsec_test",
+});
+assert.equal(sipConfig.projectId, "proj_roundhq_test");
+assert.equal(sipConfig.model, "gpt-realtime-2.1");
+assert.equal(
+  buildOpenAiRealtimeSipUri(sipConfig.projectId),
+  "sip:proj_roundhq_test@sip.api.openai.com;transport=tls"
+);
+
+const encodedCallReference = encodeRoundHqCallReference("telnyx-call-123");
+assert.equal(
+  decodeRoundHqCallReference(encodedCallReference),
+  "telnyx-call-123"
+);
+const incomingSipCall = normalizeOpenAiRealtimeIncomingCall({
+  call_id: "rtc_test",
+  sip_headers: [
+    {
+      name: "User-to-User",
+      value: encodedCallReference,
+    },
+  ],
+});
+assert.equal(incomingSipCall.callId, "rtc_test");
+assert.equal(
+  getRoundHqCallReferenceFromSipHeaders(incomingSipCall.sipHeaders),
+  "telnyx-call-123"
+);
+
+const acceptPayload = buildOpenAiRealtimeCallAcceptPayload(
+  settings,
+  sipConfig
+);
+assert.equal(acceptPayload.type, "realtime");
+assert.equal(acceptPayload.model, "gpt-realtime-2.1");
+assert.deepEqual(acceptPayload.output_modalities, ["audio"]);
+assert.equal(acceptPayload.audio.output.voice, "marin");
+assert.equal(acceptPayload.audio.input.turn_detection.create_response, true);
+assert.match(acceptPayload.instructions, /AI virtual receptionist/i);
 
 const realtimeTwiML = buildRealtimeIncomingCallTwiML({
   settings,

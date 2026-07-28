@@ -1,8 +1,11 @@
 # AI Receptionist Telnyx Setup
 
-RoundHQ AI Receptionist launches in **Voicemail-to-Lead** mode.
+RoundHQ AI Receptionist supports two per-workspace answering modes:
 
-Live realtime AI conversations are not part of the production launch. They must remain hidden or disabled until the later realtime upgrade is reviewed separately.
+- **Voicemail to lead** plays a fixed greeting, records the caller, and creates a lead from the Telnyx transcript.
+- **Live AI conversation** transfers the answered call directly from Telnyx to the OpenAI Realtime SIP service. The AI speaks with the caller and the full call is recorded and transcribed by Telnyx so RoundHQ can create the lead.
+
+Live AI is a controlled testing feature. Customer feature access is off by default, and Live AI is also off by default inside an enabled workspace.
 
 ## Product Model
 
@@ -25,10 +28,15 @@ AI_RECEPTIONIST_TELNYX_API_KEY=
 AI_RECEPTIONIST_TELNYX_PUBLIC_KEY=
 AI_RECEPTIONIST_TELNYX_CONNECTION_ID=
 AI_RECEPTIONIST_TELNYX_MESSAGING_PROFILE_ID=
+OPENAI_API_KEY=
+OPENAI_PROJECT_ID=proj_...
+OPENAI_WEBHOOK_SECRET=whsec_...
+OPENAI_REALTIME_MODEL=gpt-realtime-2.1
+OPENAI_REALTIME_VOICE=marin
 AI_RECEPTIONIST_TELNYX_BILLING_GROUP_ID=
 ```
 
-The API key, public webhook key, and connection ID are required. The messaging profile and billing group are optional.
+The Telnyx API key, public webhook key, and connection ID are required. The messaging profile and billing group are optional. The three OpenAI credentials are required only for Live AI; without them, RoundHQ keeps using the working voicemail flow.
 
 These variables are server-only. Do not prefix them with `NEXT_PUBLIC_` and do not send them to browser components.
 
@@ -53,6 +61,23 @@ The RoundHQ platform owner must:
 6. Ensure the account can search and order UK local voice numbers.
 
 RoundHQ’s number-order request assigns the shared connection and an organisation-specific customer reference at purchase time.
+
+## One-Time OpenAI Setup
+
+After this version is deployed, the RoundHQ platform owner must:
+
+1. Open the OpenAI API project identified by `OPENAI_PROJECT_ID`.
+2. Create a webhook for:
+
+   ```text
+   https://YOUR_PUBLIC_ROUNDHQ_DOMAIN/api/ai-receptionist/openai/webhook
+   ```
+
+3. Subscribe it to `realtime.call.incoming`.
+4. Copy the webhook signing secret shown at creation time into `OPENAI_WEBHOOK_SECRET`.
+5. Redeploy RoundHQ so the signing secret is active.
+
+The webhook verifies the raw request with the OpenAI SDK before accepting a call. An incoming SIP call is rejected unless its RoundHQ call reference resolves to an enabled testing workspace.
 
 ## Database Setup
 
@@ -97,6 +122,8 @@ The ordering flow stores an idempotency reference before contacting Telnyx. A re
 
 If Telnyx reports unmet regulatory requirements, the customer sees a review status rather than a false success message.
 
+Under **Status**, select the answering mode and then enable AI Receptionist. Start with a test number and place an end-to-end call before forwarding the customer's public business number.
+
 ## Webhook Flow
 
 Telnyx sends all call events to the application's primary webhook. RoundHQ dispatches `call.initiated`, `call.speak.ended`, `call.recording.saved`, `call.recording.transcription.saved`, recording errors, and call-status events internally.
@@ -107,11 +134,24 @@ The inbound flow is:
 Incoming call
 -> shared Telnyx Call Control webhook
 -> RoundHQ resolves organisation from the called number
--> Telnyx plays greeting and recording-consent prompt
--> after the greeting, Telnyx records caller audio only
--> recording callback is stored while transcription is pending
--> asynchronous transcription callback creates exactly one lead
+-> RoundHQ checks feature access, enabled state, and answering mode
 ```
+
+Voicemail mode then plays the greeting, records caller audio, and creates exactly one lead when the asynchronous Telnyx transcript arrives.
+
+Live AI mode continues as follows:
+
+```text
+RoundHQ answers and starts a dual-channel recording
+-> Telnyx transfers the call to sip:PROJECT_ID@sip.api.openai.com over TLS/SRTP
+-> OpenAI sends the signed realtime.call.incoming webhook
+-> RoundHQ verifies the signature and the RoundHQ SIP call reference
+-> RoundHQ accepts the Realtime session and triggers the opening greeting
+-> OpenAI and the caller speak directly over SIP
+-> Telnyx recording/transcription callbacks create exactly one RoundHQ lead
+```
+
+Audio does not pass through a permanent Vercel WebSocket. If the initial Telnyx live transfer cannot be started, RoundHQ automatically falls back to voicemail mode.
 
 There is no fallback organisation. Unknown called numbers are rejected.
 
@@ -124,7 +164,7 @@ RoundHQ verifies them using the platform public key.
 
 ## Recording Privacy
 
-New Telnyx-created lead activity stores a recording ID, not a raw provider recording URL.
+Telnyx-created lead activity stores a recording ID, not a raw provider recording URL. Voicemail recordings use the inbound track. Live AI recordings use both tracks in dual-channel mode and include post-call transcription.
 
 Playback uses:
 
@@ -151,6 +191,7 @@ Run the focused suites:
 npm run test:ai-receptionist-number-provisioning
 npm run test:ai-receptionist-settings
 npm run test:ai-receptionist-telnyx
+npm run test:ai-receptionist-realtime
 ```
 
 ## Staging Checklist
@@ -163,16 +204,18 @@ npm run test:ai-receptionist-telnyx
 6. Confirm the Telnyx application uses API v2 and the unified webhook URL.
 7. Allocate a number through the customer-facing settings flow.
 8. Confirm the allocated number is attached to the shared connection in Telnyx.
-9. Save the greeting and enable voicemail-to-lead.
+9. Save the greeting, select **Voicemail to lead**, and enable AI Receptionist.
 10. Place an inbound test call and leave a message.
 11. Confirm no lead is created before the transcript arrives.
 12. Confirm exactly one lead appears after transcription.
-13. Redeliver callbacks and confirm no duplicate lead is created.
-14. Confirm unknown numbers and invalid or stale signatures are rejected.
-15. Test a failed transcription and confirm the fallback lead is created.
+13. Complete the OpenAI project webhook setup and redeploy with `OPENAI_WEBHOOK_SECRET`.
+14. Select **Live AI conversation** for the testing workspace.
+15. Place a call and confirm the AI identifies itself, gives the recording notice, and asks the configured questions.
+16. Confirm both sides of the call can be played back and one lead is created from the transcript.
+17. Redeliver callbacks and confirm no duplicate lead is created.
+18. Confirm unknown numbers and invalid or stale Telnyx/OpenAI signatures are rejected.
+19. Temporarily remove one OpenAI setting in staging and confirm calls use voicemail mode.
 
-## Current Launch Limitation
+## Pilot Safeguards
 
-RoundHQ AI Receptionist is **voicemail-to-lead only** for launch.
-
-Do not market or expose live realtime AI conversations until the realtime media bridge, latency, monitoring, safety controls, and production support model have been reviewed separately.
+Keep customer feature access disabled except for named testing accounts. Live AI must identify itself as an AI virtual receptionist, announce recording/transcription, avoid prices and appointment promises, and direct immediate life-threatening emergencies to 999 or 112. Review recordings, transcripts, latency, costs, failure rates, and lead accuracy before wider release.

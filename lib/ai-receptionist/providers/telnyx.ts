@@ -16,6 +16,11 @@ import {
 import type {
   AiReceptionistPrivateSettings,
 } from "@/lib/ai-receptionist-settings";
+import {
+  buildOpenAiRealtimeSipUri,
+  encodeRoundHqCallReference,
+  getOpenAiRealtimeSipConfig,
+} from "@/lib/ai-receptionist/realtime/openai-sip";
 import type {
   IncomingCallResult,
   RecordingCompleteResult,
@@ -43,6 +48,7 @@ type TelnyxCall = {
   eventType: string;
   callControlId: string;
   callSessionId: string;
+  parentCallControlId: string;
   callerNumber: string;
   calledNumber: string;
   callStatus: string;
@@ -151,10 +157,17 @@ function decodeTelnyxClientState(payload: Record<string, unknown>) {
   }
 }
 
-function buildTelnyxClientState(call: TelnyxCall) {
+function buildTelnyxClientState(
+  call: TelnyxCall,
+  parentCallControlId = call.parentCallControlId
+) {
   return Buffer.from(
     JSON.stringify({
       called_number: call.calledNumber,
+      caller_number: call.callerNumber,
+      ...(parentCallControlId
+        ? { parent_call_control_id: parentCallControlId }
+        : {}),
     }),
     "utf8"
   ).toString("base64");
@@ -162,6 +175,16 @@ function buildTelnyxClientState(call: TelnyxCall) {
 
 export function getTelnyxWebhookEventType(rawBody: string) {
   return parseTelnyxWebhookBody(rawBody)?.eventType ?? "";
+}
+
+export function getParentCallControlIdFromTelnyxWebhook(rawBody: string) {
+  const event = parseTelnyxWebhookBody(rawBody);
+
+  return event
+    ? getFirstText(decodeTelnyxClientState(event.payload), [
+        "parent_call_control_id",
+      ])
+    : "";
 }
 
 export function getCalledNumberFromTelnyxWebhook(rawBody: string) {
@@ -199,11 +222,13 @@ function normalizeTelnyxCall(event: TelnyxEvent): TelnyxCall {
     eventType: event.eventType,
     callControlId,
     callSessionId: getFirstText(event.payload, ["call_session_id"]) || callControlId,
-    callerNumber: getFirstText(event.payload, [
-      "from",
-      "from_number",
-      "caller_number",
-    ]),
+    parentCallControlId: getFirstText(clientState, ["parent_call_control_id"]),
+    callerNumber:
+      getFirstText(event.payload, [
+        "from",
+        "from_number",
+        "caller_number",
+      ]) || getFirstText(clientState, ["caller_number"]),
     calledNumber:
       getFirstText(event.payload, [
         "to",
@@ -510,6 +535,84 @@ async function startTelnyxVoicemailRecording(options: {
   });
 }
 
+async function startTelnyxRealtimeConversation(options: {
+  settings: AiReceptionistPrivateSettings;
+  call: TelnyxCall;
+  fetchImpl?: typeof fetch;
+}) {
+  const config = getOpenAiRealtimeSipConfig();
+
+  if (!config) {
+    throw new Error("OpenAI Realtime SIP is not configured.");
+  }
+
+  const callControlId = encodeURIComponent(options.call.callControlId);
+  const clientState = buildTelnyxClientState(options.call);
+  const targetLegClientState = buildTelnyxClientState(
+    options.call,
+    options.call.callControlId
+  );
+  const callReference = encodeRoundHqCallReference(
+    options.call.callControlId
+  );
+
+  await telnyxApiRequest({
+    apiKey: options.settings.telnyxApiKey,
+    path: `/calls/${callControlId}/actions/answer`,
+    body: {
+      client_state: clientState,
+      command_id: buildTelnyxCommandId(options.call.callControlId, "answer"),
+    },
+    fetchImpl: options.fetchImpl,
+  });
+  await telnyxApiRequest({
+    apiKey: options.settings.telnyxApiKey,
+    path: `/calls/${callControlId}/actions/record_start`,
+    body: {
+      format: "mp3",
+      channels: "dual",
+      recording_track: "both",
+      play_beep: true,
+      max_length: 600,
+      timeout_secs: 12,
+      trim: "trim-silence",
+      transcription: true,
+      transcription_engine: "B",
+      transcription_language: "en-GB",
+      client_state: clientState,
+      command_id: buildTelnyxCommandId(options.call.callControlId, "record"),
+    },
+    fetchImpl: options.fetchImpl,
+  });
+  await telnyxApiRequest({
+    apiKey: options.settings.telnyxApiKey,
+    path: `/calls/${callControlId}/actions/transfer`,
+    body: {
+      to: buildOpenAiRealtimeSipUri(config.projectId),
+      timeout_secs: 20,
+      time_limit_secs: 600,
+      park_after_unbridge: "self",
+      sip_transport_protocol: "TLS",
+      media_encryption: "SRTP",
+      target_leg_client_state: targetLegClientState,
+      custom_headers: [
+        {
+          name: "X-RoundHQ-Call-ID",
+          value: callReference,
+        },
+      ],
+      sip_headers: [
+        {
+          name: "User-to-User",
+          value: callReference,
+        },
+      ],
+      command_id: buildTelnyxCommandId(options.call.callControlId, "transfer"),
+    },
+    fetchImpl: options.fetchImpl,
+  });
+}
+
 function extractLabelledValue(text: string, labels: string[]) {
   for (const label of labels) {
     const pattern = new RegExp(`\\b${label}\\s*[:\\-]\\s*([^\\n.]+)`, "i");
@@ -676,6 +779,9 @@ export async function handleTelnyxIncomingCall(
   }
 
   const call = normalizeTelnyxCall(validated.event);
+  const liveAiConfigured = Boolean(
+    validated.settings.realtimeEnabled && getOpenAiRealtimeSipConfig()
+  );
 
   if (!call.callControlId) {
     return jsonResult({ error: "call_control_id is required." }, 400);
@@ -691,7 +797,7 @@ export async function handleTelnyxIncomingCall(
       accountSid: validated.settings.telnyxConnectionId,
       callerNumber: call.callerNumber,
       twilioPhoneNumber: call.calledNumber,
-      callType: "voicemail",
+      callType: liveAiConfigured ? "realtime" : "voicemail",
       callStatus: call.callStatus || "incoming",
       rawPayload: call.rawPayload,
     }
@@ -702,12 +808,53 @@ export async function handleTelnyxIncomingCall(
   }
 
   try {
-    await startTelnyxVoicemailGreeting({
-      settings: validated.settings,
-      call,
-      fetchImpl: context.fetchImpl,
-    });
+    if (liveAiConfigured) {
+      await startTelnyxRealtimeConversation({
+        settings: validated.settings,
+        call,
+        fetchImpl: context.fetchImpl,
+      });
+      await updateAiReceptionistCallLog(
+        context.supabase,
+        validated.settings.organizationId,
+        call.callControlId,
+        {
+          callType: "realtime",
+          callStatus: "realtime-transfer-requested",
+          outcome: "conversation_pending",
+        }
+      );
+    } else {
+      await startTelnyxVoicemailGreeting({
+        settings: validated.settings,
+        call,
+        fetchImpl: context.fetchImpl,
+      });
+    }
   } catch (error) {
+    if (liveAiConfigured) {
+      try {
+        await startTelnyxVoicemailGreeting({
+          settings: validated.settings,
+          call,
+          fetchImpl: context.fetchImpl,
+        });
+        await updateAiReceptionistCallLog(
+          context.supabase,
+          validated.settings.organizationId,
+          call.callControlId,
+          {
+            callType: "voicemail",
+            callStatus: "live-ai-fallback",
+            outcome: "transcription_pending",
+          }
+        );
+        return jsonResult({ ok: true, fallback: "voicemail" });
+      } catch {
+        // The failure below records the original live-transfer error.
+      }
+    }
+
     await updateAiReceptionistCallLog(
       context.supabase,
       validated.settings.organizationId,
@@ -717,14 +864,17 @@ export async function handleTelnyxIncomingCall(
         notificationError:
           error instanceof Error && error.message.trim()
             ? error.message
-            : "Unable to start Telnyx voicemail flow.",
+            : "Unable to start the Telnyx receptionist flow.",
       }
     );
 
-    return jsonResult({ ok: false, error: "Unable to start voicemail flow." }, 502);
+    return jsonResult(
+      { ok: false, error: "Unable to start the receptionist call flow." },
+      502
+    );
   }
 
-  return jsonResult({ ok: true });
+  return jsonResult({ ok: true, mode: liveAiConfigured ? "realtime" : "voicemail" });
 }
 
 export async function handleTelnyxSpeakEnded(
@@ -807,13 +957,16 @@ export async function handleTelnyxRecordingComplete(
     return jsonResult({ error: "call_control_id is required." }, 400);
   }
 
+  const callLogId =
+    webhookRecording.parentCallControlId || webhookRecording.callControlId;
   const existingCallLog = await getAiReceptionistCallLog(
     context.supabase,
     validated.settings.organizationId,
-    webhookRecording.callControlId
+    callLogId
   );
   const recording: TelnyxRecording = {
     ...webhookRecording,
+    callControlId: callLogId,
     callerNumber:
       webhookRecording.callerNumber || existingCallLog?.caller_number || "",
     calledNumber:
@@ -854,7 +1007,10 @@ export async function handleTelnyxRecordingComplete(
       accountSid: validated.settings.telnyxConnectionId,
       callerNumber: recording.callerNumber || undefined,
       twilioPhoneNumber: recording.calledNumber || undefined,
-      callType: "voicemail",
+      callType:
+        existingCallLog?.call_type === "realtime"
+          ? "realtime"
+          : "voicemail",
       recordingUrl: recording.recordingUrl || undefined,
       durationSeconds: recording.durationSeconds ?? undefined,
       transcript: recording.transcript || undefined,
@@ -964,21 +1120,94 @@ export async function handleTelnyxCallStatus(
     return jsonResult({ error: "call_control_id is required." }, 400);
   }
 
+  const callLogId = call.parentCallControlId || call.callControlId;
+  const existingCallLog = await getAiReceptionistCallLog(
+    context.supabase,
+    validated.settings.organizationId,
+    callLogId
+  );
+  const isAnswered = validated.event.eventType === "call.answered";
+  const isEnded = ["call.hangup", "call.bridged.hangup"].includes(
+    validated.event.eventType
+  );
+  const shouldFallbackToVoicemail = Boolean(
+    call.parentCallControlId &&
+      isEnded &&
+      existingCallLog?.call_type === "realtime" &&
+      !existingCallLog.session_id &&
+      validated.settings.enabled
+  );
+
   await upsertAiReceptionistCallLog(
     context.supabase,
     validated.settings.organizationId,
     {
       provider: "telnyx",
       providerEventId: call.eventId,
-      callSid: call.callControlId,
+      callSid: callLogId,
       accountSid: validated.settings.telnyxConnectionId,
       callerNumber: call.callerNumber || undefined,
       twilioPhoneNumber: call.calledNumber || undefined,
-      callType: "voicemail",
+      callType:
+        existingCallLog?.call_type === "realtime"
+          ? "realtime"
+          : "voicemail",
       callStatus: call.callStatus || "status-callback",
+      answeredAt: isAnswered
+        ? existingCallLog?.answered_at || new Date().toISOString()
+        : undefined,
+      endedAt:
+        isEnded && !call.parentCallControlId
+          ? new Date().toISOString()
+          : undefined,
       rawPayload: call.rawPayload,
     }
   );
+
+  if (shouldFallbackToVoicemail) {
+    const originalCall: TelnyxCall = {
+      ...call,
+      callControlId: callLogId,
+      parentCallControlId: "",
+    };
+
+    try {
+      await startTelnyxVoicemailGreeting({
+        settings: validated.settings,
+        call: originalCall,
+        fetchImpl: context.fetchImpl,
+      });
+      await updateAiReceptionistCallLog(
+        context.supabase,
+        validated.settings.organizationId,
+        callLogId,
+        {
+          callType: "voicemail",
+          callStatus: "live-ai-fallback",
+          outcome: "transcription_pending",
+          endedAt: null,
+        }
+      );
+      return jsonResult({ ok: true, fallback: "voicemail" });
+    } catch (error) {
+      await updateAiReceptionistCallLog(
+        context.supabase,
+        validated.settings.organizationId,
+        callLogId,
+        {
+          notificationStatus: "failed",
+          notificationError:
+            error instanceof Error && error.message.trim()
+              ? error.message
+              : "Unable to start voicemail after the live AI transfer failed.",
+        }
+      );
+      return jsonResult(
+        { ok: false, error: "Unable to start the voicemail fallback." },
+        502
+      );
+    }
+  }
 
   return jsonResult({ ok: true });
 }
@@ -988,7 +1217,10 @@ export async function handleTelnyxWebhook(
 ): Promise<IncomingCallResult | RecordingCompleteResult> {
   const eventType = getTelnyxWebhookEventType(context.rawBody);
 
-  if (eventType === "call.initiated") {
+  if (
+    eventType === "call.initiated" &&
+    !getParentCallControlIdFromTelnyxWebhook(context.rawBody)
+  ) {
     return handleTelnyxIncomingCall(context);
   }
 

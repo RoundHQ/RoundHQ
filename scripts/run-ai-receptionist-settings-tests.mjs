@@ -123,7 +123,7 @@ const publicSettingsWithSecret = mapAiReceptionistSettingsRow({
 });
 assert.equal(publicSettingsWithSecret.twilioAuthTokenConfigured, true);
 assert.equal(publicSettingsWithSecret.telnyxApiKeyConfigured, true);
-assert.equal(publicSettingsWithSecret.realtimeEnabled, false);
+assert.equal(publicSettingsWithSecret.realtimeEnabled, true);
 assert.equal(
   Object.prototype.hasOwnProperty.call(publicSettingsWithSecret, "telnyxApiKey"),
   false,
@@ -157,6 +157,7 @@ const updatedSettings = normalizeAiReceptionistSettings({
   telnyxConnectionId: "telnyx-app-1",
   telnyxMessagingProfileId: "messaging-profile-1",
   greetingMessage: "Thanks for calling RoundHQ Test Co.",
+  realtimeEnabled: true,
   consentMessage: "This call may be recorded.",
   businessHoursEnabled: true,
   questionsToAsk: ["Name?", "Service required?"],
@@ -186,7 +187,7 @@ assert.equal(writeRow.telnyx_phone_number, "+44 121 555 1001");
 assert.equal(writeRow.telnyx_connection_id, "telnyx-app-1");
 assert.equal(writeRow.telnyx_messaging_profile_id, "messaging-profile-1");
 assert.equal(writeRow.telnyx_public_key, "public-key");
-assert.equal(writeRow.realtime_enabled, false);
+assert.equal(writeRow.realtime_enabled, true);
 assert.equal(writeRow.lead_source_label, "AI Receptionist");
 assert.deepEqual(writeRow.questions_to_ask, ["Name?", "Service required?"]);
 assert.deepEqual(writeRow.emergency_keywords, ["urgent", "same day"]);
@@ -352,15 +353,12 @@ assert.match(renderedFormHtml, /RoundHQ manages the secure phone connection/);
 assert.doesNotMatch(renderedFormHtml, /Telnyx API Key/);
 assert.doesNotMatch(renderedFormHtml, /Telnyx Public Key/);
 assert.doesNotMatch(renderedFormHtml, /Connection \/ App ID/);
-assert.match(renderedFormHtml, /creates a lead after Telnyx transcription/);
-assert.doesNotMatch(
-  renderedFormHtml,
-  /Realtime voice receptionist/,
-  "realtime live conversation should be hidden for launch"
-);
+assert.match(renderedFormHtml, /Answering mode/);
+assert.match(renderedFormHtml, /Voicemail to lead/);
+assert.match(renderedFormHtml, /Live AI conversation/);
 assert.match(
   renderedFormHtml,
-  /Voicemail-to-lead is enabled on \+44 121 555 1001/
+  /Live AI is enabled on \+44 121 555 1001/
 );
 
 const unconfiguredFormHtml = renderToStaticMarkup(
