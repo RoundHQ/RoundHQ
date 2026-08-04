@@ -597,32 +597,33 @@ const liveTargetResponse = await handleTelnyxWebhook(
 assert.equal(liveTargetResponse.status, 200);
 assert.equal(liveTables.ai_receptionist_call_logs.length, 1);
 assert.equal(liveTables.ai_receptionist_call_logs[0].call_sid, "call-live-a");
-const liveTargetBridgedBody = buildTelnyxBody(
+const liveOriginalBridgedBody = buildTelnyxBody(
   "call.bridged",
-  "event-live-target-bridged",
+  "event-live-original-bridged",
   {
-    call_control_id: "call-live-target",
-    call_session_id: "session-live-target",
-    client_state: liveTransferBody.target_leg_client_state,
+    call_control_id: "call-live-a",
+    call_session_id: "session-live-a",
+    from: "+447700900099",
+    to: telnyxPhoneNumberA,
     state: "bridged",
   }
 );
 const liveRecordingApiCalls = [];
-const liveTargetBridgedResponse = await handleTelnyxWebhook(
+const liveOriginalBridgedResponse = await handleTelnyxWebhook(
   context({
     tables: liveTables,
-    rawBody: liveTargetBridgedBody,
+    rawBody: liveOriginalBridgedBody,
     fetchImpl: async (url, options) => {
       liveRecordingApiCalls.push({ url: String(url), options });
       return okJsonResponse();
     },
   })
 );
-assert.equal(liveTargetBridgedResponse.status, 200);
+assert.equal(liveOriginalBridgedResponse.status, 200);
 assert.equal(liveRecordingApiCalls.length, 1);
 assert.match(
   liveRecordingApiCalls[0].url,
-  /call-live-target\/actions\/record_start$/
+  /call-live-a\/actions\/record_start$/
 );
 const liveRecordingBody = JSON.parse(
   liveRecordingApiCalls[0].options.body
@@ -635,7 +636,38 @@ assert.equal(liveRecordingBody.transcription, true);
 const liveRecordingState = JSON.parse(
   Buffer.from(liveRecordingBody.client_state, "base64").toString("utf8")
 );
-assert.equal(liveRecordingState.parent_call_control_id, "call-live-a");
+assert.equal(liveRecordingState.called_number, telnyxPhoneNumberA);
+assert.equal(liveRecordingState.parent_call_control_id, undefined);
+assert.equal(
+  liveTables.ai_receptionist_call_logs[0].ai_summaries
+    .live_recording_requested,
+  true
+);
+assert.equal(
+  liveTables.ai_receptionist_call_logs[0].ai_summaries
+    .live_recording_call_control_id,
+  "call-live-a"
+);
+
+const duplicateLiveBridgeResponse = await handleTelnyxWebhook(
+  context({
+    tables: liveTables,
+    rawBody: buildTelnyxBody(
+      "call.bridged",
+      "event-live-target-bridged",
+      {
+        call_control_id: "call-live-target",
+        call_session_id: "session-live-target",
+        client_state: liveTransferBody.target_leg_client_state,
+        state: "bridged",
+      }
+    ),
+    fetchImpl: async () => {
+      throw new Error("A duplicate bridge must not start another recording.");
+    },
+  })
+);
+assert.equal(duplicateLiveBridgeResponse.status, 200);
 
 
 const acceptFailureTables = structuredClone(liveTables);
@@ -674,14 +706,14 @@ const liveRecordingSavedBody = buildTelnyxBody(
   "call.recording.saved",
   "event-live-recording-saved",
   {
-    call_control_id: "call-live-target",
-    call_session_id: "session-live-target",
+    call_control_id: "call-live-a",
+    call_session_id: "session-live-a",
     recording_id: "recording-live-full",
     recording_urls: {
       mp3: "https://api.telnyx.com/recordings/recording-live-full.mp3",
     },
     duration_millis: 142000,
-    client_state: liveTransferBody.target_leg_client_state,
+    client_state: liveRecordingBody.client_state,
   }
 );
 const liveRecordingSavedResponse = await handleTelnyxWebhook(
@@ -698,14 +730,14 @@ const liveTranscriptBody = buildTelnyxBody(
   "call.recording.transcription.saved",
   "event-live-transcript-saved",
   {
-    call_control_id: "call-live-target",
-    call_session_id: "session-live-target",
+    call_control_id: "call-live-a",
+    call_session_id: "session-live-a",
     recording_id: "recording-live-full",
     status: "completed",
     transcription_text:
       "Channel 0: Hello. Thanks for calling RoundHQ Test Co A garden maintenance. I'm an AI virtual receptionist. " +
       "Channel 1: My name is William Williamson. My address is 18 Calderwood Road, East Kilbride, G74 3AB. I need pressure washing on the driveway.",
-    client_state: liveTransferBody.target_leg_client_state,
+    client_state: liveRecordingBody.client_state,
   }
 );
 const liveTranscriptResponse = await handleTelnyxWebhook(

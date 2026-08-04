@@ -1213,11 +1213,19 @@ export async function handleTelnyxCallStatus(
       !existingCallLog.session_id &&
       validated.settings.enabled
   );
+  const existingAiSummaries =
+    existingCallLog?.ai_summaries &&
+    typeof existingCallLog.ai_summaries === "object" &&
+    !Array.isArray(existingCallLog.ai_summaries)
+      ? existingCallLog.ai_summaries
+      : {};
+  const recordingAlreadyRequested =
+    existingAiSummaries.live_recording_requested === true;
   const shouldStartRealtimeRecording = Boolean(
-    call.parentCallControlId &&
-      validated.event.eventType === "call.bridged" &&
+    validated.event.eventType === "call.bridged" &&
       existingCallLog?.call_type === "realtime" &&
-      validated.settings.enabled
+      validated.settings.enabled &&
+      !recordingAlreadyRequested
   );
 
 
@@ -1254,6 +1262,18 @@ export async function handleTelnyxCallStatus(
         call,
         fetchImpl: context.fetchImpl,
       });
+      await updateAiReceptionistCallLog(
+        context.supabase,
+        validated.settings.organizationId,
+        callLogId,
+        {
+          aiSummaries: {
+            ...existingAiSummaries,
+            live_recording_requested: true,
+            live_recording_call_control_id: call.callControlId,
+          },
+        }
+      );
     } catch (error) {
       await updateAiReceptionistCallLog(
         context.supabase,
