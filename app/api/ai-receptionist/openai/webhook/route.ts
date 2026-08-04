@@ -21,14 +21,8 @@ function sendInitialGreeting(apiKey: string, callId: string) {
     );
     let settled = false;
     const timeout = setTimeout(() => {
-      if (settled) {
-        return;
-      }
-
-      settled = true;
-      socket.terminate();
-      reject(new Error("Timed out while starting the AI greeting."));
-    }, 3_000);
+      finish(new Error("Timed out while waiting for the AI greeting audio."));
+    }, 20_000);
 
     const finish = (error?: Error) => {
       if (settled) {
@@ -51,10 +45,50 @@ function sendInitialGreeting(apiKey: string, callId: string) {
     socket.once("open", () => {
       socket.send(
         JSON.stringify(buildOpenAiRealtimeInitialGreetingEvent()),
-        (error) => finish(error || undefined)
+        (error) => {
+          if (error) {
+            finish(error);
+          }
+        }
       );
     });
+    socket.on("message", (data) => {
+      let event: {
+        type?: unknown;
+        error?: { message?: unknown };
+        response?: { status?: unknown };
+      };
+
+      try {
+        event = JSON.parse(data.toString()) as typeof event;
+      } catch {
+        return;
+      }
+
+      if (event.type === "error") {
+        const message =
+          typeof event.error?.message === "string"
+            ? event.error.message
+            : "OpenAI could not generate the opening greeting.";
+        finish(new Error(message));
+        return;
+      }
+
+      if (event.type === "response.done") {
+        if (event.response?.status === "failed") {
+          finish(new Error("OpenAI failed to complete the opening greeting."));
+          return;
+        }
+
+        finish();
+      }
+    });
     socket.once("error", (error) => finish(error));
+    socket.once("close", () => {
+      if (!settled) {
+        finish(new Error("OpenAI closed the greeting connection too early."));
+      }
+    });
   });
 }
 

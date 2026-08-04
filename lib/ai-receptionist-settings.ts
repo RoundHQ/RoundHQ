@@ -31,6 +31,8 @@ const AI_RECEPTIONIST_LEGACY_PUBLIC_SETTINGS_COLUMNS = [
 const AI_RECEPTIONIST_PUBLIC_SETTINGS_COLUMNS = [
   ...AI_RECEPTIONIST_LEGACY_PUBLIC_SETTINGS_COLUMNS,
   "voice_accent",
+  "custom_conversation_enabled",
+  "conversation_instructions",
 ] as const;
 
 const AI_RECEPTIONIST_MANAGED_NUMBER_COLUMNS = [
@@ -137,6 +139,8 @@ export type AiReceptionistSettings = {
   twilioAuthTokenConfigured: boolean;
   realtimeEnabled: boolean;
   voiceAccent: AiReceptionistVoiceAccent;
+  customConversationEnabled: boolean;
+  conversationInstructions: string;
   transferToNumber: string;
   newLeadSmsEnabled: boolean;
   newLeadSmsPhoneNumber: string;
@@ -184,6 +188,8 @@ export type AiReceptionistSettingsRow = {
   realtime_enabled?: boolean | null;
   transfer_to_number?: string | null;
   voice_accent?: string | null;
+  custom_conversation_enabled?: boolean | null;
+  conversation_instructions?: string | null;
   new_lead_sms_enabled?: boolean | null;
   new_lead_sms_phone_number?: string | null;
   business_hours_enabled: boolean | null;
@@ -365,6 +371,8 @@ export function getDefaultAiReceptionistSettings(
     twilioAuthTokenConfigured: false,
     realtimeEnabled: false,
     voiceAccent: "scottish",
+    customConversationEnabled: false,
+    conversationInstructions: "",
     transferToNumber: "",
     newLeadSmsEnabled: false,
     newLeadSmsPhoneNumber: "",
@@ -428,6 +436,8 @@ export function normalizeAiReceptionistSettings(
     twilioAuthTokenConfigured: Boolean(value?.twilioAuthTokenConfigured),
     realtimeEnabled: Boolean(value?.realtimeEnabled),
     voiceAccent: normalizeAiReceptionistVoiceAccent(value?.voiceAccent),
+    customConversationEnabled: Boolean(value?.customConversationEnabled),
+    conversationInstructions: getText(value?.conversationInstructions),
     transferToNumber: getText(value?.transferToNumber),
     newLeadSmsEnabled: Boolean(value?.newLeadSmsEnabled),
     newLeadSmsPhoneNumber: getText(value?.newLeadSmsPhoneNumber),
@@ -479,6 +489,8 @@ export function mapAiReceptionistSettingsRow(
     twilioAuthTokenConfigured: Boolean(row.twilio_auth_token?.trim()),
     realtimeEnabled: Boolean(row.realtime_enabled),
     voiceAccent: normalizeAiReceptionistVoiceAccent(row.voice_accent),
+    customConversationEnabled: Boolean(row.custom_conversation_enabled),
+    conversationInstructions: row.conversation_instructions ?? "",
     transferToNumber: row.transfer_to_number ?? "",
     newLeadSmsEnabled: Boolean(row.new_lead_sms_enabled),
     newLeadSmsPhoneNumber: row.new_lead_sms_phone_number ?? "",
@@ -525,6 +537,8 @@ export function mapAiReceptionistSettingsToRow(
     twilio_phone_number: settings.twilioPhoneNumber,
     realtime_enabled: settings.realtimeEnabled,
     voice_accent: settings.voiceAccent,
+    custom_conversation_enabled: settings.customConversationEnabled,
+    conversation_instructions: settings.conversationInstructions,
     transfer_to_number: settings.transferToNumber,
     new_lead_sms_enabled: settings.newLeadSmsEnabled,
     new_lead_sms_phone_number: settings.newLeadSmsPhoneNumber,
@@ -630,11 +644,28 @@ export function validateAiReceptionistSettings(
     errors.push("Consent message must be 1,000 characters or fewer.");
   }
 
+  if (settings.conversationInstructions.length > 8000) {
+    errors.push("Conversation instructions must be 8,000 characters or fewer.");
+  }
+
+  if (
+    settings.customConversationEnabled &&
+    !settings.conversationInstructions
+  ) {
+    errors.push(
+      "Add conversation instructions before enabling the fully custom live conversation."
+    );
+  }
+
   if (settings.enabled && !settings.businessName) {
     errors.push("Business name is required when AI Receptionist is enabled.");
   }
 
-  if (settings.enabled && settings.questionsToAsk.length === 0) {
+  if (
+    settings.enabled &&
+    (!settings.realtimeEnabled || !settings.customConversationEnabled) &&
+    settings.questionsToAsk.length === 0
+  ) {
     errors.push("Add at least one question before enabling AI Receptionist.");
   }
 

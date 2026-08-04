@@ -178,6 +178,12 @@ export default function AiReceptionistSettingsForm({
   const [voiceAccent, setVoiceAccent] = useState<AiReceptionistVoiceAccent>(
     initialSettings.voiceAccent
   );
+  const [customConversationEnabled, setCustomConversationEnabled] = useState(
+    initialSettings.customConversationEnabled
+  );
+  const [conversationInstructions, setConversationInstructions] = useState(
+    initialSettings.conversationInstructions
+  );
   const [businessName, setBusinessName] = useState(initialSettings.businessName);
   const [notificationEmail, setNotificationEmail] = useState(
     initialSettings.notificationEmail
@@ -467,8 +473,9 @@ export default function AiReceptionistSettingsForm({
               <option value="neutral">Voice default</option>
             </select>
             <span className="mt-2 block text-xs font-semibold leading-5 text-slate-500">
-              Scottish uses a natural, clear Scottish speaking style rather than
-              an exaggerated regional character.
+              Scottish is a best-effort speaking style applied to OpenAI&apos;s
+              voice. Exact regional pronunciation still depends on the voice
+              service.
             </span>
           </label>
         ) : (
@@ -491,6 +498,100 @@ export default function AiReceptionistSettingsForm({
         ) : null}
       </Section>
 
+      <Section title="Live AI Conversation">
+        <p className="text-sm font-semibold leading-6 text-slate-500">
+          Choose whether Live AI uses the guided greeting and question list, or
+          follows one fully editable set of conversation instructions.
+        </p>
+
+        <fieldset className="mt-4">
+          <legend className="sr-only">Live AI conversation control</legend>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label
+              className={`cursor-pointer rounded-md border p-4 transition ${
+                !customConversationEnabled
+                  ? "border-[#19c653] bg-emerald-50 ring-2 ring-[#19c653]/15"
+                  : "border-slate-200 bg-white hover:border-slate-300"
+              }`}
+            >
+              <span className="flex items-start gap-3">
+                <input
+                  type="radio"
+                  name="custom_conversation_enabled"
+                  value="false"
+                  checked={!customConversationEnabled}
+                  onChange={() => setCustomConversationEnabled(false)}
+                  className="mt-1 size-4 accent-[#19c653]"
+                />
+                <span>
+                  <span className="block text-sm font-black text-slate-950">
+                    Guided greeting and questions
+                  </span>
+                  <span className="mt-1 block text-sm font-semibold leading-5 text-slate-500">
+                    Uses the greeting, consent message, and question list below.
+                  </span>
+                </span>
+              </span>
+            </label>
+            <label
+              className={`cursor-pointer rounded-md border p-4 transition ${
+                customConversationEnabled
+                  ? "border-[#19c653] bg-emerald-50 ring-2 ring-[#19c653]/15"
+                  : "border-slate-200 bg-white hover:border-slate-300"
+              }`}
+            >
+              <span className="flex items-start gap-3">
+                <input
+                  type="radio"
+                  name="custom_conversation_enabled"
+                  value="true"
+                  checked={customConversationEnabled}
+                  onChange={() => setCustomConversationEnabled(true)}
+                  className="mt-1 size-4 accent-[#19c653]"
+                />
+                <span>
+                  <span className="block text-sm font-black text-slate-950">
+                    Fully custom conversation
+                  </span>
+                  <span className="mt-1 block text-sm font-semibold leading-5 text-slate-500">
+                    Replaces the predefined live greeting and question flow.
+                  </span>
+                </span>
+              </span>
+            </label>
+          </div>
+        </fieldset>
+
+        {customConversationEnabled ? (
+          <div className="mt-5">
+            <TextAreaField
+              label="Conversation instructions"
+              name="conversation_instructions"
+              value={conversationInstructions}
+              onChange={setConversationInstructions}
+              maxLength={8000}
+              rows={14}
+            />
+            <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">
+              Write the opening, exact phrases, questions, likely replies, and
+              closing. Put wording the AI must say exactly in quotation marks.
+              You can use {"{{business_name}}"} for the saved business name.
+            </p>
+          </div>
+        ) : (
+          <input
+            type="hidden"
+            name="conversation_instructions"
+            value={conversationInstructions}
+          />
+        )}
+
+        <div className="mt-4 flex gap-3 rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold leading-6 text-sky-900">
+          <AlertTriangle className="mt-1 size-4 shrink-0" />
+          RoundHQ still requires the AI to identify itself, say the editable
+          recording consent message once, and follow emergency safety rules.
+        </div>
+      </Section>
       <Section title="Business Details">
         <div className="grid gap-5 md:grid-cols-3">
           <TextField
@@ -527,6 +628,10 @@ export default function AiReceptionistSettingsForm({
       </Section>
 
       <Section title="Greeting & Consent">
+        <p className="mb-4 text-sm font-semibold leading-6 text-slate-500">
+          Voicemail mode uses the greeting. Live AI always says the editable
+          recording consent; a fully custom conversation replaces its greeting.
+        </p>
         <div className="grid gap-5 lg:grid-cols-2">
           <TextAreaField
             label="Greeting message"
@@ -547,6 +652,7 @@ export default function AiReceptionistSettingsForm({
         </div>
       </Section>
 
+      {!customConversationEnabled ? (
       <Section title="Questions">
         <p className="mb-4 text-sm font-semibold text-slate-500">
           Live AI asks these questions naturally when the caller has not already
@@ -617,6 +723,7 @@ export default function AiReceptionistSettingsForm({
           </button>
         </div>
       </Section>
+      ) : null}
 
       <Section title="Business Hours">
         <p className="mb-4 text-sm font-semibold text-slate-500">

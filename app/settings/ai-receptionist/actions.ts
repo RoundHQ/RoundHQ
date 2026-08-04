@@ -59,6 +59,13 @@ function buildAiReceptionistSettingsFromFormData(
     voiceAccent: normalizeAiReceptionistVoiceAccent(
       getText(formData, "voice_accent")
     ),
+    customConversationEnabled: ["true", "on"].includes(
+      getText(formData, "custom_conversation_enabled")
+    ),
+    conversationInstructions: getText(
+      formData,
+      "conversation_instructions"
+    ),
     transferToNumber: getText(formData, "transfer_to_number"),
     newLeadSmsEnabled: formData.get("new_lead_sms_enabled") === "on",
     newLeadSmsPhoneNumber: getText(formData, "new_lead_sms_phone_number"),

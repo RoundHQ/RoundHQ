@@ -5,7 +5,7 @@ import type {
 import { buildAiReceptionistRealtimeSystemPrompt } from "@/lib/ai-receptionist/realtime/session";
 
 const DEFAULT_OPENAI_REALTIME_MODEL = "gpt-realtime-2.1";
-const DEFAULT_OPENAI_REALTIME_VOICE = "marin";
+const DEFAULT_OPENAI_REALTIME_VOICE = "cedar";
 const ROUNDHQ_CALL_HEADER = "x-roundhq-call-id";
 const USER_TO_USER_HEADER = "user-to-user";
 
@@ -202,7 +202,7 @@ export function buildOpenAiRealtimeCallAcceptPayload(
     model: config.model,
     instructions: buildAiReceptionistRealtimeSystemPrompt(settings),
     output_modalities: ["audio"] as Array<"audio">,
-    max_output_tokens: 256,
+    max_output_tokens: 1024,
     audio: {
       input: {
         turn_detection: {
@@ -217,7 +217,7 @@ export function buildOpenAiRealtimeCallAcceptPayload(
       },
       output: {
         voice: config.voice,
-        speed: 1,
+        speed: settings.voiceAccent === "scottish" ? 0.95 : 1,
       },
     },
   };
@@ -228,7 +228,7 @@ export function buildOpenAiRealtimeInitialGreetingEvent() {
     type: "response.create" as const,
     response: {
       instructions:
-        "Begin the phone call now. Deliver the configured opening line and recording consent naturally, then ask the first unanswered question. Keep this first turn brief.",
+        "Begin the phone call now. Follow the selected conversation flow from its first step. Include the required AI identity and recording consent in this first turn, keep it brief, then wait when the flow expects the caller to reply.",
     },
   };
 }

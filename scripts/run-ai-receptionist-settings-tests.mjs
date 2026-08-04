@@ -78,6 +78,8 @@ assert.deepEqual(
 assert.equal(defaultSettings.businessHours.monday.start, "08:00");
 assert.equal(defaultSettings.businessHours.saturday.enabled, false);
 assert.equal(defaultSettings.voiceAccent, "scottish");
+assert.equal(defaultSettings.customConversationEnabled, false);
+assert.equal(defaultSettings.conversationInstructions, "");
 assert.equal(defaultSettings.leadSourceLabel, "AI Receptionist");
 assert.equal(defaultSettings.telephonyProvider, "telnyx");
 assert.equal(defaultSettings.realtimeEnabled, false);
@@ -159,6 +161,9 @@ const updatedSettings = normalizeAiReceptionistSettings({
   telnyxMessagingProfileId: "messaging-profile-1",
   greetingMessage: "Thanks for calling RoundHQ Test Co.",
   voiceAccent: "british",
+  customConversationEnabled: true,
+  conversationInstructions:
+    'Start with "Hello from {{business_name}}." Then ask what work is required.',
   realtimeEnabled: true,
   consentMessage: "This call may be recorded.",
   businessHoursEnabled: true,
@@ -190,6 +195,8 @@ assert.equal(writeRow.telnyx_connection_id, "telnyx-app-1");
 assert.equal(writeRow.telnyx_messaging_profile_id, "messaging-profile-1");
 assert.equal(writeRow.telnyx_public_key, "public-key");
 assert.equal(writeRow.voice_accent, "british");
+assert.equal(writeRow.custom_conversation_enabled, true);
+assert.match(writeRow.conversation_instructions, /Hello from/);
 assert.equal(writeRow.realtime_enabled, true);
 assert.equal(writeRow.lead_source_label, "AI Receptionist");
 assert.deepEqual(writeRow.questions_to_ask, ["Name?", "Service required?"]);
@@ -337,6 +344,7 @@ assert.equal(
 const enabledSettings = normalizeAiReceptionistSettings({
   ...updatedSettings,
   enabled: true,
+  customConversationEnabled: false,
 });
 const renderedFormHtml = renderToStaticMarkup(
   React.createElement(AiReceptionistSettingsForm, {
@@ -361,9 +369,27 @@ assert.match(renderedFormHtml, /Voicemail to lead/);
 assert.match(renderedFormHtml, /Live AI conversation/);
 assert.match(renderedFormHtml, /Voice accent/);
 assert.match(renderedFormHtml, /Scottish/);
+assert.match(renderedFormHtml, /Fully custom conversation/);
 assert.match(
   renderedFormHtml,
   /Live AI is enabled on \+44 121 555 1001/
+);
+
+const renderedCustomConversationFormHtml = renderToStaticMarkup(
+  React.createElement(AiReceptionistSettingsForm, {
+    initialSettings: normalizeAiReceptionistSettings({
+      ...enabledSettings,
+      customConversationEnabled: true,
+      conversationInstructions:
+        'Start by saying "Hello from {{business_name}}." Then ask what help is needed.',
+    }),
+    workspaceName: "RoundHQ Test Co",
+  })
+);
+assert.match(renderedCustomConversationFormHtml, /Conversation instructions/);
+assert.doesNotMatch(
+  renderedCustomConversationFormHtml,
+  /<h2[^>]*>Questions<\/h2>/
 );
 
 const unconfiguredFormHtml = renderToStaticMarkup(
