@@ -317,6 +317,31 @@ assert.equal(leadState.phone, "07712 345678");
 assert.equal(leadState.service_required, "Hedge trimming");
 assert.match(leadState.address, /12 High Street/i);
 
+let callerOnlyState = createEmptyAiReceptionistLeadState();
+callerOnlyState = updateAiReceptionistLeadStateFromTranscript(callerOnlyState, {
+  speaker: "caller",
+  text:
+    "I'm an AI virtual receptionist. Garden maintenance. My address is 18 Calderwood Road, East Kilbride, G74 3AB.",
+});
+assert.equal(
+  callerOnlyState.name,
+  "",
+  "assistant self-description must never become the caller name"
+);
+assert.equal(
+  callerOnlyState.address,
+  "18 Calderwood Road, East Kilbride, G74 3AB"
+);
+callerOnlyState = updateAiReceptionistLeadStateFromTranscript(callerOnlyState, {
+  speaker: "caller",
+  text: "I actually need pressure washing on the driveway.",
+});
+assert.equal(
+  callerOnlyState.service_required,
+  "Pressure washing",
+  "a specific service should replace an earlier generic classification"
+);
+
 const transcript = formatAiReceptionistRealtimeTranscript([
   { speaker: "ai", text: "Hello, thanks for calling.", atSeconds: 1 },
   { speaker: "caller", text: "Hi, I need my hedge cut.", atSeconds: 4 },

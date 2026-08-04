@@ -291,21 +291,40 @@ function extractLabelledValue(text: string, labels: string[]) {
   return "";
 }
 
+function cleanInferredName(value: string) {
+  const candidate = value
+    .split(
+      /\b(?:and\s+i|calling|looking|want|need|after|about|from|at)\b|[,.;!?]/i
+    )[0]
+    ?.replace(/\s+/g, " ")
+    .trim();
+
+  if (
+    !candidate ||
+    candidate.length < 2 ||
+    candidate.split(/\s+/).length > 4 ||
+    /\b(?:ai|virtual|receptionist|assistant|enquiry|quote|pressure|washing|garden|maintenance)\b/i.test(
+      candidate
+    )
+  ) {
+    return "";
+  }
+
+  return candidate;
+}
+
 function inferName(text: string) {
   const labelled = extractLabelledValue(text, [
     "name",
     "customer name",
     "caller name",
   ]);
+  const conversational =
+    text.match(
+      /\b(?:my name is|i am|i'm|this is|it's)\s+([a-z][a-z' -]{1,60})/i
+    )?.[1] ?? "";
 
-  if (labelled) {
-    return labelled;
-  }
-
-  return (
-    text.match(/\b(?:my name is|i am|i'm|this is|it's)\s+([a-z][a-z' -]{1,50})/i)?.[1]?.trim() ??
-    ""
-  );
+  return cleanInferredName(labelled || conversational);
 }
 
 function inferPhone(text: string) {
@@ -325,16 +344,16 @@ function inferAddress(text: string) {
     "property address",
     "site address",
   ]);
-
-  if (labelled) {
-    return labelled;
-  }
-
-  return (
+  const conversational =
     text.match(
-      /\b\d{1,5}\s+[a-z0-9' -]+\s+(?:street|st|road|rd|avenue|ave|drive|dr|lane|ln|close|court|place|gardens|crescent|terrace|way|view|park)\b[^.\n]*/i
-    )?.[0]?.trim() ?? ""
-  );
+      /\b(?:(?:my|the|property|site)\s+)?address\s+(?:is|would be)\s+([^.\n]+)/i
+    )?.[1]?.trim() ?? "";
+  const street =
+    text.match(
+      /\b\d{1,5}[a-z]?\s+[a-z0-9' -]+\s+(?:street|st|road|rd|avenue|ave|drive|dr|lane|ln|close|court|place|gardens|crescent|terrace|way|view|park|row|walk|grove|hill|mount|square)\b[^.\n]*/i
+    )?.[0]?.trim() ?? "";
+
+  return labelled || conversational || street;
 }
 
 function inferService(text: string) {
@@ -350,6 +369,20 @@ function inferService(text: string) {
   }
 
   return SERVICE_KEYWORDS.find(([pattern]) => pattern.test(text))?.[1] ?? "";
+}
+
+const GENERIC_SERVICE_LABELS = new Set([
+  "Garden maintenance",
+  "Cleaning",
+  "Quote request",
+]);
+
+function shouldReplaceService(currentService: string, inferredService: string) {
+  return (
+    !currentService ||
+    (GENERIC_SERVICE_LABELS.has(currentService) &&
+      !GENERIC_SERVICE_LABELS.has(inferredService))
+  );
 }
 
 export function updateAiReceptionistLeadStateFromTranscript(
@@ -391,7 +424,10 @@ export function updateAiReceptionistLeadStateFromTranscript(
     nextState.address = inferredAddress;
   }
 
-  if (!nextState.service_required && inferredService) {
+  if (
+    inferredService &&
+    shouldReplaceService(nextState.service_required, inferredService)
+  ) {
     nextState.service_required = inferredService;
   }
 

@@ -498,18 +498,11 @@ const liveIncomingResponse = await handleTelnyxWebhook(
 );
 assert.equal(liveIncomingResponse.status, 200);
 assert.equal(liveIncomingResponse.body.mode, "realtime");
-assert.equal(liveApiCalls.length, 3);
+assert.equal(liveApiCalls.length, 2);
 assert.match(liveApiCalls[0].url, /\/answer$/);
-assert.match(liveApiCalls[1].url, /\/record_start$/);
-assert.match(liveApiCalls[2].url, /\/transfer$/);
+assert.match(liveApiCalls[1].url, /\/transfer$/);
 
-const liveRecordBody = JSON.parse(liveApiCalls[1].options.body);
-assert.equal(liveRecordBody.recording_track, "both");
-assert.equal(liveRecordBody.channels, "dual");
-assert.equal(liveRecordBody.play_beep, false);
-assert.equal(liveRecordBody.transcription, true);
-
-const liveTransferBody = JSON.parse(liveApiCalls[2].options.body);
+const liveTransferBody = JSON.parse(liveApiCalls[1].options.body);
 assert.equal(
   liveTransferBody.to,
   "sip:proj_roundhq_test@sip.api.openai.com;transport=tls"
@@ -604,6 +597,46 @@ const liveTargetResponse = await handleTelnyxWebhook(
 assert.equal(liveTargetResponse.status, 200);
 assert.equal(liveTables.ai_receptionist_call_logs.length, 1);
 assert.equal(liveTables.ai_receptionist_call_logs[0].call_sid, "call-live-a");
+const liveTargetBridgedBody = buildTelnyxBody(
+  "call.bridged",
+  "event-live-target-bridged",
+  {
+    call_control_id: "call-live-target",
+    call_session_id: "session-live-target",
+    client_state: liveTransferBody.target_leg_client_state,
+    state: "bridged",
+  }
+);
+const liveRecordingApiCalls = [];
+const liveTargetBridgedResponse = await handleTelnyxWebhook(
+  context({
+    tables: liveTables,
+    rawBody: liveTargetBridgedBody,
+    fetchImpl: async (url, options) => {
+      liveRecordingApiCalls.push({ url: String(url), options });
+      return okJsonResponse();
+    },
+  })
+);
+assert.equal(liveTargetBridgedResponse.status, 200);
+assert.equal(liveRecordingApiCalls.length, 1);
+assert.match(
+  liveRecordingApiCalls[0].url,
+  /call-live-target\/actions\/record_start$/
+);
+const liveRecordingBody = JSON.parse(
+  liveRecordingApiCalls[0].options.body
+);
+assert.equal(liveRecordingBody.recording_track, "both");
+assert.equal(liveRecordingBody.channels, "dual");
+assert.equal(liveRecordingBody.play_beep, false);
+assert.equal(liveRecordingBody.timeout_secs, 0);
+assert.equal(liveRecordingBody.transcription, true);
+const liveRecordingState = JSON.parse(
+  Buffer.from(liveRecordingBody.client_state, "base64").toString("utf8")
+);
+assert.equal(liveRecordingState.parent_call_control_id, "call-live-a");
+
 
 const acceptFailureTables = structuredClone(liveTables);
 acceptFailureTables.ai_receptionist_call_logs[0].session_id = null;
@@ -637,6 +670,74 @@ assert.match(
 );
 
 
+const liveRecordingSavedBody = buildTelnyxBody(
+  "call.recording.saved",
+  "event-live-recording-saved",
+  {
+    call_control_id: "call-live-target",
+    call_session_id: "session-live-target",
+    recording_id: "recording-live-full",
+    recording_urls: {
+      mp3: "https://api.telnyx.com/recordings/recording-live-full.mp3",
+    },
+    duration_millis: 142000,
+    client_state: liveTransferBody.target_leg_client_state,
+  }
+);
+const liveRecordingSavedResponse = await handleTelnyxWebhook(
+  context({
+    tables: liveTables,
+    rawBody: liveRecordingSavedBody,
+  })
+);
+assert.equal(liveRecordingSavedResponse.status, 200);
+assert.equal(liveRecordingSavedResponse.body.pending, true);
+assert.equal(liveTables.customer_leads.length, 0);
+
+const liveTranscriptBody = buildTelnyxBody(
+  "call.recording.transcription.saved",
+  "event-live-transcript-saved",
+  {
+    call_control_id: "call-live-target",
+    call_session_id: "session-live-target",
+    recording_id: "recording-live-full",
+    status: "completed",
+    transcription_text:
+      "Channel 0: Hello. Thanks for calling RoundHQ Test Co A garden maintenance. I'm an AI virtual receptionist. " +
+      "Channel 1: My name is William Williamson. My address is 18 Calderwood Road, East Kilbride, G74 3AB. I need pressure washing on the driveway.",
+    client_state: liveTransferBody.target_leg_client_state,
+  }
+);
+const liveTranscriptResponse = await handleTelnyxWebhook(
+  context({
+    tables: liveTables,
+    rawBody: liveTranscriptBody,
+  })
+);
+assert.equal(liveTranscriptResponse.status, 200);
+assert.equal(liveTables.customer_leads.length, 1);
+const liveLead = liveTables.customer_leads[0];
+assert.equal(liveLead.name, "William Williamson");
+assert.equal(liveLead.address, "18 Calderwood Road, East Kilbride, G74 3AB");
+assert.equal(liveLead.service, "Pressure washing");
+assert.match(liveLead.message, /pressure washing on the driveway/i);
+assert.doesNotMatch(liveLead.message, /AI virtual receptionist/i);
+const liveMetadata = getAiReceptionistCallMetadata(
+  liveLead.activity_history[0]
+);
+assert.match(liveMetadata.transcript, /AI:/);
+assert.match(liveMetadata.transcript, /Caller:/);
+assert.equal(liveMetadata.transcript_entries[0].speaker, "ai");
+assert.equal(liveMetadata.transcript_entries[1].speaker, "caller");
+assert.equal(
+  liveTables.ai_receptionist_call_logs[0].duration_seconds,
+  142
+);
+assert.equal(
+  liveTables.ai_receptionist_call_logs[0].recording_url,
+  "https://api.telnyx.com/recordings/recording-live-full.mp3"
+);
+
 const liveFallbackTables = createTables();
 liveFallbackTables.ai_receptionist_settings[0].realtime_enabled = true;
 const liveFallbackSetupCalls = [];
@@ -662,7 +763,7 @@ await handleTelnyxWebhook(
   })
 );
 const fallbackTransferBody = JSON.parse(
-  liveFallbackSetupCalls[2].options.body
+  liveFallbackSetupCalls[1].options.body
 );
 const failedTargetBody = buildTelnyxBody(
   "call.hangup",

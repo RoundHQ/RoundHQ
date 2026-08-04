@@ -22,6 +22,12 @@ import {
   getOpenAiRealtimeSipConfig,
   getOpenAiRealtimeSipReadiness,
 } from "@/lib/ai-receptionist/realtime/openai-sip";
+import {
+  createEmptyAiReceptionistLeadState,
+  formatAiReceptionistRealtimeTranscript,
+  reduceTranscriptToLeadState,
+  type AiReceptionistRealtimeTranscriptEntry,
+} from "@/lib/ai-receptionist/realtime/session";
 import type {
   IncomingCallResult,
   RecordingCompleteResult,
@@ -67,17 +73,6 @@ type TelnyxRecording = TelnyxCall & {
 const TELNYX_API_BASE_URL = "https://api.telnyx.com/v2";
 const TELNYX_SIGNATURE_TOLERANCE_SECONDS = 5 * 60;
 const ED25519_SPKI_DER_PREFIX = "302a300506032b6570032100";
-const SERVICE_KEYWORDS: Array<[RegExp, string]> = [
-  [/\bhedge\b|\btrim(?:ming)?\b/i, "Hedge trimming"],
-  [/\bgrass\b|\blawn\b|\bmow(?:ing)?\b|\bcut(?:ting)?\b/i, "Garden maintenance"],
-  [/\bgutter\b/i, "Gutter cleaning"],
-  [/\bpressure\b|\bjet\s*wash/i, "Pressure washing"],
-  [/\bpvc\b|\bupvc\b|\bfascia\b|\bsoffit\b/i, "PVC cleaning"],
-  [/\bturf\b/i, "Turf laying"],
-  [/\bovergrown\b/i, "Overgrown garden"],
-  [/\bgarden\b|\bmaintenance\b/i, "Garden maintenance"],
-  [/\bquote\b|\bestimate\b/i, "Quote request"],
-];
 
 function getText(value: unknown) {
   if (typeof value === "string") {
@@ -584,25 +579,6 @@ async function startTelnyxRealtimeConversation(options: {
   });
   await telnyxApiRequest({
     apiKey: options.settings.telnyxApiKey,
-    path: `/calls/${callControlId}/actions/record_start`,
-    body: {
-      format: "mp3",
-      channels: "dual",
-      recording_track: "both",
-      play_beep: false,
-      max_length: 600,
-      timeout_secs: 12,
-      trim: "trim-silence",
-      transcription: true,
-      transcription_engine: "B",
-      transcription_language: "en-GB",
-      client_state: clientState,
-      command_id: buildTelnyxCommandId(options.call.callControlId, "record"),
-    },
-    fetchImpl: options.fetchImpl,
-  });
-  await telnyxApiRequest({
-    apiKey: options.settings.telnyxApiKey,
     path: `/calls/${callControlId}/actions/transfer`,
     body: {
       to: buildOpenAiRealtimeSipUri(config.projectId),
@@ -630,74 +606,138 @@ async function startTelnyxRealtimeConversation(options: {
   });
 }
 
-function extractLabelledValue(text: string, labels: string[]) {
-  for (const label of labels) {
-    const pattern = new RegExp(`\\b${label}\\s*[:\\-]\\s*([^\\n.]+)`, "i");
-    const match = text.match(pattern);
+async function startTelnyxRealtimeRecording(options: {
+  settings: AiReceptionistPrivateSettings;
+  call: TelnyxCall;
+  fetchImpl?: typeof fetch;
+}) {
+  const callControlId = encodeURIComponent(options.call.callControlId);
 
-    if (match?.[1]?.trim()) {
-      return match[1].trim();
-    }
+  await telnyxApiRequest({
+    apiKey: options.settings.telnyxApiKey,
+    path: `/calls/${callControlId}/actions/record_start`,
+    body: {
+      format: "mp3",
+      channels: "dual",
+      recording_track: "both",
+      play_beep: false,
+      max_length: 600,
+      timeout_secs: 0,
+      trim: "trim-silence",
+      transcription: true,
+      transcription_engine: "B",
+      transcription_language: "en-GB",
+      client_state: buildTelnyxClientState(options.call),
+      command_id: buildTelnyxCommandId(
+        options.call.callControlId,
+        "realtime-record"
+      ),
+    },
+    fetchImpl: options.fetchImpl,
+  });
+}
+
+
+function parseTelnyxDualChannelTranscript(
+  transcript: string,
+  callType: "voicemail" | "realtime"
+) {
+  const markers = Array.from(
+    transcript.matchAll(/\bchannel\s+(\d+)\s*:\s*/gi)
+  );
+
+  if (markers.length === 0) {
+    return [] as AiReceptionistRealtimeTranscriptEntry[];
   }
 
-  return "";
+  return markers
+    .map((marker, index): AiReceptionistRealtimeTranscriptEntry | null => {
+      const channel = Number(marker[1]);
+      const start = (marker.index ?? 0) + marker[0].length;
+      const end = markers[index + 1]?.index ?? transcript.length;
+      const text = transcript.slice(start, end).trim();
+
+      if (!text) {
+        return null;
+      }
+
+      return {
+        speaker:
+          callType === "voicemail" || channel !== 0 ? "caller" : "ai",
+        text,
+        atSeconds: 0,
+      };
+    })
+    .filter(
+      (entry): entry is AiReceptionistRealtimeTranscriptEntry => Boolean(entry)
+    );
 }
 
-function inferName(transcript: string) {
-  return (
-    extractLabelledValue(transcript, ["name", "my name", "customer name"]) ||
-    transcript.match(/\b(?:my name is|i am|i'm|this is)\s+([a-z][a-z' -]{1,50})/i)?.[1]?.trim() ||
-    ""
+function prepareTelnyxTranscript(
+  transcript: string,
+  callType: "voicemail" | "realtime"
+) {
+  const rawTranscript = transcript.trim();
+  const channelEntries = parseTelnyxDualChannelTranscript(
+    rawTranscript,
+    callType
   );
+  const transcriptEntries =
+    channelEntries.length > 0
+      ? channelEntries
+      : rawTranscript
+        ? [
+            {
+              speaker: callType === "voicemail" ? "caller" : "system",
+              text: rawTranscript,
+              atSeconds: 0,
+            } satisfies AiReceptionistRealtimeTranscriptEntry,
+          ]
+        : [];
+  return {
+    transcriptEntries,
+    formattedTranscript:
+      channelEntries.length > 0
+        ? formatAiReceptionistRealtimeTranscript(transcriptEntries)
+        : rawTranscript,
+  };
 }
 
-function inferAddress(transcript: string) {
-  return (
-    extractLabelledValue(transcript, [
-      "address",
-      "property address",
-      "site address",
-    ]) ||
-    transcript.match(
-      /\b\d{1,5}\s+[a-z0-9' -]+\s+(?:street|st|road|rd|avenue|ave|drive|dr|lane|ln|close|court|place|gardens|crescent|terrace|way|view|park)\b[^.\n]*/i
-    )?.[0]?.trim() ||
-    ""
+function buildTelnyxLeadPayload(
+  recording: TelnyxRecording,
+  callType: "voicemail" | "realtime"
+) {
+  const preparedTranscript = prepareTelnyxTranscript(
+    recording.transcript,
+    callType
   );
-}
-
-function inferServiceRequired(transcript: string) {
-  return SERVICE_KEYWORDS.find(([pattern]) => pattern.test(transcript))?.[1] ?? "";
-}
-
-function buildAiSummary(recording: TelnyxRecording) {
-  if (!recording.transcript.trim()) {
-    return recording.transcriptionStatus === "failed"
-      ? "Voicemail received. Transcription failed or is not available yet."
-      : "Voicemail received. Transcript is not available yet.";
-  }
-
-  return recording.transcript.length > 240
-    ? `${recording.transcript.slice(0, 237).trim()}...`
-    : recording.transcript.trim();
-}
-
-function buildTelnyxVoicemailLeadPayload(recording: TelnyxRecording) {
-  const transcript = recording.transcript.trim();
+  const state = reduceTranscriptToLeadState(
+    preparedTranscript.transcriptEntries,
+    createEmptyAiReceptionistLeadState()
+  );
+  const transcript = preparedTranscript.formattedTranscript;
   const transcriptionFailed =
     !transcript && recording.transcriptionStatus.toLowerCase() === "failed";
+  const callLabel =
+    callType === "realtime" ? "AI Receptionist call" : "Voicemail recording";
   const fallbackDescription = transcriptionFailed
-    ? "Voicemail recording received. Transcription failed or is not available yet."
-    : "Voicemail recording received. Transcript is not available yet.";
+    ? `${callLabel} received. Transcription failed or is not available yet.`
+    : `${callLabel} received. Caller transcript is not available yet.`;
+  const description = state.job_description || fallbackDescription;
 
   return {
-    customer_name: inferName(transcript),
+    customer_name: state.name,
     phone: recording.callerNumber,
     caller_phone: recording.callerNumber,
-    address: inferAddress(transcript),
-    service_required: inferServiceRequired(transcript),
-    job_description: transcript || fallbackDescription,
-    ai_summary: buildAiSummary(recording),
+    address: state.address,
+    service_required: state.service_required,
+    job_description: description,
+    ai_summary:
+      description.length > 240
+        ? `${description.slice(0, 237).trim()}...`
+        : description,
     transcript,
+    transcript_entries: preparedTranscript.transcriptEntries,
     recording_id: recording.callControlId,
     call_duration_seconds: recording.durationSeconds ?? undefined,
     source: "AI Receptionist",
@@ -1013,6 +1053,12 @@ export async function handleTelnyxRecordingComplete(
       webhookRecording.transcript || existingCallLog?.transcript || "",
   };
   const existingLeadId = existingCallLog?.lead_id ?? null;
+  const callType =
+    existingCallLog?.call_type === "realtime" ? "realtime" : "voicemail";
+  const preparedTranscript = prepareTelnyxTranscript(
+    recording.transcript,
+    callType
+  );
   const isTranscriptionEvent =
     recording.eventType === "call.recording.transcription.saved";
   const transcriptionFailed =
@@ -1039,13 +1085,11 @@ export async function handleTelnyxRecordingComplete(
       accountSid: validated.settings.telnyxConnectionId,
       callerNumber: recording.callerNumber || undefined,
       twilioPhoneNumber: recording.calledNumber || undefined,
-      callType:
-        existingCallLog?.call_type === "realtime"
-          ? "realtime"
-          : "voicemail",
+      callType,
       recordingUrl: recording.recordingUrl || undefined,
       durationSeconds: recording.durationSeconds ?? undefined,
-      transcript: recording.transcript || undefined,
+      transcript: preparedTranscript.formattedTranscript || undefined,
+      transcriptEntries: preparedTranscript.transcriptEntries,
       leadId: existingLeadId || undefined,
       callStatus: recording.eventType || "recording-complete",
       outcome,
@@ -1073,7 +1117,7 @@ export async function handleTelnyxRecordingComplete(
     recording.transcriptionStatus = "failed";
   }
 
-  const leadPayload = buildTelnyxVoicemailLeadPayload(recording);
+  const leadPayload = buildTelnyxLeadPayload(recording, callType);
   const leadResult = await createAiReceptionistLeadFromPayload({
     supabase: context.supabase,
     organizationId: validated.settings.organizationId,
@@ -1169,6 +1213,13 @@ export async function handleTelnyxCallStatus(
       !existingCallLog.session_id &&
       validated.settings.enabled
   );
+  const shouldStartRealtimeRecording = Boolean(
+    call.parentCallControlId &&
+      validated.event.eventType === "call.bridged" &&
+      existingCallLog?.call_type === "realtime" &&
+      validated.settings.enabled
+  );
+
 
   await upsertAiReceptionistCallLog(
     context.supabase,
@@ -1195,6 +1246,35 @@ export async function handleTelnyxCallStatus(
       rawPayload: call.rawPayload,
     }
   );
+
+  if (shouldStartRealtimeRecording) {
+    try {
+      await startTelnyxRealtimeRecording({
+        settings: validated.settings,
+        call,
+        fetchImpl: context.fetchImpl,
+      });
+    } catch (error) {
+      await updateAiReceptionistCallLog(
+        context.supabase,
+        validated.settings.organizationId,
+        callLogId,
+        {
+          callStatus: "realtime-recording-failed",
+          notificationStatus: "failed",
+          notificationError:
+            error instanceof Error && error.message.trim()
+              ? error.message
+              : "Unable to record the live AI conversation.",
+        }
+      );
+
+      return jsonResult(
+        { ok: false, error: "Unable to start live call recording." },
+        502
+      );
+    }
+  }
 
   if (shouldFallbackToVoicemail) {
     const originalCall: TelnyxCall = {
