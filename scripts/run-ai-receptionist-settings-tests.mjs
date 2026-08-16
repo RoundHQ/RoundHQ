@@ -80,7 +80,7 @@ assert.equal(defaultSettings.businessHours.saturday.enabled, false);
 assert.equal(defaultSettings.voiceAccent, "scottish");
 assert.equal(defaultSettings.customConversationEnabled, false);
 assert.equal(defaultSettings.conversationInstructions, "");
-assert.equal(defaultSettings.leadSourceLabel, "AI Receptionist");
+assert.equal(defaultSettings.leadSourceLabel, "Voicemail");
 assert.equal(defaultSettings.telephonyProvider, "telnyx");
 assert.equal(defaultSettings.realtimeEnabled, false);
 
@@ -126,7 +126,7 @@ const publicSettingsWithSecret = mapAiReceptionistSettingsRow({
 });
 assert.equal(publicSettingsWithSecret.twilioAuthTokenConfigured, true);
 assert.equal(publicSettingsWithSecret.telnyxApiKeyConfigured, true);
-assert.equal(publicSettingsWithSecret.realtimeEnabled, true);
+assert.equal(publicSettingsWithSecret.realtimeEnabled, false);
 assert.equal(
   Object.prototype.hasOwnProperty.call(publicSettingsWithSecret, "telnyxApiKey"),
   false,
@@ -195,10 +195,10 @@ assert.equal(writeRow.telnyx_connection_id, "telnyx-app-1");
 assert.equal(writeRow.telnyx_messaging_profile_id, "messaging-profile-1");
 assert.equal(writeRow.telnyx_public_key, "public-key");
 assert.equal(writeRow.voice_accent, "british");
-assert.equal(writeRow.custom_conversation_enabled, true);
+assert.equal(writeRow.custom_conversation_enabled, false);
 assert.match(writeRow.conversation_instructions, /Hello from/);
-assert.equal(writeRow.realtime_enabled, true);
-assert.equal(writeRow.lead_source_label, "AI Receptionist");
+assert.equal(writeRow.realtime_enabled, false);
+assert.equal(writeRow.lead_source_label, "Voicemail");
 assert.deepEqual(writeRow.questions_to_ask, ["Name?", "Service required?"]);
 assert.deepEqual(writeRow.emergency_keywords, ["urgent", "same day"]);
 assert.equal(writeRow.business_hours_enabled, true);
@@ -233,12 +233,10 @@ const enabledWithoutQuestionsValidation = validateAiReceptionistSettings({
   enabled: true,
   businessName: "RoundHQ Test Co",
   questionsToAsk: [],
+  telnyxPhoneNumber: "+441215551001",
+  phoneProvisioningStatus: "active",
 });
-assert.equal(enabledWithoutQuestionsValidation.ok, false);
-assert.match(
-  enabledWithoutQuestionsValidation.errors.join(" "),
-  /at least one question/i
-);
+assert.equal(enabledWithoutQuestionsValidation.ok, true);
 
 const legacyTwilioFieldsValidation = validateAiReceptionistSettings(
   normalizeAiReceptionistSettings({
@@ -355,24 +353,24 @@ const renderedFormHtml = renderToStaticMarkup(
 assert.match(renderedFormHtml, /Status/);
 assert.match(renderedFormHtml, /Business Details/);
 assert.match(renderedFormHtml, /Greeting &amp; Consent/);
-assert.match(renderedFormHtml, /Questions/);
-assert.match(renderedFormHtml, /Business Hours/);
-assert.match(renderedFormHtml, /Emergency Keywords/);
-assert.match(renderedFormHtml, /Phone Connection/);
+assert.doesNotMatch(renderedFormHtml, /<h2[^>]*>Questions<\/h2>/);
+assert.doesNotMatch(renderedFormHtml, /Business Hours/);
+assert.doesNotMatch(renderedFormHtml, /Emergency Keywords/);
+assert.match(renderedFormHtml, /Voicemail number/);
 assert.match(renderedFormHtml, /Your receptionist number/);
 assert.match(renderedFormHtml, /RoundHQ manages the secure phone connection/);
 assert.doesNotMatch(renderedFormHtml, /Telnyx API Key/);
 assert.doesNotMatch(renderedFormHtml, /Telnyx Public Key/);
 assert.doesNotMatch(renderedFormHtml, /Connection \/ App ID/);
-assert.match(renderedFormHtml, /Answering mode/);
-assert.match(renderedFormHtml, /Voicemail to lead/);
-assert.match(renderedFormHtml, /Live AI conversation/);
-assert.match(renderedFormHtml, /Voice accent/);
-assert.match(renderedFormHtml, /Scottish/);
-assert.match(renderedFormHtml, /Fully custom conversation/);
+assert.doesNotMatch(renderedFormHtml, /Answering mode/);
+assert.match(renderedFormHtml, /Voicemail-to-lead/);
+assert.doesNotMatch(renderedFormHtml, /Live AI conversation/);
+assert.doesNotMatch(renderedFormHtml, /Voice accent/);
+assert.doesNotMatch(renderedFormHtml, /Scottish/);
+assert.doesNotMatch(renderedFormHtml, /Fully custom conversation/);
 assert.match(
   renderedFormHtml,
-  /Live AI is enabled on \+44 121 555 1001/
+  /Voicemail-to-lead is enabled on \+44 121 555 1001/
 );
 
 const renderedCustomConversationFormHtml = renderToStaticMarkup(
@@ -386,7 +384,7 @@ const renderedCustomConversationFormHtml = renderToStaticMarkup(
     workspaceName: "RoundHQ Test Co",
   })
 );
-assert.match(renderedCustomConversationFormHtml, /Conversation instructions/);
+assert.doesNotMatch(renderedCustomConversationFormHtml, /Conversation instructions/);
 assert.doesNotMatch(
   renderedCustomConversationFormHtml,
   /<h2[^>]*>Questions<\/h2>/
@@ -417,8 +415,8 @@ const renderedSettingsPageHtml = renderToStaticMarkup(
 );
 assert.match(
   renderedSettingsPageHtml,
-  /AI Receptionist/,
-  "AI Receptionist should render as a Settings tab"
+  /Voicemail/,
+  "Voicemail should render as a Settings tab"
 );
 assert.doesNotMatch(
   renderedSettingsPageHtml,
@@ -437,8 +435,8 @@ const renderedNonAdminSettingsPageHtml = renderToStaticMarkup(
 );
 assert.doesNotMatch(
   renderedNonAdminSettingsPageHtml,
-  /AI Receptionist/,
-  "non-admin users should not see the AI Receptionist settings tab"
+  /Voicemail/,
+  "non-admin users should not see the voicemail settings tab"
 );
 
 console.log("AI Receptionist settings tests passed.");

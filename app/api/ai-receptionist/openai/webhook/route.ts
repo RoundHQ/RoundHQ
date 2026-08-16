@@ -92,7 +92,18 @@ function sendInitialGreeting(apiKey: string, callId: string) {
   });
 }
 
+function liveAiCallsAreRetired() {
+  return true;
+}
+
 export async function POST(request: Request) {
+  if (liveAiCallsAreRetired()) {
+    return Response.json(
+      { error: "Live AI calls have been retired. Use the voicemail-to-lead flow." },
+      { status: 410 }
+    );
+  }
+
   const config = getOpenAiRealtimeSipConfig();
 
   if (!config) {

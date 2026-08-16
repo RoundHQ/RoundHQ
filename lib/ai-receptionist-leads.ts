@@ -11,7 +11,7 @@ import { buildCustomerLeadFromPayload } from "@/lib/customer-leads";
 import { mapCustomerLeadToWriteRow } from "@/lib/supabase/customer-leads-data";
 
 export const AI_RECEPTIONIST_SOURCE: CustomerLeadSource = "ai_receptionist";
-export const AI_RECEPTIONIST_SOURCE_LABEL = "AI Receptionist";
+export const AI_RECEPTIONIST_SOURCE_LABEL = "Voicemail";
 export const AI_RECEPTIONIST_ACTIVITY_TYPE = "ai_receptionist_call";
 
 export type AiReceptionistCallMetadata = {
@@ -386,7 +386,7 @@ function buildAiReceptionistActivityDetail(
   metadata: AiReceptionistCallMetadata
 ) {
   const sections = [
-    metadata.ai_summary ? `AI summary:\n${metadata.ai_summary}` : "",
+    metadata.ai_summary ? `Call summary:\n${metadata.ai_summary}` : "",
     metadata.ai_summary_short
       ? `Short summary:\n${metadata.ai_summary_short}`
       : "",
@@ -413,7 +413,7 @@ function buildAiReceptionistActivityDetail(
 
   return sections.length > 0
     ? sections.join("\n\n")
-    : "Lead captured by AI Receptionist.";
+    : "Lead captured from voicemail.";
 }
 
 function getOptionalMetadataText(value: unknown) {
@@ -583,7 +583,7 @@ export function buildAiReceptionistLeadFromPayload(
     id: options.activityId ?? crypto.randomUUID(),
     type: AI_RECEPTIONIST_ACTIVITY_TYPE,
     occurredAt: lead.submittedAt,
-    title: "AI Receptionist Call",
+    title: "Voicemail Call",
     detail: buildAiReceptionistActivityDetail(metadata),
     metadata,
   };
@@ -663,7 +663,7 @@ export async function createAiReceptionistLeadFromPayload(options: {
 
     return {
       ok: false,
-      error: error.message || "Unable to create the AI Receptionist lead.",
+      error: error.message || "Unable to create the voicemail lead.",
       status: code === "23503" ? 403 : 500,
     };
   }

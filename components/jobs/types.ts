@@ -206,7 +206,7 @@ export const RECURRING_INVOICE_FREQUENCY_OPTIONS = [
 export type RecurringInvoiceFrequency =
   (typeof RECURRING_INVOICE_FREQUENCY_OPTIONS)[number];
 
-export const DOCUMENT_DELIVERY_METHOD_OPTIONS = ["email"] as const;
+export const DOCUMENT_DELIVERY_METHOD_OPTIONS = ["email", "text"] as const;
 
 export type DocumentDeliveryMethod =
   (typeof DOCUMENT_DELIVERY_METHOD_OPTIONS)[number];
@@ -241,6 +241,7 @@ export type Quote = {
     | "scheduled"
     | "manual_required"
     | "skipped";
+  sentAt?: string;
 };
 
 export type Invoice = {
@@ -271,6 +272,9 @@ export type Invoice = {
   stripePaymentStatus?: StripeInvoicePaymentStatus;
   stripePaymentIntentId?: string;
   stripePaymentCompletedAt?: string;
+  sentAt?: string;
+  refundedAmount?: number;
+  voidedAt?: string;
 };
 
 export type QuoteFollowUpState = {
@@ -434,6 +438,7 @@ export type RecurringInvoiceTemplate = {
   preferredSendMethod?: DocumentDeliveryMethod;
   sendTo?: string;
   isActive: boolean;
+  deletedAt?: string;
   lastGeneratedDate?: string;
   createdAt?: string;
   updatedAt?: string;

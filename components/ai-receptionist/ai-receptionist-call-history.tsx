@@ -17,7 +17,8 @@ function formatDate(value: string) {
     return "Unknown";
   }
 
-  return date.toLocaleString(undefined, {
+  return date.toLocaleString("en-GB", {
+    timeZone: "Europe/London",
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -42,7 +43,7 @@ export default function AiReceptionistCallHistory({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs font-black uppercase tracking-wide text-emerald-700">
-            AI Receptionist
+            Voicemail
           </p>
           <h2 className="mt-1 text-lg font-extrabold tracking-normal text-slate-950">
             Call History
@@ -55,7 +56,7 @@ export default function AiReceptionistCallHistory({
 
       {!schemaReady ? (
         <div className="mt-5 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
-          Run the AI Receptionist Stage 5 SQL to enable call history.
+          Apply the latest RoundHQ database migration to enable call history.
           {schemaError ? (
             <div className="mt-2 text-xs text-amber-800">{schemaError}</div>
           ) : null}
@@ -63,7 +64,7 @@ export default function AiReceptionistCallHistory({
       ) : calls.length === 0 ? (
         <div className="mt-5 flex items-center gap-3 rounded-md border border-slate-200 bg-slate-50 px-4 py-5 text-sm font-semibold text-slate-500">
           <Bot className="size-4" />
-          No AI Receptionist calls yet.
+          No voicemail calls yet.
         </div>
       ) : (
         <div className="mt-5 overflow-hidden rounded-md border border-slate-200">

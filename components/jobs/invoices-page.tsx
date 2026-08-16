@@ -15,6 +15,7 @@ import DocumentSendDialog from "./document-send-dialog";
 import { sendInvoiceDocument } from "./document-delivery";
 import {
   formatCurrency,
+  formatStoredDate,
   getCustomerEmailAddresses,
   getInputDateValue,
   getTodayDateInputValue,
@@ -150,6 +151,7 @@ type Props = {
   ) => Promise<void> | void;
   stripeInvoicePaymentsEnabled?: boolean;
   onCreatePaymentLink?: (invoiceId: string) => Promise<Invoice | null>;
+  onSendText: (invoiceId: string) => void;
   onSaveRecurringTemplate: (
     template: RecurringInvoiceTemplate
   ) => Promise<RecurringInvoiceTemplate | null>;
@@ -183,6 +185,7 @@ type InvoiceAction =
   | "pdf"
   | "payment-link"
   | "email"
+  | "text"
   | "recurring"
   | "delete";
 
@@ -266,7 +269,8 @@ function formatHistoryDate(value: string) {
     return "Unknown date";
   }
 
-  return parsedDate.toLocaleString(undefined, {
+  return parsedDate.toLocaleString("en-GB", {
+    timeZone: "Europe/London",
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -308,7 +312,7 @@ function getInvoiceEmailMessage(
     `Please find invoice ${invoice.invoiceNumber} attached.`,
     `Invoice total: ${formatCurrency(invoice.total)}`,
     invoice.dueDate
-      ? `Due by: ${new Date(invoice.dueDate).toLocaleDateString()}`
+      ? `Due by: ${formatStoredDate(invoice.dueDate)}`
       : undefined,
     invoice.stripePaymentLinkUrl
       ? `Pay securely online: ${invoice.stripePaymentLinkUrl}`
@@ -492,6 +496,7 @@ export default function InvoicesPage({
   onMarkSent,
   stripeInvoicePaymentsEnabled = false,
   onCreatePaymentLink,
+  onSendText,
   onSaveRecurringTemplate,
   onDeleteRecurringTemplate,
 }: Props) {
@@ -846,6 +851,7 @@ export default function InvoicesPage({
           ]
         : []),
       { action: "email", label: "Email invoice" },
+      { action: "text", label: "Send by text" },
       {
         action: "recurring",
         label: existingTemplate ? "Edit recurring" : "Make recurring",
@@ -879,6 +885,9 @@ export default function InvoicesPage({
         break;
       case "email":
         setSendTarget({ invoiceId: invoice.id, method: "email" });
+        break;
+      case "text":
+        onSendText(invoice.id);
         break;
       case "recurring":
         openRecurringEditor(invoice.id, existingTemplate ?? undefined);
@@ -992,11 +1001,11 @@ export default function InvoicesPage({
                       </p>
                       <p className="mt-1 text-sm text-slate-500">
                         {template.frequency} • Next send{" "}
-                        {new Date(template.nextSendDate).toLocaleDateString()}
+                        {formatStoredDate(template.nextSendDate)}
                         {paymentByDate ? (
                           <>
                             {" - Payment by "}
-                            {new Date(paymentByDate).toLocaleDateString()}
+                            {formatStoredDate(paymentByDate)}
                           </>
                         ) : null}
                       </p>
@@ -1155,10 +1164,10 @@ export default function InvoicesPage({
                       </td>
 
                       <td className="px-4 py-4 text-sm text-slate-600">
-                        <div>{new Date(invoice.date).toLocaleDateString()}</div>
+                        <div>{formatStoredDate(invoice.date)}</div>
                         {invoice.dueDate ? (
                           <div className="mt-1 text-xs text-slate-400">
-                            Due by {new Date(invoice.dueDate).toLocaleDateString()}
+                            Due by {formatStoredDate(invoice.dueDate)}
                           </div>
                         ) : null}
                       </td>

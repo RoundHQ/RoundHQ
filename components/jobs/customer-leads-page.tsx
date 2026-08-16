@@ -337,7 +337,8 @@ function formatLeadDate(value: string) {
     return "Unknown date";
   }
 
-  return parsedDate.toLocaleString(undefined, {
+  return parsedDate.toLocaleString("en-GB", {
+    timeZone: "Europe/London",
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -366,7 +367,7 @@ export function getSourceLabel(
     case "email":
       return "Email";
     case "ai_receptionist":
-      return showAiAssistantDetails ? "AI Receptionist" : "Phone";
+      return showAiAssistantDetails ? "Voicemail" : "Phone";
     case "manual":
       return "Manual";
     default:
@@ -701,7 +702,7 @@ function ActivityTimelineEntry({ entry }: { entry: LeadTimelineItem }) {
           <p className="text-sm font-bold text-slate-900">{activityTitle}</p>
           {isAiReceptionistCall ? (
             <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-200">
-              [AI Receptionist]
+              [Voicemail]
             </span>
           ) : null}
           <time className="text-[11px] font-semibold text-slate-400">

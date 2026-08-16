@@ -302,7 +302,8 @@ function formatMonthLabel(monthKey: string) {
     return "Unknown month";
   }
 
-  return monthDate.toLocaleString(undefined, {
+  return monthDate.toLocaleString("en-GB", {
+    timeZone: "Europe/London",
     month: "short",
     year: "numeric",
   });
@@ -2870,8 +2871,8 @@ export default function PaymentsPage({
             Season Window
           </p>
           <p className="mt-2 text-2xl font-black tracking-tight text-slate-900">
-            {seasonDateRange.startDate.toLocaleDateString()} to{" "}
-            {seasonDateRange.endDate.toLocaleDateString()}
+            {seasonDateRange.startDate.toLocaleDateString("en-GB")} to{" "}
+            {seasonDateRange.endDate.toLocaleDateString("en-GB")}
           </p>
           <p className="mt-2 text-sm text-slate-500">
             Monthly plans use 12 payment months starting from the configured

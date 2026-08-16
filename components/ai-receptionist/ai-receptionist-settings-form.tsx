@@ -51,6 +51,16 @@ function Section({
   title: string;
   children: ReactNode;
 }) {
+  const hidden = [
+    "Live AI Conversation",
+    "Questions",
+    "Business Hours",
+    "Emergency Keywords",
+  ].includes(title);
+  if (hidden) {
+    return null;
+  }
+
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-[0_18px_46px_rgba(15,23,42,0.06)] sm:p-6">
       <h2 className="text-lg font-extrabold tracking-normal text-slate-950">
@@ -172,9 +182,7 @@ export default function AiReceptionistSettingsForm({
   workspaceName,
 }: Props) {
   const [enabled, setEnabled] = useState(initialSettings.enabled);
-  const [realtimeEnabled, setRealtimeEnabled] = useState(
-    initialSettings.realtimeEnabled
-  );
+  const [realtimeEnabled, setRealtimeEnabled] = useState(false);
   const [voiceAccent, setVoiceAccent] = useState<AiReceptionistVoiceAccent>(
     initialSettings.voiceAccent
   );
@@ -302,6 +310,8 @@ export default function AiReceptionistSettingsForm({
         name="emergency_keywords_json"
         value={JSON.stringify(normalizedKeywords)}
       />
+      <input type="hidden" name="realtime_enabled" value="false" />
+      <input type="hidden" name="custom_conversation_enabled" value="false" />
 
       {actionState.message ? (
         <div
@@ -326,7 +336,7 @@ export default function AiReceptionistSettingsForm({
               onChange={(event) => setEnabled(event.target.checked)}
               className="size-5 accent-[#19c653]"
             />
-            Enable AI Receptionist
+            Enable voicemail-to-lead
           </label>
           <span
             className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-xs font-black uppercase tracking-wide ${
@@ -339,7 +349,8 @@ export default function AiReceptionistSettingsForm({
           </span>
         </div>
 
-        <fieldset className="mt-5">
+        {false ? (
+        <fieldset className="hidden" aria-hidden="true">
           <legend className="text-sm font-black text-slate-800">
             Answering mode
           </legend>
@@ -398,6 +409,7 @@ export default function AiReceptionistSettingsForm({
             </label>
           </div>
         </fieldset>
+        ) : null}
 
         <div className="mt-4 flex gap-3 rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-900">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
@@ -485,7 +497,7 @@ export default function AiReceptionistSettingsForm({
         {enabled && !providerConnected ? (
           <div className="mt-4 flex gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
             <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-            AI Receptionist is enabled, but the receptionist phone number is not ready yet.
+            Voicemail-to-lead is enabled, but the phone number is not ready yet.
           </div>
         ) : null}
 
@@ -629,8 +641,7 @@ export default function AiReceptionistSettingsForm({
 
       <Section title="Greeting & Consent">
         <p className="mb-4 text-sm font-semibold leading-6 text-slate-500">
-          Voicemail mode uses the greeting. Live AI always says the editable
-          recording consent; a fully custom conversation replaces its greeting.
+          Callers hear this greeting and recording notice before leaving their message.
         </p>
         <div className="grid gap-5 lg:grid-cols-2">
           <TextAreaField
@@ -841,7 +852,7 @@ export default function AiReceptionistSettingsForm({
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-lg font-extrabold tracking-normal text-slate-950">
-                  Phone Connection
+                  Voicemail number
                 </h2>
                 <span
                   className={`inline-flex rounded-full px-3 py-1 text-xs font-black uppercase tracking-wide ${
@@ -862,7 +873,7 @@ export default function AiReceptionistSettingsForm({
                 </span>
               </div>
               <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">
-                Keep your existing business number with call forwarding, or choose a new UK number for the receptionist.
+                Keep your existing business number with call forwarding, or choose a new UK number for voicemail-to-lead.
               </p>
 
               <AiReceptionistPhoneSetup
@@ -922,7 +933,7 @@ export default function AiReceptionistSettingsForm({
           className="inline-flex min-h-24 items-center justify-center gap-3 rounded-lg bg-[#19c653] px-5 py-4 text-sm font-black text-white shadow-[0_18px_46px_rgba(25,198,83,0.24)] transition hover:bg-[#22d861] disabled:cursor-not-allowed disabled:opacity-60"
         >
           <Save className="size-5" />
-          {isPending ? "Saving..." : "Save AI Receptionist settings"}
+          {isPending ? "Saving..." : "Save voicemail settings"}
         </button>
       </div>
 

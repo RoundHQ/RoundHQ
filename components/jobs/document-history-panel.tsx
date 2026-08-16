@@ -55,7 +55,8 @@ function formatHistoryDate(value: string) {
     return "Unknown date";
   }
 
-  return parsedDate.toLocaleString(undefined, {
+  return parsedDate.toLocaleString("en-GB", {
+    timeZone: "Europe/London",
     day: "2-digit",
     month: "short",
     year: "numeric",

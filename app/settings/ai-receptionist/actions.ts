@@ -54,14 +54,11 @@ function buildAiReceptionistSettingsFromFormData(
     fallbackPhoneNumber: getText(formData, "fallback_phone_number"),
     notificationEmail: getText(formData, "notification_email"),
     telephonyProvider: "telnyx",
-    realtimeEnabled:
-      ["true", "on"].includes(getText(formData, "realtime_enabled")),
+    realtimeEnabled: false,
     voiceAccent: normalizeAiReceptionistVoiceAccent(
       getText(formData, "voice_accent")
     ),
-    customConversationEnabled: ["true", "on"].includes(
-      getText(formData, "custom_conversation_enabled")
-    ),
+    customConversationEnabled: false,
     conversationInstructions: getText(
       formData,
       "conversation_instructions"
@@ -94,7 +91,7 @@ function buildAiReceptionistSettingsFromFormData(
       []
     ),
     consentMessage: getText(formData, "consent_message"),
-    leadSourceLabel: getText(formData, "lead_source_label") || "AI Receptionist",
+    leadSourceLabel: getText(formData, "lead_source_label") || "Voicemail",
   });
 }
 
@@ -206,7 +203,7 @@ export async function updateAiReceptionistSettingsAction(
 
   return {
     ok: true,
-    message: "AI Receptionist settings saved.",
+    message: "Voicemail-to-lead settings saved.",
     errors: [],
     settings: {
       ...settings,

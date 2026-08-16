@@ -8,6 +8,7 @@ import {
   getStripePriceIdFromSettings,
   isPlatformStripeConfigured,
 } from "@/lib/admin/stripe-settings";
+import { getCanonicalBaseUrl } from "@/lib/urls";
 
 let stripeClient: { secretKey: string; client: Stripe } | null = null;
 
@@ -71,13 +72,7 @@ export async function getStripeWebhookSecrets() {
 }
 
 export function getBaseUrl(requestUrl: string) {
-  const configuredUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
-
-  if (configuredUrl) {
-    return configuredUrl.replace(/\/$/, "");
-  }
-
-  return new URL(requestUrl).origin;
+  return getCanonicalBaseUrl(requestUrl);
 }
 
 export function getStripeObjectId(

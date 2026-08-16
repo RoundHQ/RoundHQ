@@ -9,7 +9,7 @@ import {
 import { generateQuotePDF } from "./pdf-generator";
 import DocumentSendDialog from "./document-send-dialog";
 import { sendQuoteDocument } from "./document-delivery";
-import { formatCurrency, getCustomerEmailAddresses } from "./helpers";
+import { formatCurrency, formatStoredDate, getCustomerEmailAddresses } from "./helpers";
 import type {
   Customer,
   DocumentDeliveryMethod,
@@ -123,6 +123,7 @@ type Props = {
     quoteId: string,
     metadata?: DocumentSendMetadata
   ) => Promise<void> | void;
+  onSendText: (quoteId: string) => void;
   onMarkRead?: (
     quoteId: string,
     metadata?: DocumentSendMetadata
@@ -153,6 +154,7 @@ type QuoteAction =
   | "invoice"
   | "pdf"
   | "email"
+  | "text"
   | "delete";
 
 type QuoteActionTone = "accept" | "decline" | "danger" | "neutral" | "primary";
@@ -270,7 +272,8 @@ function formatHistoryDate(value: string) {
     return "Unknown date";
   }
 
-  return parsedDate.toLocaleString(undefined, {
+  return parsedDate.toLocaleString("en-GB", {
+    timeZone: "Europe/London",
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -339,6 +342,7 @@ export default function QuotesPage({
   onConvertToInvoice,
   allowQuoteConversionWorkflows = true,
   onMarkSent,
+  onSendText,
 }: Props) {
   const [sendTarget, setSendTarget] = useState<SendTarget>(null);
   const [activeFilter, setActiveFilter] = useState<QuoteFilter>("All");
@@ -493,6 +497,7 @@ export default function QuotesPage({
       },
       { action: "pdf", label: "Download PDF" },
       { action: "email", label: "Email quote" },
+      { action: "text", label: "Send by text" },
       ...(canScheduleQuote
         ? [
             {
@@ -542,6 +547,9 @@ export default function QuotesPage({
         break;
       case "email":
         setSendTarget({ quoteId: quote.id, method: "email" });
+        break;
+      case "text":
+        onSendText(quote.id);
         break;
       case "delete":
         onDelete(quote.id);
@@ -675,7 +683,7 @@ export default function QuotesPage({
                       </td>
 
                       <td className="px-4 py-4 text-sm text-slate-600">
-                        {new Date(quote.date).toLocaleDateString()}
+                        {formatStoredDate(quote.date)}
                       </td>
 
                       <td className="px-4 py-4">
@@ -691,9 +699,7 @@ export default function QuotesPage({
                             <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
                               <p className="font-semibold">
                                 Suggested:{" "}
-                                {new Date(
-                                  `${schedulingRecommendation.slot.date}T00:00:00`
-                                ).toLocaleDateString()}{" "}
+                                {formatStoredDate(schedulingRecommendation.slot.date)}{" "}
                                 {schedulingRecommendation.slot.startTime}-
                                 {schedulingRecommendation.slot.finishTime}
                               </p>

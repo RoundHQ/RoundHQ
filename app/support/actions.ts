@@ -15,6 +15,7 @@ import {
   type SupportCategory,
   type SupportPriority,
 } from "@/lib/support/helpdesk";
+import { buildCanonicalUrl } from "@/lib/urls";
 
 const SUPPORT_SUBMIT_SIDE_EFFECT_TIMEOUT_MS = 8000;
 
@@ -68,10 +69,7 @@ function getOpenTicketRedirectUrl(
 }
 
 function getAdminTicketUrl(ticketId: string) {
-  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "");
-  const ticketPath = `/admin/helpdesk/${ticketId}`;
-
-  return baseUrl ? `${baseUrl}${ticketPath}` : ticketPath;
+  return buildCanonicalUrl(`/admin/helpdesk/${encodeURIComponent(ticketId)}`);
 }
 
 function getActionErrorMessage(error: unknown) {

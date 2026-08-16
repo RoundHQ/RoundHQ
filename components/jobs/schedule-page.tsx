@@ -225,7 +225,8 @@ function formatTimeValue(value?: string) {
     return value;
   }
 
-  return new Date(2000, 0, 1, hour, minute).toLocaleTimeString(undefined, {
+  return new Date(2000, 0, 1, hour, minute).toLocaleTimeString("en-GB", {
+    timeZone: "Europe/London",
     hour: "numeric",
     minute: "2-digit",
   });
@@ -710,7 +711,8 @@ export default function SchedulePage({
           </div>
 
           <h3 className="text-center text-xl font-black tracking-tight text-slate-900">
-            {monthStart.toLocaleDateString(undefined, {
+            {monthStart.toLocaleDateString("en-GB", {
+              timeZone: "Europe/London",
               month: "long",
               year: "numeric",
             })}
@@ -812,7 +814,8 @@ export default function SchedulePage({
               Selected Date
             </p>
             <h3 className="mt-1 text-xl font-black tracking-tight text-slate-900">
-              {new Date(selectedDate).toLocaleDateString(undefined, {
+              {new Date(selectedDate).toLocaleDateString("en-GB", {
+                timeZone: "Europe/London",
                 weekday: "long",
                 day: "numeric",
                 month: "long",
@@ -906,7 +909,8 @@ export default function SchedulePage({
               {modalMode === "quote" ? "Schedule Quoted Work" : "Add Appointment"}
             </h3>
             <p className="mt-1 text-sm text-slate-500">
-              {new Date(selectedDate).toLocaleDateString(undefined, {
+              {new Date(selectedDate).toLocaleDateString("en-GB", {
+                timeZone: "Europe/London",
                 weekday: "long",
                 day: "numeric",
                 month: "long",

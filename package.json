@@ -17,7 +17,8 @@
     "test:ai-receptionist-twilio": "node scripts/run-ai-receptionist-twilio-tests.mjs",
     "test:ai-receptionist-telnyx": "node scripts/run-ai-receptionist-telnyx-tests.mjs",
     "test:ai-receptionist-number-provisioning": "node scripts/run-ai-receptionist-number-provisioning-tests.mjs",
-    "test:ai-receptionist-realtime": "node scripts/run-ai-receptionist-realtime-tests.mjs"
+    "test:ai-receptionist-realtime": "node scripts/run-ai-receptionist-retirement-tests.mjs",
+    "test:backlog": "node scripts/run-backlog-tests.mjs"
   },
   "dependencies": {
     "@react-google-maps/api": "^2.20.8",

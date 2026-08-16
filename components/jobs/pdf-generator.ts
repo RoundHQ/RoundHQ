@@ -4,6 +4,7 @@ import type {
     QuoteStatus,
     StripeInvoicePaymentStatus,
 } from "./types";
+import { formatUkDate } from "@/lib/dates";
 
 type CustomerType = "Residential" | "Commercial";
 
@@ -154,8 +155,7 @@ function formatDate(value: string | undefined) {
         return "-";
     }
 
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+    return formatUkDate(value);
 }
 
 function normalizeOptionalText(value: string | undefined) {

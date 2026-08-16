@@ -2937,3 +2937,237 @@ on conflict (slug) do nothing;
 insert into public.support_settings (id)
 values ('primary')
 on conflict (id) do nothing;
+
+-- Customer communications, secure sharing, payment requests, recurring schedule audit, voicemail-only mode, and VAT settings.
+
+-- Safe, tenant-scoped communications and automation foundation.
+
+alter table public.organizations
+  add column if not exists business_timezone text not null default 'Europe/London';
+
+alter table public.quotes add column if not exists sent_at timestamptz null;
+alter table public.invoices
+  add column if not exists sent_at timestamptz null,
+  add column if not exists refunded_amount numeric(12, 2) not null default 0,
+  add column if not exists voided_at timestamptz null;
+
+alter table public.recurring_invoice_templates
+  add column if not exists deleted_at timestamptz null,
+  add column if not exists deleted_by uuid null references auth.users(id) on delete set null;
+create index if not exists recurring_invoice_templates_active_due_idx
+  on public.recurring_invoice_templates (organization_id, next_send_date)
+  where is_active = true and deleted_at is null;
+
+create table if not exists public.recurring_invoice_events (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  schedule_id text not null,
+  event_type text not null check (event_type in ('created', 'updated', 'deleted')),
+  actor_user_id uuid null references auth.users(id) on delete set null,
+  metadata jsonb not null default '{}'::jsonb check (jsonb_typeof(metadata) = 'object'),
+  created_at timestamptz not null default now()
+);
+create index if not exists recurring_invoice_events_schedule_idx
+  on public.recurring_invoice_events (organization_id, schedule_id, created_at desc);
+
+create table if not exists public.communication_settings (
+  organization_id uuid primary key references public.organizations(id) on delete cascade,
+  timezone text not null default 'Europe/London',
+  quiet_hours_start time not null default '20:00',
+  quiet_hours_end time not null default '08:00',
+  email_from_name text null,
+  email_from_address text null,
+  email_reply_to text null,
+  sms_from_number text null,
+  sms_sender_mode text not null default 'platform_default' check (sms_sender_mode in ('platform_default', 'business_name', 'business_mobile')),
+  sms_sender_value text null,
+  quote_sms_template text not null default 'Hello {{customerName}}, your quote from {{businessName}} is ready. {{documentLink}}',
+  invoice_sms_template text not null default 'Hello {{customerName}}, invoice {{invoiceNumber}} from {{businessName}} is ready. {{documentLink}}',
+  quote_follow_up_delay_days integer not null default 3 check (quote_follow_up_delay_days between 0 and 365),
+  invoice_follow_up_delay_days integer not null default 1 check (invoice_follow_up_delay_days between 0 and 365),
+  service_reminders_enabled boolean not null default false,
+  service_reminder_lead_days integer not null default 1 check (service_reminder_lead_days between 0 and 30),
+  service_reminder_send_time time not null default '18:00',
+  service_reminder_template text not null default 'Hi {{customerName}}, this is a reminder that {{businessName}} is due on {{serviceDate}} for {{serviceType}}. Approximate arrival: {{arrivalWindow}}.',
+  completion_messages_enabled boolean not null default false,
+  completion_message_template text not null default 'Hi {{customerName}}, your {{serviceType}} visit has been completed. Thank you from {{businessName}}.',
+  vat_threshold_card_enabled boolean not null default false,
+  vat_threshold_amount numeric(12, 2) not null default 90000 check (vat_threshold_amount > 0),
+  vat_warning_percent integer not null default 80 check (vat_warning_percent between 1 and 100),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+insert into public.communication_settings (organization_id, timezone)
+select id, business_timezone from public.organizations on conflict (organization_id) do nothing;
+
+create table if not exists public.customer_communication_preferences (
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  customer_id bigint not null references public.customers(id) on delete cascade,
+  sms_allowed boolean not null default true,
+  email_allowed boolean not null default true,
+  sms_opted_out_at timestamptz null,
+  email_opted_out_at timestamptz null,
+  updated_by uuid null references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (organization_id, customer_id)
+);
+
+create table if not exists public.document_share_tokens (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  document_type text not null check (document_type in ('quote', 'invoice')),
+  document_id text not null,
+  token_hash text not null unique check (char_length(token_hash) = 64),
+  expires_at timestamptz not null,
+  revoked_at timestamptz null,
+  created_by uuid null references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  check (expires_at > created_at)
+);
+create index if not exists document_share_tokens_document_idx
+  on public.document_share_tokens (organization_id, document_type, document_id, expires_at desc);
+
+create table if not exists public.customer_messages (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  customer_id bigint null references public.customers(id) on delete set null,
+  channel text not null check (channel in ('sms', 'email')),
+  message_kind text not null check (message_kind in ('quote', 'invoice', 'quote_follow_up', 'invoice_follow_up', 'service_reminder', 'job_completion')),
+  recipient text not null,
+  subject text null,
+  body text not null,
+  related_type text null check (related_type is null or related_type in ('quote', 'invoice', 'job')),
+  related_id text null,
+  occurrence_key text null,
+  status text not null default 'queued' check (status in ('queued', 'sent', 'delivered', 'failed', 'cancelled')),
+  provider text null,
+  provider_message_id text null,
+  idempotency_key text not null,
+  scheduled_for timestamptz not null default now(),
+  next_attempt_at timestamptz not null default now(),
+  attempt_count integer not null default 0 check (attempt_count between 0 and 20),
+  failure_reason text null,
+  initiated_by uuid null references auth.users(id) on delete set null,
+  sent_at timestamptz null,
+  delivered_at timestamptz null,
+  failed_at timestamptz null,
+  cancelled_at timestamptz null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (organization_id, idempotency_key)
+);
+create index if not exists customer_messages_due_idx on public.customer_messages (next_attempt_at, scheduled_for) where status = 'queued';
+create index if not exists customer_messages_history_idx on public.customer_messages (organization_id, created_at desc);
+create index if not exists customer_messages_related_idx on public.customer_messages (organization_id, related_type, related_id, created_at desc);
+create unique index if not exists customer_messages_provider_id_idx on public.customer_messages (provider, provider_message_id) where provider_message_id is not null;
+
+create table if not exists public.customer_message_events (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  customer_message_id uuid not null references public.customer_messages(id) on delete cascade,
+  provider_event_id text not null unique,
+  event_type text not null,
+  provider_status text null,
+  metadata jsonb not null default '{}'::jsonb check (jsonb_typeof(metadata) = 'object'),
+  created_at timestamptz not null default now()
+);
+create index if not exists customer_message_events_message_idx on public.customer_message_events (customer_message_id, created_at desc);
+
+create table if not exists public.payment_provider_connections (
+  organization_id uuid primary key references public.organizations(id) on delete cascade,
+  provider text not null default 'stripe' check (provider in ('stripe', 'gocardless')),
+  provider_account_id text null,
+  status text not null default 'not_connected' check (status in ('not_connected', 'pending', 'active', 'restricted', 'disabled')),
+  configuration jsonb not null default '{}'::jsonb check (jsonb_typeof(configuration) = 'object'),
+  connected_at timestamptz null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.payment_requests (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  customer_id bigint null references public.customers(id) on delete set null,
+  invoice_id text not null references public.invoices(id) on delete restrict,
+  provider text not null check (provider in ('stripe', 'gocardless')),
+  provider_request_id text null,
+  payment_url text null,
+  amount numeric(12, 2) not null check (amount > 0),
+  currency text not null default 'GBP' check (currency = 'GBP'),
+  status text not null default 'pending' check (status in ('pending', 'open', 'paid', 'failed', 'expired', 'cancelled', 'refunded')),
+  idempotency_key text not null,
+  expires_at timestamptz null,
+  paid_at timestamptz null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (organization_id, idempotency_key)
+);
+create index if not exists payment_requests_invoice_idx on public.payment_requests (organization_id, invoice_id, created_at desc);
+create unique index if not exists payment_requests_provider_id_idx on public.payment_requests (provider, provider_request_id) where provider_request_id is not null;
+
+create table if not exists public.payment_webhook_events (
+  id uuid primary key default gen_random_uuid(),
+  provider text not null check (provider in ('stripe', 'gocardless')),
+  provider_event_id text not null unique,
+  event_type text not null,
+  payment_request_id uuid null references public.payment_requests(id) on delete set null,
+  processed_at timestamptz not null default now()
+);
+
+alter table public.ai_receptionist_settings add column if not exists reception_mode text not null default 'voicemail';
+alter table public.ai_receptionist_settings drop constraint if exists ai_receptionist_settings_reception_mode_check;
+alter table public.ai_receptionist_settings add constraint ai_receptionist_settings_reception_mode_check check (reception_mode = 'voicemail');
+
+update public.ai_receptionist_settings
+set realtime_enabled = false,
+    custom_conversation_enabled = false,
+    reception_mode = 'voicemail',
+    lead_source_label = 'Voicemail',
+    updated_at = now()
+where realtime_enabled is distinct from false
+   or custom_conversation_enabled is distinct from false
+   or reception_mode is distinct from 'voicemail'
+   or lead_source_label is distinct from 'Voicemail';
+
+alter table public.recurring_invoice_events enable row level security;
+alter table public.communication_settings enable row level security;
+alter table public.customer_communication_preferences enable row level security;
+alter table public.document_share_tokens enable row level security;
+alter table public.customer_messages enable row level security;
+alter table public.customer_message_events enable row level security;
+alter table public.payment_provider_connections enable row level security;
+alter table public.payment_requests enable row level security;
+alter table public.payment_webhook_events enable row level security;
+
+drop policy if exists "Members read recurring invoice events" on public.recurring_invoice_events;
+drop policy if exists "Members create recurring invoice events" on public.recurring_invoice_events;
+drop policy if exists "Members read communication settings" on public.communication_settings;
+drop policy if exists "Admins manage communication settings" on public.communication_settings;
+drop policy if exists "Members manage communication preferences" on public.customer_communication_preferences;
+drop policy if exists "Members read document tokens" on public.document_share_tokens;
+drop policy if exists "Members create document tokens" on public.document_share_tokens;
+drop policy if exists "Members revoke document tokens" on public.document_share_tokens;
+drop policy if exists "Members read customer messages" on public.customer_messages;
+drop policy if exists "Members create customer messages" on public.customer_messages;
+drop policy if exists "Members read message events" on public.customer_message_events;
+drop policy if exists "Admins read payment connections" on public.payment_provider_connections;
+drop policy if exists "Admins manage payment connections" on public.payment_provider_connections;
+drop policy if exists "Members read payment requests" on public.payment_requests;
+drop policy if exists "Members create payment requests" on public.payment_requests;
+
+create policy "Members read recurring invoice events" on public.recurring_invoice_events for select to authenticated using (public.is_organization_member(organization_id));
+create policy "Members create recurring invoice events" on public.recurring_invoice_events for insert to authenticated with check (public.is_organization_member(organization_id));
+create policy "Members read communication settings" on public.communication_settings for select to authenticated using (public.is_organization_member(organization_id));
+create policy "Admins manage communication settings" on public.communication_settings for all to authenticated using (public.is_organization_admin(organization_id)) with check (public.is_organization_admin(organization_id));
+create policy "Members manage communication preferences" on public.customer_communication_preferences for all to authenticated using (public.is_organization_member(organization_id)) with check (public.is_organization_member(organization_id));
+create policy "Members read document tokens" on public.document_share_tokens for select to authenticated using (public.is_organization_member(organization_id));
+create policy "Members create document tokens" on public.document_share_tokens for insert to authenticated with check (public.is_organization_member(organization_id));
+create policy "Members revoke document tokens" on public.document_share_tokens for update to authenticated using (public.is_organization_member(organization_id)) with check (public.is_organization_member(organization_id));
+create policy "Members read customer messages" on public.customer_messages for select to authenticated using (public.is_organization_member(organization_id));
+create policy "Members create customer messages" on public.customer_messages for insert to authenticated with check (public.is_organization_member(organization_id));
+create policy "Members read message events" on public.customer_message_events for select to authenticated using (public.is_organization_member(organization_id));
+create policy "Admins read payment connections" on public.payment_provider_connections for select to authenticated using (public.is_organization_admin(organization_id));
+create policy "Admins manage payment connections" on public.payment_provider_connections for all to authenticated using (public.is_organization_admin(organization_id)) with check (public.is_organization_admin(organization_id));
+create policy "Members read payment requests" on public.payment_requests for select to authenticated using (public.is_organization_member(organization_id));
+create policy "Members create payment requests" on public.payment_requests for insert to authenticated with check (public.is_organization_member(organization_id));

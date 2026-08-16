@@ -106,18 +106,18 @@ assert.equal(fullPayloadLead.source, AI_RECEPTIONIST_SOURCE);
 assert.equal(fullPayloadLead.rawPayload?.preferred_time, "Morning");
 assert.equal(fullPayloadLead.rawPayload?.source, AI_RECEPTIONIST_SOURCE);
 assert.equal(fullPayloadLead.activityHistory.length, 1);
-assert.equal(fullPayloadLead.activityHistory[0].title, "AI Receptionist Call");
+assert.equal(fullPayloadLead.activityHistory[0].title, "Voicemail Call");
 assert.equal(
   fullPayloadLead.activityHistory[0].type,
   AI_RECEPTIONIST_ACTIVITY_TYPE
 );
 assert.ok(
   fullPayloadLead.activityHistory.some(
-    (entry) => entry.title === "AI Receptionist Call"
+    (entry) => entry.title === "Voicemail Call"
   ),
   "activity should be visible on the lead"
 );
-assert.equal(getSourceLabel(fullPayloadLead.source), "AI Receptionist");
+assert.equal(getSourceLabel(fullPayloadLead.source), "Voicemail");
 assert.equal(
   formatAiReceptionistCallDuration(180),
   "3m 0s",

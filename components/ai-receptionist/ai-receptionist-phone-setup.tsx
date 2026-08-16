@@ -394,7 +394,7 @@ export default function AiReceptionistPhoneSetup({ value, onChange }: Props) {
               </button>
               <p className="mt-3 text-xs font-semibold leading-5 text-slate-500">
                 This allocates a UK receptionist number to your RoundHQ account.
-                Your normal AI Receptionist add-on terms apply.
+                Your normal voicemail-to-lead add-on terms apply.
               </p>
             </div>
           ) : (

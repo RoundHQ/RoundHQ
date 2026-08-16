@@ -12,10 +12,10 @@ import {
   isSupabaseServiceRoleConfigured,
 } from "@/lib/supabase/admin";
 import { getSubscriptionPlan, normalizePlanKey } from "@/lib/billing/plans";
+import { getCanonicalBaseUrl } from "@/lib/urls";
 
 export const runtime = "nodejs";
 
-const PUBLIC_SIGNUP_BASE_URL = "https://roundhq.co.uk";
 
 type SignupRequestBody = {
   companyName?: unknown;
@@ -37,38 +37,6 @@ function getSignupErrorMessage(error: unknown, fallback: string) {
 
 function normalizeSignupEmail(value: unknown) {
   return getText(value).toLowerCase();
-}
-
-function isLocalBaseUrl(value: string) {
-  try {
-    const hostname = new URL(value).hostname.toLowerCase();
-
-    return hostname === "localhost" || hostname === "127.0.0.1";
-  } catch {
-    return value.includes("localhost") || value.includes("127.0.0.1");
-  }
-}
-
-function getSignupBaseUrl(requestUrl: string) {
-  const configuredUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
-
-  if (configuredUrl) {
-    const normalizedUrl = configuredUrl.replace(/\/$/, "");
-
-    if (!isLocalBaseUrl(normalizedUrl)) {
-      return normalizedUrl;
-    }
-  }
-
-  try {
-    const origin = new URL(requestUrl).origin;
-
-    return origin.includes("localhost") || origin.includes("127.0.0.1")
-      ? PUBLIC_SIGNUP_BASE_URL
-      : origin;
-  } catch {
-    return PUBLIC_SIGNUP_BASE_URL;
-  }
 }
 
 function buildRoundHqConfirmationLink({
@@ -203,7 +171,7 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = createServiceRoleClient();
-  const baseUrl = getSignupBaseUrl(request.url);
+  const baseUrl = getCanonicalBaseUrl(request.url);
   const { data, error } = await supabase.auth.admin.generateLink({
     type: "signup",
     email,

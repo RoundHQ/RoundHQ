@@ -21,6 +21,7 @@ import {
   formatCurrencyAmount,
   type CurrencyCode,
 } from "./currency";
+import { formatUkDate, getBusinessIsoDate } from "@/lib/dates";
 
 export const dayOrder = [
   "Monday",
@@ -71,11 +72,7 @@ export function formatStoredDate(value: string | null | undefined) {
     return "â€”";
   }
 
-  return new Date(
-    parsed.year,
-    parsed.monthIndex,
-    parsed.day
-  ).toLocaleDateString();
+  return formatUkDate(`${parsed.year}-${String(parsed.monthIndex + 1).padStart(2, "0")}-${String(parsed.day).padStart(2, "0")}`);
 }
 
 export function toStoredDateTime(value: string | null | undefined) {
@@ -84,11 +81,7 @@ export function toStoredDateTime(value: string | null | undefined) {
 }
 
 export function getTodayDateInputValue() {
-  const today = new Date();
-  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(
-    2,
-    "0"
-  )}-${String(today.getDate()).padStart(2, "0")}`;
+  return getBusinessIsoDate();
 }
 
 export function normalizeSeasonMonthDay(
@@ -465,8 +458,8 @@ export function buildSeasonMonths(
 
     months.push({
       key: start,
-      label: monthStart.toLocaleString(undefined, { month: "short" }),
-      fullLabel: monthStart.toLocaleString(undefined, {
+      label: monthStart.toLocaleString("en-GB", { month: "short" }),
+      fullLabel: monthStart.toLocaleString("en-GB", {
         month: "short",
         year: "numeric",
       }),
@@ -504,8 +497,8 @@ export function buildPaymentYearMonths(
 
     return {
       key,
-      label: monthStart.toLocaleString(undefined, { month: "short" }),
-      fullLabel: monthStart.toLocaleString(undefined, {
+      label: monthStart.toLocaleString("en-GB", { month: "short" }),
+      fullLabel: monthStart.toLocaleString("en-GB", {
         month: "short",
         year: "numeric",
       }),
@@ -662,7 +655,7 @@ export function formatNextDue(
     base.getDate() +
       getRotationDays(getEffectiveRotationWeeks(customer, defaultRotationWeeks))
   );
-  return base.toLocaleDateString();
+  return formatUkDate(base);
 }
 
 export function getCustomerTotals(

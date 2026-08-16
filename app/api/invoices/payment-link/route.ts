@@ -1,7 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type Stripe from "stripe";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { ensureWorkspace } from "@/lib/workspace";
+import { getPaymentRequestIdempotencyKey } from "@/lib/payments/provider";
+import { recordStripePaymentRequest } from "@/lib/payments/requests";
 import { getBaseUrl, getStripe } from "@/lib/stripe/server";
 import {
   getWorkspaceStripeSettings,
@@ -22,6 +25,7 @@ type InvoicePaymentRow = {
   stripe_payment_status: string | null;
   stripe_payment_intent_id: string | null;
   stripe_payment_completed_at: string | null;
+  updated_at: string;
 };
 
 type CustomerEmailRow = {
@@ -169,7 +173,7 @@ export async function POST(request: NextRequest) {
     const { data: invoiceData, error: invoiceError } = await supabase
       .from("invoices")
       .select(
-        "id,invoice_number,customer_id,customer_name,status,total,stripe_checkout_session_id,stripe_payment_link_url,stripe_payment_status,stripe_payment_intent_id,stripe_payment_completed_at"
+        "id,invoice_number,customer_id,customer_name,status,total,stripe_checkout_session_id,stripe_payment_link_url,stripe_payment_status,stripe_payment_intent_id,stripe_payment_completed_at,updated_at"
       )
       .eq("organization_id", organizationId)
       .eq("id", invoiceId)
@@ -200,6 +204,15 @@ export async function POST(request: NextRequest) {
     }
 
     const stripe = await getStripe();
+    const paymentRequestKey = getPaymentRequestIdempotencyKey({
+      organizationId,
+      invoiceId: invoice.id,
+      provider: "stripe",
+      amount: invoiceTotal,
+      version: invoice.updated_at,
+    });
+    const paymentAuditClient = createServiceRoleClient();
+
     const account = await stripe.accounts.retrieve(settings.stripeConnectedAccountId);
 
     if (!account.charges_enabled) {
@@ -239,6 +252,16 @@ export async function POST(request: NextRequest) {
       });
 
       if (existingSession?.url) {
+        await recordStripePaymentRequest(paymentAuditClient, {
+          organizationId,
+          customerId: invoice.customer_id,
+          invoiceId: invoice.id,
+          session: existingSession,
+          amount: invoiceTotal,
+          currency: settings.currencyCode,
+          status: "open",
+          idempotencyKey: paymentRequestKey,
+        });
         return NextResponse.json({
           invoice: serializeInvoice({
             ...invoice,
@@ -298,6 +321,7 @@ export async function POST(request: NextRequest) {
       },
       {
         stripeAccount: settings.stripeConnectedAccountId,
+        idempotencyKey: paymentRequestKey,
       }
     );
 
@@ -318,7 +342,7 @@ export async function POST(request: NextRequest) {
       .eq("organization_id", organizationId)
       .eq("id", invoice.id)
       .select(
-        "id,invoice_number,customer_id,customer_name,status,total,stripe_checkout_session_id,stripe_payment_link_url,stripe_payment_status,stripe_payment_intent_id,stripe_payment_completed_at"
+        "id,invoice_number,customer_id,customer_name,status,total,stripe_checkout_session_id,stripe_payment_link_url,stripe_payment_status,stripe_payment_intent_id,stripe_payment_completed_at,updated_at"
       )
       .single();
 
@@ -326,9 +350,21 @@ export async function POST(request: NextRequest) {
       throw updateError;
     }
 
+    await recordStripePaymentRequest(paymentAuditClient, {
+      organizationId,
+      customerId: invoice.customer_id,
+      invoiceId: invoice.id,
+      session: checkoutSession,
+      amount: invoiceTotal,
+      currency: settings.currencyCode,
+      status: "open",
+      idempotencyKey: paymentRequestKey,
+    });
+
     return NextResponse.json({
       invoice: serializeInvoice(updatedInvoiceData as InvoicePaymentRow),
     });
+
   } catch (error) {
     const schemaError = getSchemaErrorMessage(error);
 

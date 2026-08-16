@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Mail, Send, X } from "lucide-react";
+import { Mail, Phone, Send, X } from "lucide-react";
 
-type WorkflowMessageMethod = "email";
+type WorkflowMessageMethod = "email" | "text";
 
 type Props = {
   isOpen: boolean;
@@ -15,6 +15,7 @@ type Props = {
   initialEmailSubject: string;
   initialEmailMessage: string;
   initialTextMessage: string;
+  allowedMethods?: WorkflowMessageMethod[];
   onClose: () => void;
   onSend: (payload: {
     method: WorkflowMessageMethod;
@@ -38,11 +39,13 @@ export default function WorkflowMessageDialog({
   isOpen,
   title,
   description,
+  defaultMethod,
   emailRecipients,
   textRecipients,
   initialEmailSubject,
   initialEmailMessage,
   initialTextMessage,
+  allowedMethods = ["email", "text"],
   onClose,
   onSend,
 }: Props) {
@@ -54,7 +57,7 @@ export default function WorkflowMessageDialog({
     () => textRecipients[0] ?? "",
     [textRecipients]
   );
-  const [method, setMethod] = useState<WorkflowMessageMethod>("email");
+  const [method, setMethod] = useState<WorkflowMessageMethod>(defaultMethod);
   const [emailRecipient, setEmailRecipient] = useState(defaultEmailRecipient);
   const [textRecipient, setTextRecipient] = useState(defaultTextRecipient);
   const [emailSubject, setEmailSubject] = useState(initialEmailSubject);
@@ -68,7 +71,7 @@ export default function WorkflowMessageDialog({
       return;
     }
 
-    setMethod("email");
+    setMethod(defaultMethod);
     setEmailRecipient(defaultEmailRecipient);
     setTextRecipient(defaultTextRecipient);
     setEmailSubject(initialEmailSubject);
@@ -77,6 +80,7 @@ export default function WorkflowMessageDialog({
     setIsSending(false);
     setErrorMessage("");
   }, [
+    defaultMethod,
     defaultEmailRecipient,
     defaultTextRecipient,
     initialEmailMessage,
@@ -89,7 +93,8 @@ export default function WorkflowMessageDialog({
     return null;
   }
 
-  const requiresEmail = true;
+  const requiresEmail = method === "email";
+  const requiresText = method === "text";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
@@ -125,7 +130,7 @@ export default function WorkflowMessageDialog({
 
         <div className="mt-6">
           <div className="inline-flex flex-wrap gap-2 rounded-2xl bg-slate-100 p-1">
-            {(["email"] as WorkflowMessageMethod[]).map((option) => {
+            {allowedMethods.map((option) => {
               const isActive = method === option;
 
               return (
@@ -133,7 +138,7 @@ export default function WorkflowMessageDialog({
                   key={option}
                   type="button"
                   onClick={() => {
-                    setMethod("email");
+                    setMethod(option);
                     setErrorMessage("");
                   }}
                   className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
@@ -142,7 +147,7 @@ export default function WorkflowMessageDialog({
                       : "text-slate-600 hover:bg-white/70"
                   }`}
                 >
-                  Email
+                  {option === "email" ? "Email" : "Text message"}
                 </button>
               );
             })}
@@ -221,6 +226,50 @@ export default function WorkflowMessageDialog({
             </section>
           ) : null}
 
+          {requiresText ? (
+            <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4 xl:col-span-2">
+              <div className="flex items-center gap-2 text-slate-700">
+                <Phone size={16} />
+                <p className="text-sm font-semibold">Text message</p>
+              </div>
+              <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">
+                    Send To
+                  </label>
+                  <input
+                    type="tel"
+                    list="workflow-text-recipients"
+                    value={textRecipient}
+                    onChange={(event) => {
+                      setTextRecipient(event.target.value);
+                      setErrorMessage("");
+                    }}
+                    placeholder="07..."
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
+                  />
+                  <datalist id="workflow-text-recipients">
+                    {textRecipients.map((option) => <option key={option} value={option} />)}
+                  </datalist>
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">
+                    Message preview
+                  </label>
+                  <textarea
+                    value={textMessage}
+                    maxLength={1600}
+                    onChange={(event) => {
+                      setTextMessage(event.target.value);
+                      setErrorMessage("");
+                    }}
+                    className="min-h-[150px] w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
+                  />
+                  <p className="mt-2 text-right text-xs text-slate-500">{textMessage.length}/1600 characters</p>
+                </div>
+              </div>
+            </section>
+          ) : null}
         </div>
 
         <div className="mt-6 flex flex-wrap justify-end gap-2">
@@ -239,6 +288,11 @@ export default function WorkflowMessageDialog({
                 setErrorMessage("Add an email recipient and subject before sending.");
                 return;
               }
+              if (requiresText && (!textRecipient.trim() || !textMessage.trim())) {
+                setErrorMessage("Add a mobile number and message before sending.");
+                return;
+              }
+
 
               setIsSending(true);
               setErrorMessage("");
@@ -261,7 +315,8 @@ export default function WorkflowMessageDialog({
             }}
             disabled={
               isSending ||
-              (requiresEmail && (!emailRecipient.trim() || !emailSubject.trim()))
+              (requiresEmail && (!emailRecipient.trim() || !emailSubject.trim())) ||
+              (requiresText && (!textRecipient.trim() || !textMessage.trim()))
             }
             className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
           >

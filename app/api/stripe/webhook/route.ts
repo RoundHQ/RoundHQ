@@ -120,7 +120,8 @@ export async function POST(request: Request) {
             event.data.object as Stripe.Checkout.Session,
             (event.data.object as Stripe.Checkout.Session).payment_status === "paid"
               ? "paid"
-              : "open"
+              : "open",
+            { id: event.id, type: event.type }
           );
           break;
         }
@@ -140,7 +141,8 @@ export async function POST(request: Request) {
           await syncStripeInvoiceCheckoutSession(
             supabase,
             event.data.object as Stripe.Checkout.Session,
-            "paid"
+            "paid",
+            { id: event.id, type: event.type }
           );
           break;
         }
@@ -160,7 +162,8 @@ export async function POST(request: Request) {
           await syncStripeInvoiceCheckoutSession(
             supabase,
             event.data.object as Stripe.Checkout.Session,
-            "expired"
+            "expired",
+            { id: event.id, type: event.type }
           );
         }
         break;

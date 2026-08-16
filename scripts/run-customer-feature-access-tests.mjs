@@ -146,7 +146,7 @@ const leadsPageSource = fs.readFileSync(
   path.join(projectRoot, "components", "jobs", "customer-leads-page.tsx"),
   "utf8"
 );
-assert.match(leadsPageSource, /showAiAssistantDetails \? "AI Receptionist" : "Phone"/);
+assert.match(leadsPageSource, /showAiAssistantDetails \? "Voicemail" : "Phone"/);
 assert.match(leadsPageSource, /entry\.type !== "ai_receptionist_call"/);
 
 const migrationSource = fs.readFileSync(

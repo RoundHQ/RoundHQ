@@ -28,6 +28,7 @@ import {
     KeyRound,
     HelpCircle,
     Calendar as CalendarIcon,
+    MessageSquare,
 } from "lucide-react";
 import AiReceptionistSettingsForm from "@/components/ai-receptionist/ai-receptionist-settings-form";
 import AiReceptionistCallHistory from "@/components/ai-receptionist/ai-receptionist-call-history";
@@ -97,7 +98,7 @@ type PdfHeaderStyle = "banner" | "letterhead";
 type PdfLogoBackground = "none" | "dark" | "light";
 type PdfPreviewDocumentType = "quote" | "invoice" | "rams";
 type QuoteServiceType = "service" | "product";
-type WorkflowMessageMethod = "email";
+type WorkflowMessageMethod = "email" | "text";
 type QuoteService = {
     id: string;
     title: string;
@@ -115,12 +116,14 @@ type SettingsTab =
     | "quotes"
     | "invoices"
     | "email"
+    | "customer-messages"
     | "dashboard"
     | "ai-receptionist"
     | "data";
 
 export type SettingsData = {
     businessName: string;
+    businessTimezone: string;
     tradingName: string;
     businessEmail: string;
     businessPhone: string;
@@ -196,27 +199,40 @@ export type SettingsData = {
     emailFromName: string;
     emailFromAddress: string;
     emailReplyTo: string;
+    smsSenderMode: "platform_default" | "business_name" | "business_mobile";
+    smsSenderValue: string;
+    customerMessagingQuietHoursStart: string;
+    customerMessagingQuietHoursEnd: string;
     smtpHost: string;
     smtpPort: number;
     smtpSecure: boolean;
     smtpUsername: string;
     smtpPassword: string;
     quoteFollowUpMethod: WorkflowMessageMethod;
+    quoteFollowUpDelayDays: number;
     quoteFollowUpEmailSubjectTemplate: string;
     quoteFollowUpEmailTemplate: string;
     quoteFollowUpTextTemplate: string;
     invoiceReminderMethod: WorkflowMessageMethod;
+    invoiceFollowUpDelayDays: number;
     invoiceReminderEmailSubjectTemplate: string;
     invoiceReminderEmailTemplate: string;
     invoiceReminderTextTemplate: string;
     autoSendVisitCompletionTexts: boolean;
     visitCompletionTextTemplate: string;
 
+    serviceRemindersEnabled: boolean;
+    serviceReminderLeadDays: number;
+    serviceReminderSendTime: string;
+    serviceReminderTemplate: string;
     showWeatherWidget: boolean;
     showRevenueWidget: boolean;
     showJobsWidget: boolean;
     showUnpaidWidget: boolean;
     showRecentActivityWidget: boolean;
+    vatThresholdCardEnabled: boolean;
+    vatThresholdAmount: number;
+    vatWarningPercent: number;
 
     publicLiabilityInsurance: string;
     termsAndConditionsUrl: string;
@@ -343,7 +359,7 @@ const visitDays = [
     "Saturday",
     "Sunday",
 ];
-const workflowMessageMethodOptions: WorkflowMessageMethod[] = ["email"];
+const workflowMessageMethodOptions: WorkflowMessageMethod[] = ["email", "text"];
 const MAX_LOGO_UPLOAD_SOURCE_BYTES = 10 * 1024 * 1024;
 const MAX_LOGO_UPLOAD_WIDTH = 1200;
 const MAX_LOGO_UPLOAD_HEIGHT = 800;
@@ -351,6 +367,7 @@ const LOGO_UPLOAD_JPEG_QUALITY = 0.86;
 
 const defaultSettings: SettingsData = {
     businessName: "Your Business",
+    businessTimezone: "Europe/London",
     tradingName: "",
     businessEmail: "",
     businessPhone: "",
@@ -428,12 +445,17 @@ const defaultSettings: SettingsData = {
     emailFromName: "",
     emailFromAddress: "",
     emailReplyTo: "",
+    smsSenderMode: "platform_default",
+    smsSenderValue: "",
+    customerMessagingQuietHoursStart: "20:00",
+    customerMessagingQuietHoursEnd: "08:00",
     smtpHost: "",
     smtpPort: 587,
     smtpSecure: false,
     smtpUsername: "",
     smtpPassword: "",
     quoteFollowUpMethod: "email",
+    quoteFollowUpDelayDays: 3,
     quoteFollowUpEmailSubjectTemplate:
         "Following up on quote {{documentNumber}} from {{businessName}}",
     quoteFollowUpEmailTemplate: [
@@ -451,6 +473,7 @@ const defaultSettings: SettingsData = {
     quoteFollowUpTextTemplate:
         "Hi {{customerName}}, just following up on quote {{documentNumber}} from {{businessName}}. Quote total: {{total}}. Let me know if you would like to go ahead or if you have any questions.",
     invoiceReminderMethod: "email",
+    invoiceFollowUpDelayDays: 1,
     invoiceReminderEmailSubjectTemplate:
         "Reminder: invoice {{documentNumber}} from {{businessName}} is overdue",
     invoiceReminderEmailTemplate: [
@@ -471,6 +494,10 @@ const defaultSettings: SettingsData = {
     autoSendVisitCompletionTexts: false,
     visitCompletionTextTemplate:
         "Hi {{customerName}}, your service visit has been completed today. Payment due: {{amount}}. {{paymentDetails}} Reference: {{paymentReference}}. Thanks, {{businessName}}",
+    serviceRemindersEnabled: false,
+    serviceReminderLeadDays: 1,
+    serviceReminderSendTime: "18:00",
+    serviceReminderTemplate: "Hi {{customerName}}, this is a reminder that {{businessName}} is due on {{serviceDate}} for {{serviceType}}. Approximate arrival: {{arrivalWindow}}.",
 
     showWeatherWidget: true,
     showRevenueWidget: true,
@@ -478,6 +505,9 @@ const defaultSettings: SettingsData = {
     showUnpaidWidget: true,
     showRecentActivityWidget: true,
 
+    vatThresholdCardEnabled: false,
+    vatThresholdAmount: 90000,
+    vatWarningPercent: 80,
     publicLiabilityInsurance: "£1,000,000",
     termsAndConditionsUrl: "",
 };
@@ -1096,6 +1126,7 @@ const settingsTabs: SettingsTab[] = [
     "quotes",
     "invoices",
     "email",
+    "customer-messages",
     "dashboard",
     "ai-receptionist",
     "data",
@@ -1857,7 +1888,7 @@ export default function SettingsPage({
                         "",
                         "Your SMTP settings are working and the website can send emails directly.",
                         "",
-                        `Sent at: ${new Date().toLocaleString()}`,
+                        `Sent at: ${new Date().toLocaleString("en-GB", { timeZone: "Europe/London" })}`,
                     ].join("\n"),
                     settings: {
                         emailFromName: settings.emailFromName,
@@ -2381,6 +2412,9 @@ export default function SettingsPage({
                     <TabButton active={activeTab === "email"} onClick={() => handleSettingsTabChange("email")} dataTour="settings-tab-email">
                         Email
                     </TabButton>
+                    <TabButton active={activeTab === "customer-messages"} onClick={() => handleSettingsTabChange("customer-messages")} dataTour="settings-tab-customer-messages">
+                        <span className="inline-flex items-center gap-2"><MessageSquare className="h-4 w-4" />Customer messages</span>
+                    </TabButton>
                     <TabButton active={activeTab === "dashboard"} onClick={() => handleSettingsTabChange("dashboard")} dataTour="settings-tab-dashboard">
                         Dashboard
                     </TabButton>
@@ -2388,7 +2422,7 @@ export default function SettingsPage({
                         <TabButton active={activeTab === "ai-receptionist"} onClick={() => handleSettingsTabChange("ai-receptionist")} dataTour="settings-tab-ai-receptionist">
                             <span className="inline-flex items-center gap-2">
                                 <Bot className="h-4 w-4" />
-                                AI Receptionist
+                                Voicemail
                             </span>
                         </TabButton>
                     ) : null}
@@ -2579,6 +2613,20 @@ export default function SettingsPage({
                                             onChange={(e) => update("website", e.target.value)}
                                         />
                                     </div>
+                                </Field>
+
+                                <Field
+                                    label="Business timezone"
+                                    hint="Controls Today, reminders, scheduled messages, and date rollovers."
+                                >
+                                    <Select
+                                        value={settings.businessTimezone}
+                                        onChange={(event) => update("businessTimezone", event.target.value)}
+                                    >
+                                        <option value="Europe/London">United Kingdom (Europe/London)</option>
+                                        <option value="Europe/Dublin">Ireland (Europe/Dublin)</option>
+                                        <option value="Europe/Paris">Central Europe (Europe/Paris)</option>
+                                    </Select>
                                 </Field>
 
                                 <Field label="Public liability insurance">
@@ -3860,6 +3908,21 @@ export default function SettingsPage({
                                             description="Enable VAT calculations on invoices."
                                         />
                                     </div>
+
+                                    <div className="md:col-span-2">
+                                        <Toggle
+                                            checked={settings.vatThresholdCardEnabled}
+                                            onChange={(value) => update("vatThresholdCardEnabled", value)}
+                                            label="Show VAT threshold card on dashboard"
+                                            description="Shows an estimate of taxable turnover for the rolling previous 12 months."
+                                        />
+                                    </div>
+                                    <Field label="VAT registration threshold (?)" hint="Current UK default: ?90,000. Check HMRC guidance before relying on the estimate.">
+                                        <NumberInput value={settings.vatThresholdAmount} onChange={(value) => update("vatThresholdAmount", Math.max(1, value))} min="1" step="1000" />
+                                    </Field>
+                                    <Field label="Getting close warning (%)" hint="The card changes to a warning at this percentage of the threshold.">
+                                        <NumberInput value={settings.vatWarningPercent} onChange={(value) => update("vatWarningPercent", Math.min(100, Math.max(1, value)))} min="1" step="1" />
+                                    </Field>
                                 </div>
                             </Card>
 
@@ -3934,8 +3997,8 @@ export default function SettingsPage({
                                 </Card>
 
                                 <Card
-                                    title="Stripe invoice payments"
-                                    description="Connect your Stripe account to add secure payment links to invoices."
+                                    title="Payment integrations"
+                                    description="Connect a supported provider to add secure, tenant-scoped payment links to unpaid invoices."
                                     icon={ShieldCheck}
                                     dataTour="settings-stripe-payments-section"
                                 >
@@ -4016,6 +4079,16 @@ export default function SettingsPage({
                                                     : "Complete Stripe onboarding before turning payment links on."
                                             }
                                         />
+                                        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                                            <p className="text-sm font-semibold text-slate-900">
+                                                GoCardless
+                                            </p>
+                                            <p className="mt-2 text-sm text-slate-600">
+                                                The provider layer is ready for GoCardless Billing Requests. Activation
+                                                remains unavailable until RoundHQ has completed GoCardless partner
+                                                onboarding and configured sandbox credentials and signed webhooks.
+                                            </p>
+                                        </div>
                                     </div>
                                 </Card>
                             </div>
@@ -4024,6 +4097,42 @@ export default function SettingsPage({
                     </div>
                 )}
 
+                {activeTab === "customer-messages" && (
+                    <div className="space-y-6">
+                        <Card title="Customer text messages" description="Choose what customers see when your business sends an operational text. RoundHQ keeps provider credentials private." icon={MessageSquare}>
+                            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                                <div className="md:col-span-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm leading-6 text-sky-900">Texting is managed securely by RoundHQ. Save these settings, then send a quote, invoice, reminder, or completion text from the dashboard.</div>
+                                <Field label="Sender customers see">
+                                    <Select value={settings.smsSenderMode} onChange={(event) => update("smsSenderMode", event.target.value as SettingsData["smsSenderMode"])}>
+                                        <option value="platform_default">RoundHQ managed business number</option>
+                                        <option value="business_name">Your business name (one-way text)</option>
+                                        <option value="business_mobile">Your business mobile number</option>
+                                    </Select>
+                                </Field>
+                                {settings.smsSenderMode === "business_name" ? (
+                                    <Field label="Business sender name" hint="1?11 letters, numbers, or spaces. Customers cannot reply to a name sender."><Input value={settings.smsSenderValue} onChange={(event) => update("smsSenderValue", event.target.value)} placeholder="YourBrand" maxLength={11} /></Field>
+                                ) : settings.smsSenderMode === "business_mobile" ? (
+                                    <Field label="Business mobile number" hint="Use a UK mobile number. It must be purchased or ported into RoundHQ's Telnyx messaging profile before messages can be sent from it."><Input value={settings.smsSenderValue} onChange={(event) => update("smsSenderValue", event.target.value)} placeholder="07700 900123" inputMode="tel" /></Field>
+                                ) : (
+                                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">RoundHQ will use the managed SMS number configured for the platform.</div>
+                                )}
+                                <Field label="Do not send texts before"><Input type="time" value={settings.customerMessagingQuietHoursStart} onChange={(event) => update("customerMessagingQuietHoursStart", event.target.value)} /></Field>
+                                <Field label="Do not send texts after"><Input type="time" value={settings.customerMessagingQuietHoursEnd} onChange={(event) => update("customerMessagingQuietHoursEnd", event.target.value)} /></Field>
+                                <div className="md:col-span-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">A mobile number cannot be used merely by typing it here. RoundHQ must first hold that number in its Telnyx account and assign it to the messaging profile. Use your business name if you only need one-way texts.</div>
+                            </div>
+                        </Card>
+                        <Card title="Message automations" description="Turn on only the operational messages you want to send. Templates remain editable." icon={CalendarIcon}>
+                            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                                <div className="md:col-span-2"><Toggle checked={settings.serviceRemindersEnabled} onChange={(value) => update("serviceRemindersEnabled", value)} label="Send service reminders" description="Queue a text before scheduled work." /></div>
+                                <Field label="Reminder lead time (days)"><NumberInput value={settings.serviceReminderLeadDays} onChange={(value) => update("serviceReminderLeadDays", Math.min(30, Math.max(0, Math.round(value))))} min="0" step="1" /></Field>
+                                <Field label="Reminder send time"><Input type="time" value={settings.serviceReminderSendTime} onChange={(event) => update("serviceReminderSendTime", event.target.value)} /></Field>
+                                <div className="md:col-span-2"><Field label="Service reminder template"><Textarea value={settings.serviceReminderTemplate} onChange={(event) => update("serviceReminderTemplate", event.target.value)} /></Field></div>
+                                <div className="md:col-span-2"><Toggle checked={settings.autoSendVisitCompletionTexts} onChange={(value) => update("autoSendVisitCompletionTexts", value)} label="Send a text when a job is completed" description="Only sends when a job first becomes Completed." /></div>
+                                <div className="md:col-span-2"><Field label="Completion text template"><Textarea value={settings.visitCompletionTextTemplate} onChange={(event) => update("visitCompletionTextTemplate", event.target.value)} /></Field></div>
+                            </div>
+                        </Card>
+                    </div>
+                )}
                 {activeTab === "dashboard" && (
                     <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
                         <Card
@@ -4267,10 +4376,13 @@ export default function SettingsPage({
                                                 >
                                                     {workflowMessageMethodOptions.map((option) => (
                                                         <option key={option} value={option}>
-                                                            Email
+                                                            {option === "email" ? "Email" : "Text message"}
                                                         </option>
                                                     ))}
                                                 </Select>
+                                            </Field>
+                                            <Field label="Eligible after (days)" hint="The Follow-up page remains manual; this only controls when a quote appears.">
+                                                <NumberInput value={settings.quoteFollowUpDelayDays} onChange={(value) => update("quoteFollowUpDelayDays", Math.max(0, Math.round(value)))} min="0" step="1" />
                                             </Field>
 
                                             <Field
@@ -4302,6 +4414,13 @@ export default function SettingsPage({
                                                     }
                                                 />
                                             </Field>
+                                            <Field
+                                                label="Text message template"
+                                                hint="You can edit the preview before sending. A secure quote link is added automatically."
+                                            >
+                                                <Textarea value={settings.quoteFollowUpTextTemplate} onChange={(event) => update("quoteFollowUpTextTemplate", event.target.value)} />
+                                            </Field>
+
 
                                         </div>
                                     </section>
@@ -4334,12 +4453,15 @@ export default function SettingsPage({
                                                 >
                                                     {workflowMessageMethodOptions.map((option) => (
                                                         <option key={option} value={option}>
-                                                            Email
+                                                            {option === "email" ? "Email" : "Text message"}
                                                         </option>
                                                     ))}
                                                 </Select>
                                             </Field>
 
+                                            <Field label="Eligible after due date (days)" hint="The Follow-up page remains manual; this only controls when an invoice appears.">
+                                                <NumberInput value={settings.invoiceFollowUpDelayDays} onChange={(value) => update("invoiceFollowUpDelayDays", Math.max(0, Math.round(value)))} min="0" step="1" />
+                                            </Field>
                                             <Field
                                                 label="Email subject template"
                                                 hint="Placeholders: {{customerName}}, {{businessName}}, {{documentNumber}}, {{total}}, {{dueDate}}, {{daysOverdue}}, {{reminderNumber}}"
@@ -4369,11 +4491,60 @@ export default function SettingsPage({
                                                     }
                                                 />
                                             </Field>
+                                            <Field
+                                                label="Text message template"
+                                                hint="You can edit the preview before sending. A secure invoice link is added automatically."
+                                            >
+                                                <Textarea value={settings.invoiceReminderTextTemplate} onChange={(event) => update("invoiceReminderTextTemplate", event.target.value)} />
+                                            </Field>
+
 
                                         </div>
                                     </section>
                                 </div>
                             </Card>
+                        <div className="mt-6">
+                            <Card
+                                title="Customer message automations"
+                                description="Optional messages are queued in the business timezone, respect opt-outs and quiet hours, and are never sent twice for the same occurrence."
+                                icon={CalendarIcon}
+                            >
+                                <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                                    <div className="md:col-span-2">
+                                        <Toggle
+                                            checked={settings.serviceRemindersEnabled}
+                                            onChange={(value) => update("serviceRemindersEnabled", value)}
+                                            label="Send service reminders"
+                                            description="Queue a text before scheduled work. Rescheduled, completed, and cancelled jobs are skipped."
+                                        />
+                                    </div>
+                                    <Field label="Reminder lead time (days)">
+                                        <NumberInput value={settings.serviceReminderLeadDays} onChange={(value) => update("serviceReminderLeadDays", Math.min(30, Math.max(0, Math.round(value))))} min="0" step="1" />
+                                    </Field>
+                                    <Field label="Send time">
+                                        <Input type="time" value={settings.serviceReminderSendTime} onChange={(event) => update("serviceReminderSendTime", event.target.value)} />
+                                    </Field>
+                                    <div className="md:col-span-2">
+                                        <Field label="Service reminder template" hint="Placeholders: {{customerName}}, {{businessName}}, {{serviceDate}}, {{serviceType}}, {{arrivalWindow}}">
+                                            <Textarea value={settings.serviceReminderTemplate} onChange={(event) => update("serviceReminderTemplate", event.target.value)} />
+                                        </Field>
+                                    </div>
+                                    <div className="md:col-span-2">
+                                        <Toggle
+                                            checked={settings.autoSendVisitCompletionTexts}
+                                            onChange={(value) => update("autoSendVisitCompletionTexts", value)}
+                                            label="Send a text when a job is completed"
+                                            description="Only sends on the transition to Completed. Undoing and completing again creates a new occurrence."
+                                        />
+                                    </div>
+                                    <div className="md:col-span-2">
+                                        <Field label="Completion text template" hint="Placeholders: {{customerName}}, {{businessName}}, {{serviceType}}, {{amount}}, {{paymentDetails}}, {{paymentReference}}">
+                                            <Textarea value={settings.visitCompletionTextTemplate} onChange={(event) => update("visitCompletionTextTemplate", event.target.value)} />
+                                        </Field>
+                                    </div>
+                                </div>
+                            </Card>
+                        </div>
                         </div>
                         ) : null}
                     </div>
@@ -4383,7 +4554,7 @@ export default function SettingsPage({
                     <div className="space-y-6">
                         {!aiReceptionistSettings ? (
                             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
-                                AI Receptionist settings are not available yet. Refresh the page
+                                Voicemail settings are not available yet. Refresh the page
                                 once the database setup has been applied.
                             </div>
                         ) : (
@@ -4393,7 +4564,7 @@ export default function SettingsPage({
                                         <span className="font-bold">Database setup needed:</span>{" "}
                                         Run <code>supabase/ai_receptionist_settings.sql</code> or
                                         the latest <code>supabase/roundhq_tenant_schema.sql</code>{" "}
-                                        before saving AI Receptionist settings.
+                                        before saving voicemail settings.
                                         {aiReceptionistSettings.schemaError ? (
                                             <div className="mt-2 text-xs text-amber-800">
                                                 {aiReceptionistSettings.schemaError}

@@ -20,7 +20,6 @@ import {
   buildOpenAiRealtimeSipUri,
   encodeRoundHqCallReference,
   getOpenAiRealtimeSipConfig,
-  getOpenAiRealtimeSipReadiness,
 } from "@/lib/ai-receptionist/realtime/openai-sip";
 import {
   createEmptyAiReceptionistLeadState,
@@ -740,7 +739,7 @@ function buildTelnyxLeadPayload(
     transcript_entries: preparedTranscript.transcriptEntries,
     recording_id: recording.callControlId,
     call_duration_seconds: recording.durationSeconds ?? undefined,
-    source: "AI Receptionist",
+    source: "Voicemail",
     provider: "telnyx",
     telnyx_call_control_id: recording.callControlId,
     telnyx_call_session_id: recording.callSessionId,
@@ -836,10 +835,7 @@ export async function handleTelnyxIncomingCall(
   }
 
   const call = normalizeTelnyxCall(validated.event);
-  const liveAiReadiness = getOpenAiRealtimeSipReadiness();
-  const liveAiConfigured = Boolean(
-    validated.settings.realtimeEnabled && liveAiReadiness.ready
-  );
+  const liveAiConfigured = false;
 
   if (!call.callControlId) {
     return jsonResult({ error: "call_control_id is required." }, 400);
@@ -857,13 +853,7 @@ export async function handleTelnyxIncomingCall(
       twilioPhoneNumber: call.calledNumber,
       callType: liveAiConfigured ? "realtime" : "voicemail",
       callStatus: call.callStatus || "incoming",
-      aiSummaries:
-        validated.settings.realtimeEnabled && !liveAiReadiness.ready
-          ? {
-              live_ai_status: "configuration_unavailable",
-              live_ai_readiness: liveAiReadiness,
-            }
-          : undefined,
+      aiSummaries: undefined,
       rawPayload: call.rawPayload,
     }
   );

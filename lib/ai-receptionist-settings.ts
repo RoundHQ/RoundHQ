@@ -383,7 +383,7 @@ export function getDefaultAiReceptionistSettings(
     questionsToAsk: [...DEFAULT_AI_RECEPTIONIST_QUESTIONS],
     emergencyKeywords: [...DEFAULT_AI_RECEPTIONIST_EMERGENCY_KEYWORDS],
     consentMessage: DEFAULT_AI_RECEPTIONIST_CONSENT,
-    leadSourceLabel: "AI Receptionist",
+    leadSourceLabel: "Voicemail",
     createdAt: null,
     updatedAt: null,
     exists: false,
@@ -434,7 +434,7 @@ export function normalizeAiReceptionistSettings(
     twilioAccountSid: getText(value?.twilioAccountSid),
     twilioPhoneNumber: getText(value?.twilioPhoneNumber),
     twilioAuthTokenConfigured: Boolean(value?.twilioAuthTokenConfigured),
-    realtimeEnabled: Boolean(value?.realtimeEnabled),
+    realtimeEnabled: false,
     voiceAccent: normalizeAiReceptionistVoiceAccent(value?.voiceAccent),
     customConversationEnabled: Boolean(value?.customConversationEnabled),
     conversationInstructions: getText(value?.conversationInstructions),
@@ -449,7 +449,7 @@ export function normalizeAiReceptionistSettings(
       value?.consentMessage,
       DEFAULT_AI_RECEPTIONIST_CONSENT
     ),
-    leadSourceLabel: getText(value?.leadSourceLabel) || "AI Receptionist",
+    leadSourceLabel: "Voicemail",
     createdAt: value?.createdAt ?? null,
     updatedAt: value?.updatedAt ?? null,
     exists: Boolean(value?.exists),
@@ -487,9 +487,9 @@ export function mapAiReceptionistSettingsRow(
     twilioAccountSid: row.twilio_account_sid ?? "",
     twilioPhoneNumber: row.twilio_phone_number ?? "",
     twilioAuthTokenConfigured: Boolean(row.twilio_auth_token?.trim()),
-    realtimeEnabled: Boolean(row.realtime_enabled),
+    realtimeEnabled: false,
     voiceAccent: normalizeAiReceptionistVoiceAccent(row.voice_accent),
-    customConversationEnabled: Boolean(row.custom_conversation_enabled),
+    customConversationEnabled: false,
     conversationInstructions: row.conversation_instructions ?? "",
     transferToNumber: row.transfer_to_number ?? "",
     newLeadSmsEnabled: Boolean(row.new_lead_sms_enabled),
@@ -505,7 +505,7 @@ export function mapAiReceptionistSettingsRow(
       DEFAULT_AI_RECEPTIONIST_EMERGENCY_KEYWORDS
     ),
     consentMessage: row.consent_message ?? DEFAULT_AI_RECEPTIONIST_CONSENT,
-    leadSourceLabel: row.lead_source_label ?? "AI Receptionist",
+    leadSourceLabel: row.lead_source_label ?? "Voicemail",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     exists: true,
@@ -535,9 +535,9 @@ export function mapAiReceptionistSettingsToRow(
     telnyx_public_key: settings.telnyxPublicKey,
     twilio_account_sid: settings.twilioAccountSid,
     twilio_phone_number: settings.twilioPhoneNumber,
-    realtime_enabled: settings.realtimeEnabled,
+    realtime_enabled: false,
     voice_accent: settings.voiceAccent,
-    custom_conversation_enabled: settings.customConversationEnabled,
+    custom_conversation_enabled: false,
     conversation_instructions: settings.conversationInstructions,
     transfer_to_number: settings.transferToNumber,
     new_lead_sms_enabled: settings.newLeadSmsEnabled,
@@ -658,15 +658,7 @@ export function validateAiReceptionistSettings(
   }
 
   if (settings.enabled && !settings.businessName) {
-    errors.push("Business name is required when AI Receptionist is enabled.");
-  }
-
-  if (
-    settings.enabled &&
-    (!settings.realtimeEnabled || !settings.customConversationEnabled) &&
-    settings.questionsToAsk.length === 0
-  ) {
-    errors.push("Add at least one question before enabling AI Receptionist.");
+    errors.push("Business name is required when voicemail-to-lead is enabled.");
   }
 
   return {

@@ -105,7 +105,8 @@ function formatDateTime(value: string) {
     return "-";
   }
 
-  return date.toLocaleString(undefined, {
+  return date.toLocaleString("en-GB", {
+    timeZone: "Europe/London",
     day: "numeric",
     month: "short",
     hour: "2-digit",

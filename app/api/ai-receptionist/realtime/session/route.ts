@@ -7,7 +7,18 @@ import { handleRealtimeSessionStart } from "@/lib/ai-receptionist/realtime/handl
 
 export const runtime = "nodejs";
 
+function liveAiCallsAreRetired() {
+  return true;
+}
+
 export async function POST(request: NextRequest) {
+  if (liveAiCallsAreRetired()) {
+    return NextResponse.json(
+      { error: "Live AI calls have been retired. Use the voicemail-to-lead flow." },
+      { status: 410 }
+    );
+  }
+
   try {
     const parsed = await parseRealtimeJsonRequest(request);
 
