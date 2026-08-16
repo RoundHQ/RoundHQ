@@ -2060,6 +2060,17 @@ function formatTemplateCurrency(
 function getBusinessDisplayName(settings: Pick<AppSettings, "tradingName" | "businessName">) {
   return settings.tradingName.trim() || settings.businessName.trim() || "Your Business";
 }
+function getCompletionPaymentDetails(
+    settings: Pick<AppSettings, "bankAccountName" | "bankSortCode" | "bankAccountNumber">
+) {
+  const details = [
+    settings.bankAccountName.trim() ? `Account name: ${settings.bankAccountName.trim()}` : "",
+    settings.bankSortCode.trim() ? `Sort code: ${settings.bankSortCode.trim()}` : "",
+    settings.bankAccountNumber.trim() ? `Account number: ${settings.bankAccountNumber.trim()}` : "",
+  ].filter(Boolean);
+
+  return details.length > 0 ? `Pay by bank transfer. ${details.join(", ")}.` : "";
+}
 
 function applyMessageTemplate(
     template: string,
@@ -10891,13 +10902,19 @@ export default function JobsApp({
 
   async function sendScheduledJobCompletionText(
       job: ScheduledJob,
-      options: { retryFailed?: boolean } = {}
+      options: { retryFailed?: boolean; invoice?: Invoice | null } = {}
   ) {
     if (!appSettings.autoSendVisitCompletionTexts) {
       return;
     }
 
     const customer = job.customerId != null ? customerMap.get(job.customerId) ?? null : null;
+    const invoice =
+      options.invoice ??
+      (job.invoiceIds ?? [])
+        .map((invoiceId) => invoices.find((entry) => entry.id === invoiceId) ?? null)
+        .find((entry): entry is Invoice => Boolean(entry)) ??
+      null;
     const recipient = customer?.phone?.trim() || "";
     if (!customer || !recipient) {
       throw new Error("The job was completed, but the customer does not have a valid mobile number for the completion text.");
@@ -10917,6 +10934,9 @@ export default function JobsApp({
           date: formatIsoDateLabel(getInputDateValue(job.date) || job.date),
           serviceType: job.workType || getScheduledJobTypeLabel(job.type) || job.title,
           businessName: getBusinessDisplayName(appSettings),
+          amount: invoice ? formatTemplateCurrency(invoice.total, appSettings.currencyCode) : "",
+          paymentDetails: getCompletionPaymentDetails(appSettings),
+          paymentReference: appSettings.bankPaymentReference.trim() || invoice?.invoiceNumber || "",
         }),
         relatedType: "job",
         relatedId: job.id,
@@ -10969,24 +10989,29 @@ export default function JobsApp({
       return;
     }
 
+    const ensuredInvoice = await ensureInvoiceForCompletedScheduledJob(savedJob);
+    let completedJob = savedJob;
+    if (ensuredInvoice) {
+      const existingInvoiceIds = new Set(savedJob.invoiceIds ?? []);
+      if (!existingInvoiceIds.has(ensuredInvoice.id)) {
+        const savedCompletedJob = await saveScheduledJobRecord({
+          ...savedJob,
+          invoiceIds: [...existingInvoiceIds, ensuredInvoice.id],
+        });
+        completedJob = savedCompletedJob ?? {
+          ...savedJob,
+          invoiceIds: [...existingInvoiceIds, ensuredInvoice.id],
+        };
+      }
+    }
+
     let completionMessageError: Error | null = null;
     try {
-      await sendScheduledJobCompletionText(savedJob);
+      await sendScheduledJobCompletionText(completedJob, { invoice: ensuredInvoice });
     } catch (error) {
       completionMessageError = error instanceof Error
         ? error
         : new Error("The job was completed, but the completion text could not be sent.");
-    }
-
-    const ensuredInvoice = await ensureInvoiceForCompletedScheduledJob(savedJob);
-    if (ensuredInvoice) {
-      const existingInvoiceIds = new Set(savedJob.invoiceIds ?? []);
-      if (!existingInvoiceIds.has(ensuredInvoice.id)) {
-        await saveScheduledJobRecord({
-          ...savedJob,
-          invoiceIds: [...existingInvoiceIds, ensuredInvoice.id],
-        });
-      }
     }
 
     if (completionMessageError) {
