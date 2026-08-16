@@ -363,6 +363,7 @@ type AppSettings = {
   invoiceReminderEmailTemplate: string;
   invoiceReminderTextTemplate: string;
   autoSendVisitCompletionTexts: boolean;
+  autoSendServiceRoundCompletionTexts: boolean;
   visitCompletionTextTemplate: string;
 
   serviceRemindersEnabled: boolean;
@@ -1406,6 +1407,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   invoiceReminderTextTemplate:
       "Hi {{customerName}}, this is a reminder that invoice {{documentNumber}} from {{businessName}} is overdue. Total: {{total}}. Due date: {{dueDate}}. Please let me know once payment has been made.",
   autoSendVisitCompletionTexts: false,
+  autoSendServiceRoundCompletionTexts: false,
   visitCompletionTextTemplate:
       "Hi {{customerName}}, your service visit has been completed today. Payment due: {{amount}}. {{paymentDetails}} Reference: {{paymentReference}}. Thanks, {{businessName}}",
   serviceRemindersEnabled: false,
@@ -2063,15 +2065,19 @@ function getBusinessDisplayName(settings: Pick<AppSettings, "tradingName" | "bus
 function getCompletionPaymentDetails(
     settings: Pick<AppSettings, "bankAccountName" | "bankSortCode" | "bankAccountNumber">
 ) {
-  const details = [
-    settings.bankAccountName.trim() ? `Account name: ${settings.bankAccountName.trim()}` : "",
-    settings.bankSortCode.trim() ? `Sort code: ${settings.bankSortCode.trim()}` : "",
-    settings.bankAccountNumber.trim() ? `Account number: ${settings.bankAccountNumber.trim()}` : "",
-  ].filter(Boolean);
+  const details: string[] = [];
+  if (settings.bankAccountName.trim()) {
+    details.push(`Account Name: ${settings.bankAccountName.trim()}`);
+  }
+  if (settings.bankAccountNumber.trim()) {
+    details.push(`Account Number: ${settings.bankAccountNumber.trim()}`);
+  }
+  if (settings.bankSortCode.trim()) {
+    details.push(`Sort Code: ${settings.bankSortCode.trim()}`);
+  }
 
-  return details.length > 0 ? `Pay by bank transfer. ${details.join(", ")}.` : "";
+  return details.length > 0 ? ["Pay by bank transfer:", ...details].join("\n") : "";
 }
-
 function applyMessageTemplate(
     template: string,
     values: Record<string, string | number | undefined>
@@ -10919,7 +10925,9 @@ export default function JobsApp({
     if (!customer || !recipient) {
       throw new Error("The job was completed, but the customer does not have a valid mobile number for the completion text.");
     }
-
+    if (!invoice) {
+      throw new Error("The job was completed, but an invoice could not be created for the completion text.");
+    }
     const response = await fetch("/api/customer-messages", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -10928,20 +10936,19 @@ export default function JobsApp({
         channel: "sms",
         kind: "job_completion",
         recipient,
-        body: applyMessageTemplate(appSettings.visitCompletionTextTemplate, {
-          customerName: customer.name,
-          serviceDate: formatIsoDateLabel(getInputDateValue(job.date) || job.date),
-          date: formatIsoDateLabel(getInputDateValue(job.date) || job.date),
-          serviceType: job.workType || getScheduledJobTypeLabel(job.type) || job.title,
-          businessName: getBusinessDisplayName(appSettings),
-          amount: invoice ? formatTemplateCurrency(invoice.total, appSettings.currencyCode) : "",
-          paymentDetails: getCompletionPaymentDetails(appSettings),
-          paymentReference: appSettings.bankPaymentReference.trim() || invoice?.invoiceNumber || "",
-        }),
-        relatedType: "job",
-        relatedId: job.id,
+        body: [
+          `Hi ${customer.name},`,
+          "",
+          `Your ${job.workType || getScheduledJobTypeLabel(job.type) || job.title} scheduled for ${formatIsoDateLabel(getInputDateValue(job.date) || job.date)} has been completed.`,
+          `Your invoice for ${formatTemplateCurrency(invoice.total, appSettings.currencyCode)} is ready to view securely below.`,
+          "",
+          `Thanks, ${getBusinessDisplayName(appSettings)}`,
+        ].join("\n"),
+        relatedType: "invoice",
+        relatedId: invoice.id,
         occurrence: `job-completion:${job.id}`,
         retryFailed: options.retryFailed === true,
+        includeDocumentLink: true,
       }),
     });
     const result = await response.json().catch(() => null) as
@@ -10959,7 +10966,7 @@ export default function JobsApp({
 
   async function sendServiceRoundCompletionText(customer: Customer, visit: VisitLog) {
     if (
-      !appSettings.autoSendVisitCompletionTexts ||
+      !appSettings.autoSendServiceRoundCompletionTexts ||
       customer.paymentMethod !== "On Day Transfer"
     ) {
       return;

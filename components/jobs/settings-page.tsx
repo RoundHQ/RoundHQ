@@ -219,6 +219,7 @@ export type SettingsData = {
     invoiceReminderEmailTemplate: string;
     invoiceReminderTextTemplate: string;
     autoSendVisitCompletionTexts: boolean;
+    autoSendServiceRoundCompletionTexts: boolean;
     visitCompletionTextTemplate: string;
 
     serviceRemindersEnabled: boolean;
@@ -492,6 +493,7 @@ const defaultSettings: SettingsData = {
     invoiceReminderTextTemplate:
         "Hi {{customerName}}, this is a reminder that invoice {{documentNumber}} from {{businessName}} is overdue. Total: {{total}}. Due date: {{dueDate}}. Please let me know once payment has been made.",
     autoSendVisitCompletionTexts: false,
+    autoSendServiceRoundCompletionTexts: false,
     visitCompletionTextTemplate:
         "Hi {{customerName}}, your service visit has been completed today. Payment due: {{amount}}. {{paymentDetails}} Reference: {{paymentReference}}. Thanks, {{businessName}}",
     serviceRemindersEnabled: false,
@@ -4127,8 +4129,9 @@ export default function SettingsPage({
                                 <Field label="Reminder lead time (days)"><NumberInput value={settings.serviceReminderLeadDays} onChange={(value) => update("serviceReminderLeadDays", Math.min(30, Math.max(0, Math.round(value))))} min="0" step="1" /></Field>
                                 <Field label="Reminder send time"><Input type="time" value={settings.serviceReminderSendTime} onChange={(event) => update("serviceReminderSendTime", event.target.value)} /></Field>
                                 <div className="md:col-span-2"><Field label="Service reminder template"><Textarea value={settings.serviceReminderTemplate} onChange={(event) => update("serviceReminderTemplate", event.target.value)} /></Field></div>
-                                <div className="md:col-span-2"><Toggle checked={settings.autoSendVisitCompletionTexts} onChange={(value) => update("autoSendVisitCompletionTexts", value)} label="Send a text when work is completed" description="Sends when a scheduled job or service round first becomes Completed." /></div>
-                                <div className="md:col-span-2"><Field label="Completion text template"><Textarea value={settings.visitCompletionTextTemplate} onChange={(event) => update("visitCompletionTextTemplate", event.target.value)} /></Field></div>
+                                <div className="md:col-span-2"><Toggle checked={settings.autoSendVisitCompletionTexts} onChange={(value) => update("autoSendVisitCompletionTexts", value)} label="Send an invoice text when a scheduled job is completed" description="Creates the invoice and sends its secure link when a scheduled job first becomes Completed." /></div>
+                                <div className="md:col-span-2"><Toggle checked={settings.autoSendServiceRoundCompletionTexts} onChange={(value) => update("autoSendServiceRoundCompletionTexts", value)} label="Send a text when grass cutting is completed" description="Sends your editable grass-cutting template for On Day Transfer customers with a saved phone number." /></div>
+                                <div className="md:col-span-2"><Field label="Grass-cutting completion text template"><Textarea value={settings.visitCompletionTextTemplate} onChange={(event) => update("visitCompletionTextTemplate", event.target.value)} /></Field></div>
                             </div>
                         </Card>
                     </div>
@@ -4533,12 +4536,20 @@ export default function SettingsPage({
                                         <Toggle
                                             checked={settings.autoSendVisitCompletionTexts}
                                             onChange={(value) => update("autoSendVisitCompletionTexts", value)}
-                                            label="Send a text when work is completed"
-                                            description="Sends when a scheduled job or service round first becomes Completed. Undoing and completing again creates a new occurrence."
+                                            label="Send an invoice text when a scheduled job is completed"
+                                            description="Creates the invoice and sends its secure link when a scheduled job first becomes Completed. Undoing and completing again creates a new occurrence."
                                         />
                                     </div>
                                     <div className="md:col-span-2">
-                                        <Field label="Completion text template" hint="Placeholders: {{customerName}}, {{businessName}}, {{serviceType}}, {{amount}}, {{paymentDetails}}, {{paymentReference}}">
+                                        <Toggle
+                                            checked={settings.autoSendServiceRoundCompletionTexts}
+                                            onChange={(value) => update("autoSendServiceRoundCompletionTexts", value)}
+                                            label="Send a text when grass cutting is completed"
+                                            description="Sends your editable grass-cutting template for On Day Transfer customers with a saved phone number."
+                                        />
+                                    </div>
+                                    <div className="md:col-span-2">
+                                        <Field label="Grass-cutting completion text template" hint="Placeholders: {{customerName}}, {{businessName}}, {{serviceType}}, {{amount}}, {{paymentDetails}}, {{paymentReference}}">
                                             <Textarea value={settings.visitCompletionTextTemplate} onChange={(event) => update("visitCompletionTextTemplate", event.target.value)} />
                                         </Field>
                                     </div>
