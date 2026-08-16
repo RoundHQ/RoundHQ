@@ -21,27 +21,23 @@ export async function DELETE(
   const organizationId = await ensureWorkspace(supabase, user);
   const { data: existing, error: readError } = await supabase
     .from("recurring_invoice_templates")
-    .select("id,deleted_at,is_active")
+    .select("id")
     .eq("organization_id", organizationId)
     .eq("id", scheduleId)
     .maybeSingle();
 
   if (readError) return NextResponse.json({ error: readError.message }, { status: 500 });
   if (!existing) return NextResponse.json({ deleted: true, alreadyDeleted: true });
-  if (existing.deleted_at) return NextResponse.json({ deleted: true, alreadyDeleted: true });
-
-  const deletedAt = new Date().toISOString();
-  const { data: deactivated, error } = await supabase
+  const { data: deleted, error } = await supabase
     .from("recurring_invoice_templates")
-    .update({ is_active: false, deleted_at: deletedAt, deleted_by: user.id, updated_at: deletedAt })
+    .delete()
     .eq("organization_id", organizationId)
     .eq("id", scheduleId)
-    .is("deleted_at", null)
     .select("id")
     .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!deactivated) {
+  if (!deleted) {
     return NextResponse.json({ deleted: true, alreadyDeleted: true });
   }
 
@@ -53,7 +49,7 @@ export async function DELETE(
     metadata: {},
   });
   if (auditError) {
-    console.error("recurring_invoice_deactivation_audit_failed", {
+    console.error("recurring_invoice_deletion_audit_failed", {
       organizationId,
       scheduleId,
       errorCode: auditError.code,

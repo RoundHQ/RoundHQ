@@ -107,6 +107,8 @@ export type Customer = {
   address: string;
   postcode?: string;
   town?: string;
+  savedAddresses?: CustomerAddress[];
+  serviceAddressId?: string;
   phone?: string;
   email?: string;
   contactEmails?: string[];
@@ -138,6 +140,14 @@ export type Customer = {
   longitude?: number | null;
 
   createdAt: string;
+};
+
+export type CustomerAddress = {
+  id: string;
+  label: string;
+  address: string;
+  town?: string;
+  postcode?: string;
 };
 
 export type LineItem = {

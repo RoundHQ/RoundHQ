@@ -17,6 +17,7 @@ import {
 import {
     GRASS_CUT_AREA_OPTIONS,
     type Customer,
+    type CustomerAddress,
     type CustomerType,
     type DayName,
     type GrassCutArea,
@@ -384,6 +385,17 @@ export default function CustomerForm({
         setForm((prev) => ({ ...prev, [key]: value }));
     }
 
+    function updateSavedAddress(id: string, key: keyof CustomerAddress, value: string) {
+        setForm((previous) => ({ ...previous, savedAddresses: (previous.savedAddresses ?? []).map((entry) => entry.id === id ? { ...entry, [key]: value } : entry) }));
+    }
+
+    function addSavedAddress() {
+        setForm((previous) => ({ ...previous, savedAddresses: [...(previous.savedAddresses ?? []), { id: crypto.randomUUID(), label: "Additional address", address: "" }] }));
+    }
+
+    function removeSavedAddress(id: string) {
+        setForm((previous) => ({ ...previous, savedAddresses: (previous.savedAddresses ?? []).filter((entry) => entry.id !== id), serviceAddressId: previous.serviceAddressId === id ? undefined : previous.serviceAddressId }));
+    }
     function updateGrassCuttingCustomer(isGrassCuttingCustomer: boolean) {
         setForm((prev) => ({
             ...prev,
@@ -871,6 +883,10 @@ export default function CustomerForm({
                     </div>
                 </section>
 
+                <section className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex items-center justify-between gap-3"><div><h3 className="text-sm font-bold uppercase tracking-wide text-slate-500">Additional addresses</h3><p className="mt-1 text-xs text-slate-500">Save extra work addresses for quotes, invoices, and service rounds.</p></div><button type="button" onClick={addSavedAddress} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Add address</button></div>
+                    {(form.savedAddresses ?? []).map((entry) => <div key={entry.id} className="grid gap-3 rounded-xl border border-slate-200 bg-white p-3 md:grid-cols-4"><input className="rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Label" value={entry.label} onChange={(event) => updateSavedAddress(entry.id, "label", event.target.value)} /><input className="rounded-lg border border-slate-200 px-3 py-2 text-sm md:col-span-2" placeholder="Address" value={entry.address} onChange={(event) => updateSavedAddress(entry.id, "address", event.target.value)} /><button type="button" onClick={() => removeSavedAddress(entry.id)} className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700">Remove</button><input className="rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Town" value={entry.town ?? ""} onChange={(event) => updateSavedAddress(entry.id, "town", event.target.value)} /><input className="rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Postcode" value={entry.postcode ?? ""} onChange={(event) => updateSavedAddress(entry.id, "postcode", event.target.value)} />{form.isGrassCuttingCustomer ? <label className="flex items-center gap-2 text-sm font-medium text-slate-700 md:col-span-2"><input type="radio" name="service-address" checked={form.serviceAddressId === entry.id} onChange={() => update("serviceAddressId", entry.id)} />Use for this service round</label> : null}</div>)}
+                </section>
                 {showCommercialTools && (
                     <section className="space-y-4">
                         <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">

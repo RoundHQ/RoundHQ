@@ -94,6 +94,7 @@ export default async function SecureDocumentPage({
     ["Sort Code", settingText(appSettings.bankSortCode)],
   ].filter((detail): detail is [string, string] => Boolean(detail[1]));
   const bankPaymentReference = settingText(appSettings.bankPaymentReference);
+  const logoUrl = settingText(appSettings.logoUrl);
 
   const query =
     share.document_type === "quote"
@@ -126,9 +127,16 @@ export default async function SecureDocumentPage({
       <article className="mx-auto max-w-3xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:p-10">
         <header className="flex flex-col gap-6 border-b border-slate-200 pb-8 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p className="text-sm font-bold uppercase tracking-[0.2em] text-emerald-700">Secure RoundHQ document</p>
-            <h1 className="mt-2 text-3xl font-black">{title} {number}</h1>
-            <p className="mt-2 text-slate-600">From {organization?.name || "your service provider"}</p>
+            {logoUrl ? (
+              <img
+                src={logoUrl}
+                alt={`${organization?.name || "Business"} logo`}
+                className="mb-4 max-h-16 max-w-56 object-contain object-left"
+              />
+            ) : (
+              <p className="text-sm font-bold uppercase tracking-[0.2em] text-emerald-700">Secure document</p>
+            )}
+            <h1 className="text-3xl font-black">{title} {number}</h1>
           </div>
           <div className="rounded-2xl bg-slate-100 px-4 py-3 text-sm">
             <p><span className="font-semibold">Date:</span> {formatUkDate(document.date, {}, timeZone)}</p>
@@ -145,10 +153,10 @@ export default async function SecureDocumentPage({
           {address ? <p className="mt-1 text-slate-600">{address}</p> : null}
         </section>
 
-        <div className="overflow-x-auto rounded-2xl border border-slate-200">
-          <table className="w-full min-w-[34rem] border-collapse text-left text-sm">
+        <div className="rounded-2xl border border-slate-200">
+          <table className="w-full border-collapse text-left text-sm">
             <thead className="bg-slate-950 text-white">
-              <tr><th className="px-4 py-3">Item</th><th className="px-4 py-3 text-right">Qty</th><th className="px-4 py-3 text-right">Price</th><th className="px-4 py-3 text-right">Total</th></tr>
+              <tr><th className="px-4 py-3">Item</th><th className="px-4 py-3 text-right">Price</th></tr>
             </thead>
             <tbody>
               {items.map((item, index) => {
@@ -156,15 +164,13 @@ export default async function SecureDocumentPage({
                 const price = Number(item.price) || 0;
                 return (
                   <tr key={index} className="border-t border-slate-200">
-                    <td className="px-4 py-3">{String(item.description || item.name || "Service")}</td>
-                    <td className="px-4 py-3 text-right">{quantity}</td>
-                    <td className="px-4 py-3 text-right">{money(price)}</td>
-                    <td className="px-4 py-3 text-right font-semibold">{money(item.total ?? quantity * price)}</td>
+                    <td className="px-4 py-3 break-words">{String(item.description || item.name || "Service")}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-semibold">{money(item.total ?? quantity * price)}</td>
                   </tr>
                 );
               })}
             </tbody>
-            <tfoot><tr className="border-t-2 border-slate-950"><th colSpan={3} className="px-4 py-4 text-right text-base">Total</th><td className="px-4 py-4 text-right text-xl font-black">{money(document.total)}</td></tr></tfoot>
+            <tfoot><tr className="border-t-2 border-slate-950"><th className="px-4 py-4 text-right text-base">Total</th><td className="whitespace-nowrap px-4 py-4 text-right text-xl font-black">{money(document.total)}</td></tr></tfoot>
           </table>
         </div>
 

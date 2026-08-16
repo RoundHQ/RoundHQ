@@ -10369,7 +10369,7 @@ export default function JobsApp({
   }
 
   async function deleteRecurringInvoiceTemplate(templateId: string) {
-    if (!window.confirm("Deactivate this recurring invoice schedule? Existing invoices and payments will be kept.")) {
+    if (!window.confirm("Delete this recurring invoice schedule? Existing invoices and payments will be kept.")) {
       return false;
     }
 
@@ -10389,7 +10389,7 @@ export default function JobsApp({
         });
         const result = await response.json().catch(() => null) as { error?: string } | null;
         if (!response.ok) {
-          throw new Error(result?.error || "Unable to deactivate the recurring invoice schedule.");
+          throw new Error(result?.error || "Unable to delete the recurring invoice schedule.");
         }
 
         setRecurringInvoiceTemplates(nextTemplates);

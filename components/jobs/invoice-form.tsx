@@ -5,6 +5,7 @@ import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import DocumentHistoryPanel from "./document-history-panel";
 import DocumentCustomerCreateDialog from "./document-customer-create-dialog";
 import DocumentCustomerPicker from "./document-customer-picker";
+import { getCustomerAddressOptions } from "./customer-addresses";
 import {
     INVOICE_STATUS_OPTIONS,
     type Customer,
@@ -800,6 +801,21 @@ export default function InvoiceForm({
                         />
                     </div>
 
+                    {selectedCustomer && getCustomerAddressOptions(selectedCustomer).length > 1 ? (
+                        <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-700">Work address</label>
+                            <select
+                                value={getCustomerAddressOptions(selectedCustomer).find((entry) => entry.address === activeCustomerAddress && entry.town === activeCustomerTown && entry.postcode === activeCustomerPostcode)?.id ?? "primary"}
+                                onChange={(event) => {
+                                    const address = getCustomerAddressOptions(selectedCustomer).find((entry) => entry.id === event.target.value);
+                                    if (address) setDocumentCustomerFields((previous) => ({ ...previous, customerAddress: address.address, customerTown: address.town, customerPostcode: address.postcode }));
+                                }}
+                                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
+                            >
+                                {getCustomerAddressOptions(selectedCustomer).map((entry) => <option key={entry.id} value={entry.id}>{entry.label}: {[entry.address, entry.town, entry.postcode].filter(Boolean).join(", ")}</option>)}
+                            </select>
+                        </div>
+                    ) : null}
                     <div>
                         <label className="mb-2 block text-sm font-medium text-slate-700">
                             Status

@@ -1,5 +1,6 @@
 import type {
   Customer,
+  CustomerAddress,
   CutFrequency,
   CustomerType,
   DayName,
@@ -27,6 +28,8 @@ export type CustomerRow = {
   address: string;
   postcode: string | null;
   town: string | null;
+  saved_addresses?: unknown;
+  service_address_id?: string | null;
   phone: string | null;
   email: string | null;
   contact_emails: string[] | null;
@@ -59,6 +62,8 @@ export type CustomerWriteRow = {
   address: string;
   postcode: string | null;
   town: string | null;
+  saved_addresses: CustomerAddress[];
+  service_address_id: string | null;
   phone: string | null;
   email: string | null;
   contact_emails: string[];
@@ -195,6 +200,22 @@ function normalizeNotCutReason(
   return trimmed || undefined;
 }
 
+function normalizeSavedAddresses(value: unknown): CustomerAddress[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry, index) => {
+    if (!entry || typeof entry !== "object") return [];
+    const candidate = entry as Record<string, unknown>;
+    const address = typeof candidate.address === "string" ? candidate.address.trim() : "";
+    if (!address) return [];
+    return [{
+      id: typeof candidate.id === "string" && candidate.id.trim() ? candidate.id.trim() : `address-${index + 1}`,
+      label: typeof candidate.label === "string" && candidate.label.trim() ? candidate.label.trim() : `Address ${index + 1}`,
+      address,
+      town: typeof candidate.town === "string" ? candidate.town.trim() || undefined : undefined,
+      postcode: typeof candidate.postcode === "string" ? candidate.postcode.trim() || undefined : undefined,
+    }];
+  });
+}
 export function mapCustomerRowToCustomer(row: CustomerRow): Customer {
   const contactEmails = Array.isArray(row.contact_emails)
       ? row.contact_emails
@@ -212,6 +233,8 @@ export function mapCustomerRowToCustomer(row: CustomerRow): Customer {
     address: row.address,
     postcode: row.postcode ?? undefined,
     town: row.town ?? undefined,
+    savedAddresses: normalizeSavedAddresses(row.saved_addresses),
+    serviceAddressId: row.service_address_id ?? undefined,
     phone: row.phone ?? undefined,
     email: row.email ?? undefined,
     contactEmails,
@@ -254,6 +277,8 @@ export function mapCustomerToRow(customer: Customer): CustomerWriteRow {
     address: customer.address.trim(),
     postcode: customer.postcode?.trim() || null,
     town: customer.town?.trim() || null,
+    saved_addresses: normalizeSavedAddresses(customer.savedAddresses),
+    service_address_id: customer.serviceAddressId?.trim() || null,
     phone: customer.phone?.trim() || null,
     email: contactEmails[0] ?? (customer.email?.trim() || null),
     contact_emails: contactEmails,

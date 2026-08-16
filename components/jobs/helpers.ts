@@ -338,7 +338,7 @@ export function buildLocationLine(town?: string, postcode?: string) {
 
 export function getCustomerDisplayAddress(
   customer:
-    | Pick<Customer, "customerType" | "siteName" | "address" | "town" | "postcode">
+    | Pick<Customer, "customerType" | "siteName" | "address" | "town" | "postcode" | "savedAddresses" | "serviceAddressId">
     | null
     | undefined
 ) {
