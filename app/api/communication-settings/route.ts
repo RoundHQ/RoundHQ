@@ -109,6 +109,8 @@ export async function PUT(request: Request) {
     email_from_name: text(body.emailFromName, 200) || null,
     email_from_address: text(body.emailFromAddress, 320) || null,
     email_reply_to: text(body.emailReplyTo, 320) || null,
+    sms_sender_mode: selectedSenderMode,
+    sms_sender_value: normalizedSenderValue || null,
     quote_follow_up_delay_days: wholeNumber(body.quoteFollowUpDelayDays, 0, 365, 3),
     invoice_follow_up_delay_days: wholeNumber(body.invoiceFollowUpDelayDays, 0, 365, 1),
     service_reminders_enabled: body.serviceRemindersEnabled === true,
