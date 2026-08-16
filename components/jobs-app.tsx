@@ -10957,6 +10957,58 @@ export default function JobsApp({
     }
   }
 
+  async function sendServiceRoundCompletionText(customer: Customer, visit: VisitLog) {
+    if (
+      !appSettings.autoSendVisitCompletionTexts ||
+      customer.paymentMethod !== "On Day Transfer"
+    ) {
+      return;
+    }
+
+    const recipient = customer.phone?.trim() || "";
+    if (!recipient) {
+      return;
+    }
+
+    const response = await fetch("/api/customer-messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        customerId: customer.id,
+        channel: "sms",
+        kind: "job_completion",
+        recipient,
+        body: applyMessageTemplate(appSettings.visitCompletionTextTemplate, {
+          customerName: customer.name,
+          serviceDate: formatIsoDateLabel(getInputDateValue(visit.visitDate) || visit.visitDate),
+          date: formatIsoDateLabel(getInputDateValue(visit.visitDate) || visit.visitDate),
+          serviceType: "Grass cutting",
+          businessName: getBusinessDisplayName(appSettings),
+          amount: formatTemplateCurrency(
+            Number(visit.priceAtVisit ?? customer.grassCutAmount ?? 0),
+            appSettings.currencyCode
+          ),
+          paymentDetails: getCompletionPaymentDetails(appSettings),
+          paymentReference: appSettings.bankPaymentReference.trim() || customer.name,
+        }),
+        relatedType: "job",
+        relatedId: String(visit.id),
+        occurrence: `service-round-completion:${visit.id}`,
+      }),
+    });
+    const result = (await response.json().catch(() => null)) as
+      | { error?: string; processingError?: string; message?: { status?: string; failure_reason?: string } }
+      | null;
+    if (!response.ok || result?.processingError || result?.message?.status === "failed") {
+      throw new Error(
+        result?.error ||
+          result?.processingError ||
+          result?.message?.failure_reason ||
+          "The completion text could not be sent."
+      );
+    }
+  }
+
   async function retryScheduledJobCompletionText(jobId: string) {
     const job = scheduledJobs.find((entry) => entry.id === jobId) ?? null;
     if (!job || job.status !== "Completed") {
@@ -14411,6 +14463,16 @@ export default function JobsApp({
         setPendingCashPayment(customerId, false);
       }
 
+
+      if (nextStatus === "completed" && existingVisit.status !== "completed") {
+        try {
+          await sendServiceRoundCompletionText(customer, persistedVisit);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "The completion text could not be sent.";
+          setDatabaseError(`The service round was marked complete, but ${message}`);
+        }
+      }
+
       return;
     }
 
@@ -14451,6 +14513,14 @@ export default function JobsApp({
       setPendingCashPayment(customerId, false);
     }
 
+    if (nextStatus === "completed") {
+      try {
+        await sendServiceRoundCompletionText(customer, persistedVisit);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "The completion text could not be sent.";
+        setDatabaseError(`The service round was marked complete, but ${message}`);
+      }
+    }
   }
 
   async function setVisitPaidStatus(visitId: number | string, paid: boolean) {
