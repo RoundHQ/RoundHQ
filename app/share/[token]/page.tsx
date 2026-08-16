@@ -37,6 +37,13 @@ type SecureDocumentRow = {
   stripe_payment_link_url?: string | null;
   stripe_payment_status?: string | null;
 };
+function record(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+function settingText(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
 
 function money(value: unknown) {
 
@@ -74,6 +81,20 @@ export default async function SecureDocumentPage({
     .select("name,business_timezone")
     .eq("id", share.organization_id)
     .maybeSingle();
+  const { data: appState } = await supabase
+    .from("app_state")
+    .select("data")
+    .eq("organization_id", share.organization_id)
+    .eq("id", "primary")
+    .maybeSingle();
+  const appSettings = record(record(appState?.data)?.appSettings) ?? {};
+  const bankDetails = [
+    ["Account Name", settingText(appSettings.bankAccountName)],
+    ["Account Number", settingText(appSettings.bankAccountNumber)],
+    ["Sort Code", settingText(appSettings.bankSortCode)],
+  ].filter((detail): detail is [string, string] => Boolean(detail[1]));
+  const bankPaymentReference = settingText(appSettings.bankPaymentReference);
+
   const query =
     share.document_type === "quote"
       ? supabase
@@ -149,6 +170,26 @@ export default async function SecureDocumentPage({
 
         {document.notes ? <section className="mt-8 rounded-2xl bg-slate-50 p-5"><h2 className="font-bold">Notes</h2><p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{document.notes}</p></section> : null}
         {share.document_type === "invoice" && document.terms ? <section className="mt-4 rounded-2xl bg-slate-50 p-5"><h2 className="font-bold">Terms</h2><p className="mt-2 whitespace-pre-wrap text-sm text-slate-700">{document.terms}</p></section> : null}
+
+        {share.document_type === "invoice" && bankDetails.length > 0 ? (
+          <section className="mt-4 rounded-2xl bg-slate-50 p-5">
+            <h2 className="font-bold">Pay by bank transfer</h2>
+            <dl className="mt-3 space-y-2 text-sm text-slate-700">
+              {bankDetails.map(([label, value]) => (
+                <div key={label} className="flex flex-wrap gap-x-2">
+                  <dt className="font-semibold text-slate-900">{label}:</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+              {bankPaymentReference ? (
+                <div className="flex flex-wrap gap-x-2">
+                  <dt className="font-semibold text-slate-900">Payment reference:</dt>
+                  <dd>{bankPaymentReference}</dd>
+                </div>
+              ) : null}
+            </dl>
+          </section>
+        ) : null}
 
         {share.document_type === "invoice" && document.status !== "Paid" && document.stripe_payment_status === "open" && document.stripe_payment_link_url ? (
           <a className="mt-8 inline-flex min-h-11 items-center justify-center rounded-xl bg-emerald-600 px-5 py-3 font-bold text-white hover:bg-emerald-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700" href={document.stripe_payment_link_url}>Pay this invoice securely</a>

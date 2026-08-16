@@ -4544,6 +4544,11 @@ function getCustomerFeatureKey(page: PageKey) {
   return CUSTOMER_FEATURE_PAGE_OVERRIDES[page];
 }
 
+type ScheduledJobCompletionDelivery = {
+  sms?: boolean;
+  email?: boolean;
+};
+
 function ScheduledJobProfileSection({
                                       job,
                                       checklist,
@@ -4578,7 +4583,7 @@ function ScheduledJobProfileSection({
       key: ScheduledJobChecklistKey,
       checked: boolean
   ) => void;
-  onToggleCompleted: (jobId: string) => Promise<void>;
+  onToggleCompleted: (jobId: string, delivery?: ScheduledJobCompletionDelivery) => Promise<void>;
   completionMessagesEnabled: boolean;
   onRetryCompletionText: (jobId: string) => Promise<void>;
   onDeleteJob: (jobId: string) => Promise<void>;
@@ -4975,10 +4980,22 @@ function ScheduledJobProfileSection({
       return;
     }
 
+    const delivery: ScheduledJobCompletionDelivery | undefined =
+      job.status === "Completed"
+        ? undefined
+        : {
+            sms: phoneValue
+              ? window.confirm("Send the completed-work invoice to this customer by text message?")
+              : false,
+            email: primaryContactEmail
+              ? window.confirm("Send the completed-work invoice to this customer by email?")
+              : false,
+          };
+
     try {
       setIsCompleting(true);
       setCompletionMessageNotice(null);
-      await onToggleCompleted(job.id);
+      await onToggleCompleted(job.id, delivery);
       setCompletionMessageNotice({
         type: "success",
         text: job.status === "Completed" ? "Job moved back to Scheduled." : "Job marked as completed.",
@@ -4988,13 +5005,12 @@ function ScheduledJobProfileSection({
         type: "error",
         text: error instanceof Error && error.message.trim()
           ? error.message
-          : "The job was updated, but the completion text could not be sent.",
+          : "The job was updated, but the completion notification could not be sent.",
       });
     } finally {
       setIsCompleting(false);
     }
   }
-
   async function handleRetryCompletionText() {
     if (isCompleting || isDeleting || isRetryingCompletionText) {
       return;
@@ -9892,7 +9908,7 @@ export default function JobsApp({
     }
   }
 
-  async function createInvoicePaymentLink(invoiceId: string) {
+  async function createInvoicePaymentLink(invoiceId: string, fallbackInvoice?: Invoice) {
     const response = await fetch("/api/invoices/payment-link", {
       method: "POST",
       headers: {
@@ -9920,7 +9936,7 @@ export default function JobsApp({
     }
 
     const existingInvoice =
-        invoices.find((invoice) => invoice.id === invoiceId) ?? null;
+        invoices.find((invoice) => invoice.id === invoiceId) ?? fallbackInvoice ?? null;
     const updatedInvoice: Invoice | null = existingInvoice
         ? {
             ...existingInvoice,
@@ -10908,9 +10924,13 @@ export default function JobsApp({
 
   async function sendScheduledJobCompletionText(
       job: ScheduledJob,
-      options: { retryFailed?: boolean; invoice?: Invoice | null } = {}
+      options: { retryFailed?: boolean; invoice?: Invoice | null; delivery?: ScheduledJobCompletionDelivery } = {}
   ) {
-    if (!appSettings.autoSendVisitCompletionTexts) {
+    const delivery = options.delivery ?? {
+      sms: appSettings.autoSendVisitCompletionTexts,
+      email: false,
+    };
+    if (!delivery.sms && !delivery.email) {
       return;
     }
 
@@ -10921,49 +10941,58 @@ export default function JobsApp({
         .map((invoiceId) => invoices.find((entry) => entry.id === invoiceId) ?? null)
         .find((entry): entry is Invoice => Boolean(entry)) ??
       null;
-    const recipient = customer?.phone?.trim() || "";
-    if (!customer || !recipient) {
-      throw new Error("The job was completed, but the customer does not have a valid mobile number for the completion text.");
+    if (!customer) {
+      throw new Error("The job was completed, but it is not linked to a customer for the invoice notification.");
     }
     if (!invoice) {
-      throw new Error("The job was completed, but an invoice could not be created for the completion text.");
+      throw new Error("The job was completed, but an invoice could not be created for the completion notification.");
     }
-    const response = await fetch("/api/customer-messages", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        customerId: customer.id,
-        channel: "sms",
-        kind: "job_completion",
-        recipient,
-        body: [
-          `Hi ${customer.name},`,
-          "",
-          `Your ${job.workType || getScheduledJobTypeLabel(job.type) || job.title} scheduled for ${formatIsoDateLabel(getInputDateValue(job.date) || job.date)} has been completed.`,
-          `Your invoice for ${formatTemplateCurrency(invoice.total, appSettings.currencyCode)} is ready to view securely below.`,
-          "",
-          `Thanks, ${getBusinessDisplayName(appSettings)}`,
-        ].join("\n"),
-        relatedType: "invoice",
-        relatedId: invoice.id,
-        occurrence: `job-completion:${job.id}`,
-        retryFailed: options.retryFailed === true,
-        includeDocumentLink: true,
-      }),
-    });
-    const result = await response.json().catch(() => null) as
-      | { error?: string; processingError?: string; message?: { status?: string; failure_reason?: string } }
-      | null;
-    if (!response.ok || result?.processingError || result?.message?.status === "failed") {
-      throw new Error(
-        result?.error ||
-        result?.processingError ||
-        result?.message?.failure_reason ||
-        "The completion text could not be sent."
-      );
+
+    const message = [
+      `Hi ${customer.name},`,
+      "",
+      `Your work scheduled for ${formatIsoDateLabel(getInputDateValue(job.date) || job.date)} has been completed.`,
+      `Invoice ${invoice.invoiceNumber}: ${formatTemplateCurrency(invoice.total, appSettings.currencyCode)}`,
+      getCompletionPaymentDetails(appSettings),
+      `Payment reference: ${appSettings.bankPaymentReference.trim() || invoice.invoiceNumber}`,
+      invoice.stripePaymentLinkUrl?.trim() ? `Pay securely online: ${invoice.stripePaymentLinkUrl.trim()}` : "",
+      "",
+      `Thanks, ${getBusinessDisplayName(appSettings)}`,
+    ].filter(Boolean).join("\n");
+    const deliveries = [
+      delivery.sms ? { channel: "sms" as const, recipient: customer.phone?.trim() || "" } : null,
+      delivery.email ? { channel: "email" as const, recipient: customer.contactEmails?.find((email) => email.trim())?.trim() || customer.email?.trim() || "" } : null,
+    ].filter((entry): entry is { channel: "sms" | "email"; recipient: string } => Boolean(entry));
+
+    for (const item of deliveries) {
+      if (!item.recipient) {
+        throw new Error(item.channel === "email" ? "The customer does not have an email address for the invoice." : "The customer does not have a valid mobile number for the invoice text.");
+      }
+      const response = await fetch("/api/customer-messages", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          customerId: customer.id,
+          channel: item.channel,
+          kind: "job_completion",
+          recipient: item.recipient,
+          subject: item.channel === "email" ? `Invoice ${invoice.invoiceNumber} from ${getBusinessDisplayName(appSettings)}` : undefined,
+          body: message,
+          relatedType: "invoice",
+          relatedId: invoice.id,
+          occurrence: `job-completion:${job.id}`,
+          retryFailed: item.channel === "sms" && options.retryFailed === true,
+          includeDocumentLink: true,
+        }),
+      });
+      const result = await response.json().catch(() => null) as
+        | { error?: string; processingError?: string; message?: { status?: string; failure_reason?: string } }
+        | null;
+      if (!response.ok || result?.processingError || result?.message?.status === "failed") {
+        throw new Error(result?.error || result?.processingError || result?.message?.failure_reason || "The completion notification could not be sent.");
+      }
     }
   }
-
   async function sendServiceRoundCompletionText(customer: Customer, visit: VisitLog) {
     if (
       !appSettings.autoSendServiceRoundCompletionTexts ||
@@ -11024,7 +11053,7 @@ export default function JobsApp({
 
     await sendScheduledJobCompletionText(job, { retryFailed: true });
   }
-  async function toggleScheduledJobCompleted(jobId: string) {
+  async function toggleScheduledJobCompleted(jobId: string, delivery?: ScheduledJobCompletionDelivery) {
     const targetJob =
         scheduledJobs.find((scheduledJob) => scheduledJob.id === jobId) ?? null;
 
@@ -11033,6 +11062,10 @@ export default function JobsApp({
     }
 
     const isCompleting = targetJob.status !== "Completed";
+    const completionDelivery = delivery ?? {
+      sms: appSettings.autoSendVisitCompletionTexts,
+      email: false,
+    };
     const savedJob = await saveScheduledJobRecord({
       ...targetJob,
       status: isCompleting ? "Completed" : "Scheduled",
@@ -11064,20 +11097,23 @@ export default function JobsApp({
       }
     }
 
-    let completionMessageError: Error | null = null;
-    try {
-      await sendScheduledJobCompletionText(completedJob, { invoice: ensuredInvoice });
-    } catch (error) {
-      completionMessageError = error instanceof Error
-        ? error
-        : new Error("The job was completed, but the completion text could not be sent.");
+    let invoiceForNotification = ensuredInvoice;
+    if (
+      invoiceForNotification &&
+      (completionDelivery.sms || completionDelivery.email) &&
+      appSettings.stripePaymentLinksEnabled
+    ) {
+      invoiceForNotification = await createInvoicePaymentLink(
+        invoiceForNotification.id,
+        invoiceForNotification
+      ) ?? invoiceForNotification;
     }
 
-    if (completionMessageError) {
-      throw completionMessageError;
-    }
+    await sendScheduledJobCompletionText(completedJob, {
+      invoice: invoiceForNotification,
+      delivery: completionDelivery,
+    });
   }
-
   function updateScheduledJobChecklist(
       jobId: string,
       key: ScheduledJobChecklistKey,
