@@ -6123,6 +6123,11 @@ export default function JobsApp({
   >(DEFAULT_PERSISTED_APP_STATE.recurringInvoiceTemplates);
   const [recurringInvoiceTemplatesFallbackActive, setRecurringInvoiceTemplatesFallbackActive] =
       useState(DEFAULT_PERSISTED_APP_STATE.recurringInvoiceTemplatesFallbackActive);
+  useEffect(() => {
+    activeRecurringInvoiceTemplateIdsRef.current = new Set(
+      recurringInvoiceTemplates.filter((template) => template.isActive && !template.deletedAt).map((template) => template.id)
+    );
+  }, [recurringInvoiceTemplates]);
 
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(
       initialWorkspaceRoute.selectedCustomerId
@@ -6166,6 +6171,7 @@ export default function JobsApp({
       DEFAULT_STAFF_TABLES_READY
   );
   const isProcessingRecurringInvoicesRef = useRef(false);
+  const activeRecurringInvoiceTemplateIdsRef = useRef(new Set<string>());
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
   const [rolePermissions, setRolePermissions] = useState<RolePermission[]>([]);
   const [isHydrating, setIsHydrating] = useState(true);
@@ -10376,6 +10382,7 @@ export default function JobsApp({
     const nextTemplates = recurringInvoiceTemplates.filter(
         (template) => template.id !== templateId
     );
+    activeRecurringInvoiceTemplateIdsRef.current.delete(templateId);
 
     try {
       if (
@@ -11949,6 +11956,9 @@ export default function JobsApp({
         let workingInvoices = [...invoices];
 
         for (const template of dueTemplates) {
+          if (!activeRecurringInvoiceTemplateIdsRef.current.has(template.id)) {
+            continue;
+          }
           let nextSendDate = getInputDateValue(template.nextSendDate);
           let nextDueDate =
               getInputDateValue(template.nextDueDate) ||
@@ -11963,6 +11973,9 @@ export default function JobsApp({
           let updatedTemplate = { ...template };
 
           while (nextSendDate && nextSendDate <= today) {
+            if (!activeRecurringInvoiceTemplateIdsRef.current.has(template.id)) {
+              break;
+            }
             const linkedCustomer =
                 template.customerId != null
                     ? customerMap.get(template.customerId) ?? null
@@ -12028,9 +12041,10 @@ export default function JobsApp({
           }
 
           if (
-              updatedTemplate.nextSendDate !== template.nextSendDate ||
-              updatedTemplate.nextDueDate !== template.nextDueDate ||
-              updatedTemplate.lastGeneratedDate !== template.lastGeneratedDate
+              activeRecurringInvoiceTemplateIdsRef.current.has(template.id) &&
+              (updatedTemplate.nextSendDate !== template.nextSendDate ||
+                updatedTemplate.nextDueDate !== template.nextDueDate ||
+                updatedTemplate.lastGeneratedDate !== template.lastGeneratedDate)
           ) {
             await saveRecurringInvoiceTemplate(updatedTemplate);
           }
