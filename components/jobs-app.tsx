@@ -10385,10 +10385,7 @@ export default function JobsApp({
     activeRecurringInvoiceTemplateIdsRef.current.delete(templateId);
 
     try {
-      if (
-          !workflowTablesReady.recurringInvoiceTemplates ||
-          recurringInvoiceTemplatesFallbackActive
-      ) {
+      if (!workflowTablesReady.recurringInvoiceTemplates) {
         await syncRecurringInvoiceTemplatesFallback(nextTemplates);
       } else {
         const response = await fetch(`/api/recurring-invoices/${encodeURIComponent(templateId)}`, {
@@ -10400,6 +10397,19 @@ export default function JobsApp({
         }
 
         setRecurringInvoiceTemplates(nextTemplates);
+        setRecurringInvoiceTemplatesFallbackActive(false);
+        if (isDatabaseReady && canSyncAppState) {
+          try {
+            await persistAppStateSnapshot(
+              buildPersistedAppState({
+                recurringInvoiceTemplates: nextTemplates,
+                recurringInvoiceTemplatesFallbackActive: false,
+              })
+            );
+          } catch (appStateError) {
+            console.error("recurring_invoice_template_fallback_cleanup_failed", appStateError);
+          }
+        }
       }
 
       setDatabaseError(
