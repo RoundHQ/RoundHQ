@@ -101,56 +101,17 @@ async function prepareSupportWorkspaceAccess(options: {
     throw new Error(memberError.message);
   }
 
-  const { data: staffByUser, error: staffLookupError } = await serviceSupabase
+  // Support access is deliberately not a customer staff account. Remove any
+  // legacy record created by older support-view behaviour before loading data.
+  const { error: supportStaffCleanupError } = await serviceSupabase
     .from("staff_members")
-    .select("id")
+    .delete()
     .eq("organization_id", options.organizationId)
-    .eq("auth_user_id", options.user.id)
-    .maybeSingle();
+    .eq("auth_user_id", options.user.id);
 
-  if (staffLookupError) {
-    throw new Error(staffLookupError.message);
+  if (supportStaffCleanupError) {
+    throw new Error(supportStaffCleanupError.message);
   }
-
-  let existingStaff = staffByUser;
-
-  if (!existingStaff) {
-    const staffByEmailResult = await serviceSupabase
-      .from("staff_members")
-      .select("id")
-      .eq("organization_id", options.organizationId)
-      .eq("email", email)
-      .maybeSingle();
-
-    if (staffByEmailResult.error) {
-      throw new Error(staffByEmailResult.error.message);
-    }
-
-    existingStaff = staffByEmailResult.data;
-  }
-
-  const staffPayload = {
-    organization_id: options.organizationId,
-    auth_user_id: options.user.id,
-    email,
-    full_name: fullName,
-    role: "Admin",
-    is_active: true,
-    is_system_admin: true,
-    updated_at: now,
-  };
-
-  const staffResult = existingStaff?.id
-    ? await serviceSupabase
-        .from("staff_members")
-        .update(staffPayload)
-        .eq("id", existingStaff.id)
-    : await serviceSupabase.from("staff_members").insert(staffPayload);
-
-  if (staffResult.error) {
-    throw new Error(staffResult.error.message);
-  }
-
   return {
     organizationId: options.organizationId,
     workspaceName:

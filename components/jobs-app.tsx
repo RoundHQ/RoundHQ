@@ -7915,7 +7915,7 @@ export default function JobsApp({
           }
         }
 
-        if (nextStaffTablesReady.staffMembers) {
+        if (nextStaffTablesReady.staffMembers && !isSupportAccess) {
           let matchedStaffMember = findMatchingStaffMember(
               nextStaffMembers,
               user.id,
