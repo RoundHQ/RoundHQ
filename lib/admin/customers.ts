@@ -20,6 +20,8 @@ import {
   SUBSCRIPTION_SELECT,
 } from "@/lib/billing/subscriptions";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
+import { getSmsUsageForBillingPeriod } from "@/lib/messaging/sms-billing-server";
+import type { SmsUsageSummary } from "@/lib/messaging/sms-billing";
 
 type OrganizationRow = {
   id: string;
@@ -64,6 +66,11 @@ type CustomerAccountSettingsRow = {
   feature_access: unknown;
   internal_notes: string | null;
   support_priority: string | null;
+  sms_billing_enabled: boolean | null;
+  sms_terms_accepted: boolean | null;
+  sms_terms_accepted_at: string | null;
+  sms_terms_accepted_by: string | null;
+  sms_price_per_message_pence: number | null;
   updated_at: string | null;
 };
 
@@ -164,6 +171,7 @@ export type AdminCustomerProfile = {
     invoices: number;
     scheduledJobs: number;
     activeStaff: number;
+    sms: SmsUsageSummary;
   };
   recentCustomers: AppCustomerRow[];
   recentLeads: CustomerLeadRow[];
@@ -465,7 +473,7 @@ export async function getAdminCustomerProfile(organizationId: string) {
     supabase
       .from("customer_account_settings")
       .select(
-        "account_status, disabled_reason, feature_access, internal_notes, support_priority, updated_at"
+        "account_status, disabled_reason, feature_access, internal_notes, support_priority, sms_billing_enabled, sms_terms_accepted, sms_terms_accepted_at, sms_terms_accepted_by, sms_price_per_message_pence, updated_at"
       )
       .eq("organization_id", organizationId)
       .maybeSingle(),
@@ -542,6 +550,11 @@ export async function getAdminCustomerProfile(organizationId: string) {
     : mapCustomerAccountSettingsRow(
         settingsResult.data as CustomerAccountSettingsRow | null
       );
+  const smsUsage = await getSmsUsageForBillingPeriod(
+    supabase,
+    organizationId,
+    subscription?.current_period_end ?? null
+  );
   const recentCustomers = (customersResult.data ?? []) as AppCustomerRow[];
   const recentLeads = (leadsResult.data ?? []) as CustomerLeadRow[];
   const recentQuotes = (quotesResult.data ?? []) as DocumentRow[];
@@ -573,6 +586,7 @@ export async function getAdminCustomerProfile(organizationId: string) {
       invoices: invoicesResult.count ?? recentInvoices.length,
       scheduledJobs: jobsResult.count ?? upcomingJobs.length,
       activeStaff: ((staffResult.data ?? []) as OrganizationScopedRow[]).length,
+      sms: smsUsage,
     },
     recentCustomers,
     recentLeads,

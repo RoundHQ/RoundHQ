@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getMessageIdempotencyKey, type CustomerMessageChannel, type CustomerMessageKind } from "@/lib/messaging/core";
 import { processCustomerMessageById, queueCustomerMessage } from "@/lib/messaging/server";
+import { SmsEntitlementError } from "@/lib/messaging/sms-billing-server";
 import { createClient } from "@/lib/supabase/server";
 import { ensureWorkspace } from "@/lib/workspace";
 
@@ -164,6 +165,12 @@ export async function POST(request: Request) {
       { status: queued.duplicate ? 200 : 201 }
     );
   } catch (error) {
+    if (error instanceof SmsEntitlementError) {
+      return NextResponse.json({
+        error: error.message,
+        code: error.code,
+      }, { status: 403 });
+    }
     return NextResponse.json(
       { error: error instanceof Error && error.message.trim() ? error.message : "Unable to queue the customer message." },
       { status: 500 }

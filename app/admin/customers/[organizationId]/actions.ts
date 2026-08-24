@@ -81,7 +81,14 @@ export async function updateCustomerAccountAction(
   const disabledReason = getText(formData, "disabled_reason");
   const internalNotes = getText(formData, "internal_notes");
   const subscriptionPlan = normalizePlanKey(getText(formData, "subscription_plan"));
+  const smsBillingEnabled = formData.get("sms_billing_enabled") === "on";
   const supabase = createServiceRoleClient();
+  const { data: existingSettings, error: existingSettingsError } = await supabase
+    .from("customer_account_settings")
+    .select("sms_billing_enabled,sms_price_per_message_pence")
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  if (existingSettingsError) throw new Error(existingSettingsError.message);
 
   const { error: settingsError } = await supabase.from("customer_account_settings").upsert(
     {
@@ -91,6 +98,7 @@ export async function updateCustomerAccountAction(
       support_priority: supportPriority,
       internal_notes: internalNotes,
       feature_access: getFeatureAccess(formData),
+      sms_billing_enabled: smsBillingEnabled,
       updated_at: new Date().toISOString(),
     },
     {
@@ -100,6 +108,15 @@ export async function updateCustomerAccountAction(
 
   if (settingsError) {
     throw new Error(settingsError.message);
+  }
+
+  if (existingSettings?.sms_billing_enabled !== smsBillingEnabled) {
+    const { error: auditError } = await supabase.from("sms_billing_events").insert({
+      organization_id: organizationId,
+      event_type: smsBillingEnabled ? "billing_enabled" : "billing_disabled",
+      price_per_message_pence: Number(existingSettings?.sms_price_per_message_pence ?? 10),
+    });
+    if (auditError) throw new Error(auditError.message);
   }
 
   let { error: subscriptionError } = await supabase

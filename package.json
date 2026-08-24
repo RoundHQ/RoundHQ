@@ -11,6 +11,7 @@
     "test:scheduling": "node scripts/run-scheduling-tests.mjs",
     "test:team-permissions": "node scripts/run-team-permissions-tests.mjs",
     "test:customer-feature-access": "node scripts/run-customer-feature-access-tests.mjs",
+    "test:sms-billing": "node scripts/run-sms-billing-tests.mjs",
     "test:staff-invitations": "node scripts/run-staff-invitations-tests.mjs",
     "test:ai-receptionist": "node scripts/run-ai-receptionist-tests.mjs",
     "test:ai-receptionist-settings": "node scripts/run-ai-receptionist-settings-tests.mjs",

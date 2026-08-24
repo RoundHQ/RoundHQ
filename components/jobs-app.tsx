@@ -72,6 +72,7 @@ import SettingsPage, {
 } from "@/components/jobs/settings-page";
 import HelpProvider from "@/components/help/HelpProvider";
 import type { HelpTourActions, HelpTourPage } from "@/components/help/helpTours";
+import type { SmsEntitlement } from "@/lib/messaging/sms-billing";
 import {
   getEditResourceKey,
   normalizeEditInactiveAction,
@@ -4984,7 +4985,7 @@ function ScheduledJobProfileSection({
       job.status === "Completed"
         ? undefined
         : {
-            sms: phoneValue
+            sms: completionMessagesEnabled && phoneValue
               ? window.confirm("Send the completed-work invoice to this customer by text message?")
               : false,
             email: primaryContactEmail
@@ -5803,6 +5804,7 @@ function ScheduledJobProfileSection({
 
 type JobsAppProps = {
   featureAccess?: Partial<CustomerFeatureAccess>;
+  smsEntitlement?: SmsEntitlement;
   supportAccess?: {
     organizationId: string;
     workspaceName: string;
@@ -5954,6 +5956,7 @@ function getWorkspaceRouteUrl(route: WorkspaceRouteState) {
 
 export default function JobsApp({
   featureAccess,
+  smsEntitlement,
   supportAccess,
   subscriptionPlan,
   subscriptionStaffAddonQuantity,
@@ -5967,7 +5970,12 @@ export default function JobsApp({
   aiReceptionistCallHistory,
 }: JobsAppProps = {}) {
   const supportOrganizationId = supportAccess?.organizationId ?? null;
+  const [activeSmsEntitlement, setActiveSmsEntitlement] = useState(smsEntitlement);
+  const canUseSms = activeSmsEntitlement?.isActive === true;
   const isSupportAccess = Boolean(supportOrganizationId);
+  useEffect(() => {
+    setActiveSmsEntitlement(smsEntitlement);
+  }, [smsEntitlement]);
   const customerFeatureAccess = useMemo(
       () => normalizeCustomerFeatureAccess(featureAccess),
       [featureAccess]
@@ -10944,7 +10952,7 @@ export default function JobsApp({
       options: { retryFailed?: boolean; invoice?: Invoice | null; delivery?: ScheduledJobCompletionDelivery } = {}
   ) {
     const delivery = options.delivery ?? {
-      sms: appSettings.autoSendVisitCompletionTexts,
+      sms: canUseSms && appSettings.autoSendVisitCompletionTexts,
       email: false,
     };
     if (!delivery.sms && !delivery.email) {
@@ -11012,6 +11020,7 @@ export default function JobsApp({
   }
   async function sendServiceRoundCompletionText(customer: Customer, visit: VisitLog) {
     if (
+      !canUseSms ||
       !appSettings.autoSendServiceRoundCompletionTexts ||
       customer.paymentMethod !== "On Day Transfer"
     ) {
@@ -11080,7 +11089,7 @@ export default function JobsApp({
 
     const isCompleting = targetJob.status !== "Completed";
     const completionDelivery = delivery ?? {
-      sms: appSettings.autoSendVisitCompletionTexts,
+      sms: canUseSms && appSettings.autoSendVisitCompletionTexts,
       email: false,
     };
     const savedJob = await saveScheduledJobRecord({
@@ -11830,12 +11839,12 @@ export default function JobsApp({
   ]);
 
   function openQuoteTextDialog(quoteId: string) {
-    if (!quotes.some((quote) => quote.id === quoteId)) return;
+    if (!canUseSms || !quotes.some((quote) => quote.id === quoteId)) return;
     setWorkflowMessageTarget({ kind: "quote_send", quoteId });
   }
 
   function openInvoiceTextDialog(invoiceId: string) {
-    if (!invoices.some((invoice) => invoice.id === invoiceId)) return;
+    if (!canUseSms || !invoices.some((invoice) => invoice.id === invoiceId)) return;
     setWorkflowMessageTarget({ kind: "invoice_send", invoiceId });
   }
   function openQuoteFollowUpDialog(quoteId: string) {
@@ -11872,6 +11881,9 @@ export default function JobsApp({
       return;
     }
 
+    if (payload.method === "text" && !canUseSms) {
+      throw new Error("Text messaging is not enabled for this RoundHQ account.");
+    }
     const isQuote = workflowMessageTarget.kind === "quote_follow_up" || workflowMessageTarget.kind === "quote_send";
     const isFollowUp = workflowMessageTarget.kind === "quote_follow_up" || workflowMessageTarget.kind === "invoice_overdue";
     const documentId = "quoteId" in workflowMessageTarget
@@ -16219,7 +16231,7 @@ export default function JobsApp({
                         updateScheduledJobChecklist(selectedScheduledJob.id, key, checked)
                       }
                       onToggleCompleted={toggleScheduledJobCompleted}
-                      completionMessagesEnabled={appSettings.autoSendVisitCompletionTexts}
+                      completionMessagesEnabled={canUseSms && appSettings.autoSendVisitCompletionTexts}
                       onRetryCompletionText={retryScheduledJobCompletionText}
                       onDeleteJob={deleteScheduledJobRecord}
                       onSaveJob={saveScheduledJobRecord}
@@ -16583,7 +16595,7 @@ export default function JobsApp({
                       allowQuoteConversionWorkflows={hasGrowthPlan}
                       onMarkSent={markQuoteSent}
                       onMarkRead={markQuoteRead}
-                      onSendText={openQuoteTextDialog}
+                      onSendText={canUseSms ? openQuoteTextDialog : undefined}
                   />
                 )}
 
@@ -16728,7 +16740,7 @@ export default function JobsApp({
                       onMarkSent={markInvoiceSent}
                       onMarkRead={markInvoiceRead}
                       onCreatePaymentLink={createInvoicePaymentLink}
-                      onSendText={openInvoiceTextDialog}
+                      onSendText={canUseSms ? openInvoiceTextDialog : undefined}
                       onSaveRecurringTemplate={saveRecurringInvoiceTemplate}
                       onDeleteRecurringTemplate={deleteRecurringInvoiceTemplate}
                   />
@@ -16829,6 +16841,8 @@ export default function JobsApp({
                       accountEmail={currentUserEmail}
                       showGrowthSettings={hasGrowthPlan}
                       workspaceName={supportAccess?.workspaceName ?? workspaceName}
+                      smsEntitlement={activeSmsEntitlement}
+                      onSmsEntitlementChange={setActiveSmsEntitlement}
                       aiReceptionistSettings={aiReceptionistSettings}
                       aiReceptionistRealtimeReadiness={
                         aiReceptionistRealtimeReadiness

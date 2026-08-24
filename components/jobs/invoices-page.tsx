@@ -151,7 +151,7 @@ type Props = {
   ) => Promise<void> | void;
   stripeInvoicePaymentsEnabled?: boolean;
   onCreatePaymentLink?: (invoiceId: string) => Promise<Invoice | null>;
-  onSendText: (invoiceId: string) => void;
+  onSendText?: (invoiceId: string) => void;
   onSaveRecurringTemplate: (
     template: RecurringInvoiceTemplate
   ) => Promise<RecurringInvoiceTemplate | null>;
@@ -851,7 +851,7 @@ export default function InvoicesPage({
           ]
         : []),
       { action: "email", label: "Email invoice" },
-      { action: "text", label: "Send by text" },
+      ...(onSendText ? [{ action: "text" as const, label: "Send by text" }] : []),
       {
         action: "recurring",
         label: existingTemplate ? "Edit recurring" : "Make recurring",
@@ -887,7 +887,7 @@ export default function InvoicesPage({
         setSendTarget({ invoiceId: invoice.id, method: "email" });
         break;
       case "text":
-        onSendText(invoice.id);
+        onSendText?.(invoice.id);
         break;
       case "recurring":
         openRecurringEditor(invoice.id, existingTemplate ?? undefined);

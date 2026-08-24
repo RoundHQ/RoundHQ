@@ -123,7 +123,7 @@ type Props = {
     quoteId: string,
     metadata?: DocumentSendMetadata
   ) => Promise<void> | void;
-  onSendText: (quoteId: string) => void;
+  onSendText?: (quoteId: string) => void;
   onMarkRead?: (
     quoteId: string,
     metadata?: DocumentSendMetadata
@@ -497,7 +497,7 @@ export default function QuotesPage({
       },
       { action: "pdf", label: "Download PDF" },
       { action: "email", label: "Email quote" },
-      { action: "text", label: "Send by text" },
+      ...(onSendText ? [{ action: "text" as const, label: "Send by text" }] : []),
       ...(canScheduleQuote
         ? [
             {
@@ -549,7 +549,7 @@ export default function QuotesPage({
         setSendTarget({ quoteId: quote.id, method: "email" });
         break;
       case "text":
-        onSendText(quote.id);
+        onSendText?.(quote.id);
         break;
       case "delete":
         onDelete(quote.id);

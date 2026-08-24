@@ -7,6 +7,7 @@ import {
   CreditCard,
   ExternalLink,
   Mail,
+  MessageSquare,
   Save,
   ShieldCheck,
   SlidersHorizontal,
@@ -68,6 +69,10 @@ function formatCurrency(value: number | null) {
     style: "currency",
     currency: "GBP",
   }).format(value);
+}
+
+function formatPence(value: number) {
+  return formatCurrency(value / 100);
 }
 
 function formatStatus(value: string) {
@@ -642,6 +647,29 @@ export default async function AdminCustomerProfilePage({
                     />
                   </label>
 
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-5">
+                    <div className="flex items-start gap-3">
+                      <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-[#e7f9ed] text-[#168b43]">
+                        <MessageSquare aria-hidden="true" className="size-5" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-sm font-extrabold text-slate-950">Text Messaging</h3>
+                        <p className="mt-1 text-sm leading-6 text-slate-600">Allow this customer to activate paid SMS. They must accept the charge separately in their dashboard.</p>
+                      </div>
+                    </div>
+                    <label className="mt-4 flex items-start gap-3 rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-700">
+                      <input type="checkbox" name="sms_billing_enabled" defaultChecked={profile.settings.smsBillingEnabled} className="mt-1 size-4 accent-[#19c653]" />
+                      <span><span className="block font-bold text-slate-900">SMS Billing enabled</span><span className="mt-1 block leading-5 text-slate-600">Charge {formatPence(profile.settings.smsPricePerMessagePence)} for each sent text message.</span></span>
+                    </label>
+                    <dl className="mt-4 divide-y divide-slate-200 rounded-md border border-slate-200 bg-white px-4">
+                      <DetailRow label="Billing availability" value={profile.settings.smsBillingEnabled ? "Enabled" : "Disabled"} />
+                      <DetailRow label="Customer consent" value={profile.settings.smsTermsAccepted ? "Accepted" : "Not accepted"} />
+                      <DetailRow label="Current status" value={profile.settings.smsBillingEnabled && profile.settings.smsTermsAccepted ? "Active" : "Inactive"} />
+                      <DetailRow label="Accepted date" value={formatDate(profile.settings.smsTermsAcceptedAt)} />
+                      <DetailRow label="Current rate" value={`${formatPence(profile.settings.smsPricePerMessagePence)} / message`} />
+                      <DetailRow label="This billing period" value={`${profile.usage.sms.messageCount} messages · ${formatPence(profile.usage.sms.totalPricePence)}`} />
+                    </dl>
+                  </div>
                   <div>
                     <h3 className="text-sm font-bold uppercase tracking-[0.14em] text-slate-500">
                       Feature access

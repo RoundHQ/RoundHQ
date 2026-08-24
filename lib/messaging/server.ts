@@ -16,6 +16,7 @@ import {
   type CustomerMessageChannel,
   type CustomerMessageKind,
 } from "./core";
+import { recordSmsUsage, requireSmsEntitlement } from "./sms-billing-server";
 
 export type QueueCustomerMessageInput = {
   organizationId: string;
@@ -113,6 +114,10 @@ export async function queueCustomerMessage(
   supabase: SupabaseClient,
   input: QueueCustomerMessageInput
 ) {
+  if (input.channel === "sms") {
+    await requireSmsEntitlement(supabase, input.organizationId);
+  }
+
   const recipient =
     input.channel === "sms"
       ? normalizeSmsPhoneNumber(input.recipient)
@@ -328,6 +333,10 @@ export async function processCustomerMessageById(
       throw new Error("Customer messaging is disabled until provider setup is complete.");
     }
 
+    if (data.channel === "sms") {
+      await requireSmsEntitlement(supabase, data.organization_id);
+    }
+
     const providerMessageId =
       mode === "test"
         ? `test_${randomUUID()}`
@@ -351,6 +360,17 @@ export async function processCustomerMessageById(
       .select("*")
       .single();
     if (updateError) throw updateError;
+    if (data.channel === "sms" && mode === "live") {
+      await recordSmsUsage({
+        supabase,
+        organizationId: data.organization_id,
+        customerMessageId: data.id,
+        customerId: data.customer_id,
+        initiatedBy: data.initiated_by,
+        providerMessageId,
+        recipient: data.recipient,
+      });
+    }
     return updated;
   } catch (sendError) {
     const attempts = Number(data.attempt_count ?? 0) + 1;

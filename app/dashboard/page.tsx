@@ -10,6 +10,7 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { getCustomerAccountSettings } from "@/lib/customer-account";
+import { getSmsEntitlement } from "@/lib/messaging/sms-billing-server";
 import { getOrCreateAiReceptionistSettings } from "@/lib/ai-receptionist-settings";
 import {
   getAiReceptionistCallHistory,
@@ -201,6 +202,12 @@ export default async function DashboardPage({
       ? organizations[0].name.trim()
       : "RoundHQ Workspace";
   const accountSettings = await getCustomerAccountSettings(supabase, organizationId);
+  const smsEntitlement = await getSmsEntitlement(
+    supabase,
+    organizationId,
+    accountSettings,
+    subscription.current_period_end
+  );
   const aiReceptionistPilotEnabled =
     accountSettings.featureAccess.aiReceptionist;
   const canManageAiReceptionistSettings = aiReceptionistPilotEnabled
@@ -250,6 +257,7 @@ export default async function DashboardPage({
   return (
     <JobsApp
       featureAccess={supportAccess ? undefined : accountSettings.featureAccess}
+      smsEntitlement={smsEntitlement}
       supportAccess={supportAccess}
       subscriptionPlan={subscription.plan}
       subscriptionStaffAddonQuantity={subscription.staff_addon_quantity}

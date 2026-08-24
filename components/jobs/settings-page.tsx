@@ -36,6 +36,7 @@ import { createClient as createSupabaseClient } from "@/lib/supabase/client";
 import type { AiReceptionistSettings } from "@/lib/ai-receptionist-settings";
 import type { AiReceptionistCallHistoryItem } from "@/lib/ai-receptionist/call-logs";
 import type { OpenAiRealtimeSipReadiness } from "@/lib/ai-receptionist/realtime/openai-sip";
+import { formatSmsPrice, type SmsEntitlement } from "@/lib/messaging/sms-billing";
 
 import {
     DEFAULT_GRASS_CUT_SEASON_END,
@@ -255,6 +256,8 @@ type Props = {
         schemaError?: string;
     } | null;
     canManageAiReceptionistSettings?: boolean;
+    smsEntitlement?: SmsEntitlement;
+    onSmsEntitlementChange?: (entitlement: SmsEntitlement) => void;
 };
 
 export type RoundHqDataExportRecords = {
@@ -1485,6 +1488,8 @@ export default function SettingsPage({
                                          aiReceptionistRealtimeReadiness,
                                          aiReceptionistCallHistory,
                                          canManageAiReceptionistSettings = false,
+                                         smsEntitlement,
+                                         onSmsEntitlementChange,
                                      }: Props) {
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -1498,6 +1503,9 @@ export default function SettingsPage({
     const [settings, setSettings] = useState<SettingsData>(mergedSettings);
     const [activeTab, setActiveTab] = useState<SettingsTab>("business");
     const [isSaving, setIsSaving] = useState(false);
+    const [smsBilling, setSmsBilling] = useState(smsEntitlement);
+    const [smsAcceptanceConfirmed, setSmsAcceptanceConfirmed] = useState(false);
+    const [isActivatingSms, setIsActivatingSms] = useState(false);
     const [message, setMessage] = useState("");
     const [messageType, setMessageType] = useState<"success" | "error" | "info">(
         "info"
@@ -1544,6 +1552,37 @@ export default function SettingsPage({
         [resolvedExportData]
     );
     const showAiReceptionistSettings = canManageAiReceptionistSettings;
+    const canManageCustomerMessages = smsBilling?.billingEnabled === true;
+
+    useEffect(() => {
+        setSmsBilling(smsEntitlement);
+        setSmsAcceptanceConfirmed(false);
+    }, [smsEntitlement]);
+
+    async function activateSmsBilling() {
+        if (!smsAcceptanceConfirmed || isActivatingSms) return;
+        setIsActivatingSms(true);
+        try {
+            const response = await fetch("/api/sms-billing", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ action: "accept_terms" }),
+            });
+            const result = await response.json().catch(() => null) as { entitlement?: SmsEntitlement; error?: string } | null;
+            if (!response.ok || !result?.entitlement) {
+                throw new Error(result?.error || "Unable to activate text messaging.");
+            }
+            setSmsBilling(result.entitlement);
+            onSmsEntitlementChange?.(result.entitlement);
+            setMessage("Text messaging is now active for your account.");
+            setMessageType("success");
+        } catch (error) {
+            setMessage(error instanceof Error ? error.message : "Unable to activate text messaging.");
+            setMessageType("error");
+        } finally {
+            setIsActivatingSms(false);
+        }
+    }
 
     useEffect(() => {
         const root = document.documentElement;
@@ -2414,9 +2453,11 @@ export default function SettingsPage({
                     <TabButton active={activeTab === "email"} onClick={() => handleSettingsTabChange("email")} dataTour="settings-tab-email">
                         Email
                     </TabButton>
-                    <TabButton active={activeTab === "customer-messages"} onClick={() => handleSettingsTabChange("customer-messages")} dataTour="settings-tab-customer-messages">
-                        <span className="inline-flex items-center gap-2"><MessageSquare className="h-4 w-4" />Customer messages</span>
-                    </TabButton>
+                    {canManageCustomerMessages ? (
+                        <TabButton active={activeTab === "customer-messages"} onClick={() => handleSettingsTabChange("customer-messages")} dataTour="settings-tab-customer-messages">
+                            <span className="inline-flex items-center gap-2"><MessageSquare className="h-4 w-4" />Customer messages</span>
+                        </TabButton>
+                    ) : null}
                     <TabButton active={activeTab === "dashboard"} onClick={() => handleSettingsTabChange("dashboard")} dataTour="settings-tab-dashboard">
                         Dashboard
                     </TabButton>
@@ -4099,44 +4140,96 @@ export default function SettingsPage({
                     </div>
                 )}
 
-                {activeTab === "customer-messages" && (
+                {activeTab === "customer-messages" && canManageCustomerMessages ? (
                     <div className="space-y-6">
-                        <Card title="Customer text messages" description="Choose what customers see when your business sends an operational text. RoundHQ keeps provider credentials private." icon={MessageSquare}>
-                            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-                                <div className="md:col-span-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm leading-6 text-sky-900">Texting is managed securely by RoundHQ. Save these settings, then send a quote, invoice, reminder, or completion text from the dashboard.</div>
-                                <Field label="Sender customers see">
-                                    <Select value={settings.smsSenderMode} onChange={(event) => update("smsSenderMode", event.target.value as SettingsData["smsSenderMode"])}>
-                                        <option value="platform_default">RoundHQ managed business number</option>
-                                        <option value="business_name">Your business name (one-way text)</option>
-                                        <option value="business_mobile">Your business mobile number</option>
-                                    </Select>
-                                </Field>
-                                {settings.smsSenderMode === "business_name" ? (
-                                    <Field label="Business sender name" hint="1?11 letters, numbers, or spaces. Customers cannot reply to a name sender."><Input value={settings.smsSenderValue} onChange={(event) => update("smsSenderValue", event.target.value)} placeholder="YourBrand" maxLength={11} /></Field>
-                                ) : settings.smsSenderMode === "business_mobile" ? (
-                                    <Field label="Business mobile number" hint="Use a UK mobile number. It must be purchased or ported into RoundHQ's Telnyx messaging profile before messages can be sent from it."><Input value={settings.smsSenderValue} onChange={(event) => update("smsSenderValue", event.target.value)} placeholder="07700 900123" inputMode="tel" /></Field>
-                                ) : (
-                                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">RoundHQ will use the managed SMS number configured for the platform.</div>
-                                )}
-                                <Field label="Do not send texts before"><Input type="time" value={settings.customerMessagingQuietHoursStart} onChange={(event) => update("customerMessagingQuietHoursStart", event.target.value)} /></Field>
-                                <Field label="Do not send texts after"><Input type="time" value={settings.customerMessagingQuietHoursEnd} onChange={(event) => update("customerMessagingQuietHoursEnd", event.target.value)} /></Field>
-                                <div className="md:col-span-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">A mobile number cannot be used merely by typing it here. RoundHQ must first hold that number in its Telnyx account and assign it to the messaging profile. Use your business name if you only need one-way texts.</div>
-                            </div>
-                        </Card>
-                        <Card title="Message automations" description="Turn on only the operational messages you want to send. Templates remain editable." icon={CalendarIcon}>
-                            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-                                <div className="md:col-span-2"><Toggle checked={settings.serviceRemindersEnabled} onChange={(value) => update("serviceRemindersEnabled", value)} label="Send service reminders" description="Queue a text before scheduled work." /></div>
-                                <Field label="Reminder lead time (days)"><NumberInput value={settings.serviceReminderLeadDays} onChange={(value) => update("serviceReminderLeadDays", Math.min(30, Math.max(0, Math.round(value))))} min="0" step="1" /></Field>
-                                <Field label="Reminder send time"><Input type="time" value={settings.serviceReminderSendTime} onChange={(event) => update("serviceReminderSendTime", event.target.value)} /></Field>
-                                <div className="md:col-span-2"><Field label="Service reminder template"><Textarea value={settings.serviceReminderTemplate} onChange={(event) => update("serviceReminderTemplate", event.target.value)} /></Field></div>
-                                <div className="md:col-span-2"><Toggle checked={settings.autoSendVisitCompletionTexts} onChange={(value) => update("autoSendVisitCompletionTexts", value)} label="Send an invoice text when a scheduled job is completed" description="Creates the invoice and sends its secure link when a scheduled job first becomes Completed." /></div>
-                                <div className="md:col-span-2"><Toggle checked={settings.autoSendServiceRoundCompletionTexts} onChange={(value) => update("autoSendServiceRoundCompletionTexts", value)} label="Send a text when grass cutting is completed" description="Sends your editable grass-cutting template for On Day Transfer customers with a saved phone number." /></div>
-                                <div className="md:col-span-2"><Field label="Grass-cutting completion text template"><Textarea value={settings.visitCompletionTextTemplate} onChange={(event) => update("visitCompletionTextTemplate", event.target.value)} /></Field></div>
-                            </div>
-                        </Card>
+                        {!smsBilling?.isActive ? (
+                            <Card
+                                title="Text Messaging"
+                                description="Activate paid text messaging for this RoundHQ account."
+                                icon={MessageSquare}
+                            >
+                                <div className="space-y-5">
+                                    <p className="text-sm leading-6 text-slate-700">
+                                        Send appointment reminders, updates and other messages directly to your customers from RoundHQ.
+                                    </p>
+                                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-900">
+                                        Text messages are charged at {formatSmsPrice(smsBilling?.pricePerMessagePence ?? 10)} per message sent.
+                                    </div>
+                                    <label className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700">
+                                        <input
+                                            type="checkbox"
+                                            checked={smsAcceptanceConfirmed}
+                                            onChange={(event) => setSmsAcceptanceConfirmed(event.target.checked)}
+                                            className="mt-1 size-4 accent-[#19c653]"
+                                        />
+                                        <span>
+                                            I agree to be charged {formatSmsPrice(smsBilling?.pricePerMessagePence ?? 10)} for each text message sent through RoundHQ.
+                                        </span>
+                                    </label>
+                                    <button
+                                        type="button"
+                                        disabled={!smsAcceptanceConfirmed || isActivatingSms}
+                                        onClick={activateSmsBilling}
+                                        className="inline-flex items-center justify-center rounded-xl bg-[#19c653] px-5 py-3 text-sm font-bold text-white transition hover:bg-[#16ae47] disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        {isActivatingSms ? "Activating…" : "Activate Text Messaging"}
+                                    </button>
+                                </div>
+                            </Card>
+                        ) : (
+                            <>
+                                <Card title="Text Messaging" description="Paid text messaging is active for your RoundHQ account." icon={MessageSquare}>
+                                    <div className="grid gap-4 sm:grid-cols-3">
+                                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                                            <p className="text-xs font-bold uppercase tracking-[0.12em] text-emerald-700">Status</p>
+                                            <p className="mt-1 font-extrabold text-emerald-950">Active</p>
+                                        </div>
+                                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                                            <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Current price</p>
+                                            <p className="mt-1 font-extrabold text-slate-950">{formatSmsPrice(smsBilling.pricePerMessagePence)} per message</p>
+                                        </div>
+                                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                                            <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">This billing period</p>
+                                            <p className="mt-1 font-extrabold text-slate-950">{smsBilling.usage.messageCount} messages · {formatSmsPrice(smsBilling.usage.totalPricePence)}</p>
+                                        </div>
+                                    </div>
+                                </Card>
+                                <Card title="Customer text messages" description="Choose what customers see when your business sends an operational text. RoundHQ keeps provider credentials private." icon={MessageSquare}>
+                                    <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                                        <div className="md:col-span-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm leading-6 text-sky-900">Texting is managed securely by RoundHQ. Save these settings, then send a quote, invoice, reminder, or completion text from the dashboard.</div>
+                                        <Field label="Sender customers see">
+                                            <Select value={settings.smsSenderMode} onChange={(event) => update("smsSenderMode", event.target.value as SettingsData["smsSenderMode"])}>
+                                                <option value="platform_default">RoundHQ managed business number</option>
+                                                <option value="business_name">Your business name (one-way text)</option>
+                                                <option value="business_mobile">Your business mobile number</option>
+                                            </Select>
+                                        </Field>
+                                        {settings.smsSenderMode === "business_name" ? (
+                                            <Field label="Business sender name" hint="1–11 letters, numbers, or spaces. Customers cannot reply to a name sender."><Input value={settings.smsSenderValue} onChange={(event) => update("smsSenderValue", event.target.value)} placeholder="YourBrand" maxLength={11} /></Field>
+                                        ) : settings.smsSenderMode === "business_mobile" ? (
+                                            <Field label="Business mobile number" hint="Use a UK mobile number. It must be purchased or ported into RoundHQ's Telnyx messaging profile before messages can be sent from it."><Input value={settings.smsSenderValue} onChange={(event) => update("smsSenderValue", event.target.value)} placeholder="07700 900123" inputMode="tel" /></Field>
+                                        ) : (
+                                            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">RoundHQ will use the managed SMS number configured for the platform.</div>
+                                        )}
+                                        <Field label="Do not send texts before"><Input type="time" value={settings.customerMessagingQuietHoursStart} onChange={(event) => update("customerMessagingQuietHoursStart", event.target.value)} /></Field>
+                                        <Field label="Do not send texts after"><Input type="time" value={settings.customerMessagingQuietHoursEnd} onChange={(event) => update("customerMessagingQuietHoursEnd", event.target.value)} /></Field>
+                                    </div>
+                                </Card>
+                                <Card title="Message automations" description="Turn on only the operational messages you want to send. Templates remain editable." icon={CalendarIcon}>
+                                    <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                                        <div className="md:col-span-2"><Toggle checked={settings.serviceRemindersEnabled} onChange={(value) => update("serviceRemindersEnabled", value)} label="Send service reminders" description="Queue a text before scheduled work." /></div>
+                                        <Field label="Reminder lead time (days)"><NumberInput value={settings.serviceReminderLeadDays} onChange={(value) => update("serviceReminderLeadDays", Math.min(30, Math.max(0, Math.round(value))))} min="0" step="1" /></Field>
+                                        <Field label="Reminder send time"><Input type="time" value={settings.serviceReminderSendTime} onChange={(event) => update("serviceReminderSendTime", event.target.value)} /></Field>
+                                        <div className="md:col-span-2"><Field label="Service reminder template"><Textarea value={settings.serviceReminderTemplate} onChange={(event) => update("serviceReminderTemplate", event.target.value)} /></Field></div>
+                                        <div className="md:col-span-2"><Toggle checked={settings.autoSendVisitCompletionTexts} onChange={(value) => update("autoSendVisitCompletionTexts", value)} label="Send an invoice text when a scheduled job is completed" description="Creates the invoice and sends its secure link when a scheduled job first becomes Completed." /></div>
+                                        <div className="md:col-span-2"><Toggle checked={settings.autoSendServiceRoundCompletionTexts} onChange={(value) => update("autoSendServiceRoundCompletionTexts", value)} label="Send a text when grass cutting is completed" description="Sends your editable grass-cutting template for On Day Transfer customers with a saved phone number." /></div>
+                                        <div className="md:col-span-2"><Field label="Grass-cutting completion text template"><Textarea value={settings.visitCompletionTextTemplate} onChange={(event) => update("visitCompletionTextTemplate", event.target.value)} /></Field></div>
+                                    </div>
+                                </Card>
+                            </>
+                        )}
                     </div>
-                )}
-                {activeTab === "dashboard" && (
+                ) : null}                {activeTab === "dashboard" && (
                     <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
                         <Card
                             title="Dashboard widgets"
@@ -4377,7 +4470,7 @@ export default function SettingsPage({
                                                         )
                                                     }
                                                 >
-                                                    {workflowMessageMethodOptions.map((option) => (
+                                                    {(smsBilling?.isActive ? workflowMessageMethodOptions : ["email" as WorkflowMessageMethod]).map((option) => (
                                                         <option key={option} value={option}>
                                                             {option === "email" ? "Email" : "Text message"}
                                                         </option>
@@ -4417,12 +4510,14 @@ export default function SettingsPage({
                                                     }
                                                 />
                                             </Field>
+{smsBilling?.isActive ? (
                                             <Field
                                                 label="Text message template"
                                                 hint="You can edit the preview before sending. A secure quote link is added automatically."
                                             >
                                                 <Textarea value={settings.quoteFollowUpTextTemplate} onChange={(event) => update("quoteFollowUpTextTemplate", event.target.value)} />
                                             </Field>
+                                            ) : null}
 
 
                                         </div>
@@ -4454,7 +4549,7 @@ export default function SettingsPage({
                                                         )
                                                     }
                                                 >
-                                                    {workflowMessageMethodOptions.map((option) => (
+                                                    {(smsBilling?.isActive ? workflowMessageMethodOptions : ["email" as WorkflowMessageMethod]).map((option) => (
                                                         <option key={option} value={option}>
                                                             {option === "email" ? "Email" : "Text message"}
                                                         </option>
@@ -4494,18 +4589,21 @@ export default function SettingsPage({
                                                     }
                                                 />
                                             </Field>
+{smsBilling?.isActive ? (
                                             <Field
                                                 label="Text message template"
                                                 hint="You can edit the preview before sending. A secure invoice link is added automatically."
                                             >
                                                 <Textarea value={settings.invoiceReminderTextTemplate} onChange={(event) => update("invoiceReminderTextTemplate", event.target.value)} />
                                             </Field>
+                                            ) : null}
 
 
                                         </div>
                                     </section>
                                 </div>
                             </Card>
+                        {smsBilling?.isActive ? (
                         <div className="mt-6">
                             <Card
                                 title="Customer message automations"
@@ -4556,6 +4654,7 @@ export default function SettingsPage({
                                 </div>
                             </Card>
                         </div>
+) : null}
                         </div>
                         ) : null}
                     </div>
