@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 import {
   ANALYTICS_SESSION_ACTIVITY_COOKIE,
   ANALYTICS_SESSION_COOKIE,
@@ -80,7 +80,6 @@ export function trackPublicAnalyticsEvent(eventName: AnalyticsEventName, pathnam
 
 export function PublicAnalyticsTracker() {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const previousPathname = useRef<string | null>(null);
 
   useEffect(() => {
@@ -90,7 +89,7 @@ export function PublicAnalyticsTracker() {
     if (pathname === "/signup") trackPublicAnalyticsEvent("signup_page_view", pathname);
     if (pathname === "/pricing") trackPublicAnalyticsEvent("pricing_viewed", pathname);
     previousPathname.current = pathname;
-  }, [pathname, searchParams]);
+  }, [pathname]);
 
   return null;
 }
