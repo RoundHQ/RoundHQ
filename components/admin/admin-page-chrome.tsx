@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import {
   AlertTriangle,
+  BarChart3,
   ArrowRight,
   FileText,
   LifeBuoy,
@@ -41,6 +42,13 @@ export function AdminTopHeader() {
         </div>
 
         <div className="flex max-w-full flex-wrap gap-2 text-sm">
+          <Link
+            href="/admin/analytics"
+            className="inline-flex items-center gap-2 rounded-md border border-white/12 px-4 py-2 font-bold text-white/88 transition hover:bg-white/10 hover:text-white"
+          >
+            <BarChart3 aria-hidden="true" className="size-4" />
+            Analytics
+          </Link>
           <Link
             href="/admin/customers"
             className="inline-flex items-center gap-2 rounded-md border border-white/12 px-4 py-2 font-bold text-white/88 transition hover:bg-white/10 hover:text-white"

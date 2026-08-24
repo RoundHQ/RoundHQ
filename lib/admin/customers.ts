@@ -105,8 +105,20 @@ type DocumentRow = {
   created_at: string | null;
 };
 
-type ScheduledJobRow = {
-  id: string;
+type AcquisitionRow = {
+  first_source: string;
+  first_referrer_domain: string | null;
+  first_landing_path: string | null;
+  first_utm_medium: string | null;
+  first_utm_campaign: string | null;
+  first_seen_at: string | null;
+  last_source: string;
+  last_referrer_domain: string | null;
+  last_landing_path: string | null;
+  signup_completed_at: string | null;
+};
+
+type ScheduledJobRow = {  id: string;
   title: string | null;
   type: string | null;
   status: string | null;
@@ -178,6 +190,7 @@ export type AdminCustomerProfile = {
   recentQuotes: DocumentRow[];
   recentInvoices: DocumentRow[];
   upcomingJobs: ScheduledJobRow[];
+  acquisition: AcquisitionRow | null;
   settingsSchemaError: string;
 };
 
@@ -458,6 +471,7 @@ export async function getAdminCustomerProfile(organizationId: string) {
     quotesResult,
     invoicesResult,
     jobsResult,
+    acquisitionResult,
   ] = await Promise.all([
     supabase
       .from("organizations")
@@ -518,6 +532,11 @@ export async function getAdminCustomerProfile(organizationId: string) {
       .eq("organization_id", organizationId)
       .order("date", { ascending: false })
       .limit(6),
+    supabase
+      .from("analytics_signup_attribution")
+      .select("first_source, first_referrer_domain, first_landing_path, first_utm_medium, first_utm_campaign, first_seen_at, last_source, last_referrer_domain, last_landing_path, signup_completed_at")
+      .eq("organization_id", organizationId)
+      .maybeSingle(),
   ]);
 
   throwIfError(organizationResult);
@@ -560,6 +579,7 @@ export async function getAdminCustomerProfile(organizationId: string) {
   const recentQuotes = (quotesResult.data ?? []) as DocumentRow[];
   const recentInvoices = (invoicesResult.data ?? []) as DocumentRow[];
   const upcomingJobs = (jobsResult.data ?? []) as ScheduledJobRow[];
+  const acquisition = acquisitionResult.error ? null : (acquisitionResult.data as AcquisitionRow | null);
 
   return {
     workspace: buildWorkspace({
@@ -593,6 +613,7 @@ export async function getAdminCustomerProfile(organizationId: string) {
     recentQuotes,
     recentInvoices,
     upcomingJobs,
+    acquisition,
     settingsSchemaError,
   } satisfies AdminCustomerProfile;
 }

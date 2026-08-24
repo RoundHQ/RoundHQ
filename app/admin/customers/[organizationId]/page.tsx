@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Trash2,
+  TrendingUp,
   UserPlus,
   Users,
   type LucideIcon,
@@ -775,6 +776,30 @@ export default async function AdminCustomerProfilePage({
               </section>
             </div>
           </div>
+
+          {profile.acquisition ? (
+            <section className="mt-6 rounded-lg border border-slate-200 bg-white p-6 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:p-8">
+              <div className="mb-5 flex items-center gap-3">
+                <div className="flex size-11 items-center justify-center rounded-md bg-[#e7f9ed] text-[#168b43]">
+                  <TrendingUp aria-hidden="true" className="size-5" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-extrabold tracking-normal text-slate-950">Acquisition</h2>
+                  <p className="mt-1 text-sm text-slate-600">First- and last-touch attribution for this RoundHQ account.</p>
+                </div>
+              </div>
+              <dl className="divide-y divide-slate-100 rounded-md border border-slate-200 px-4">
+                <DetailRow label="Signup source" value={profile.acquisition.first_source} />
+                <DetailRow label="Medium" value={profile.acquisition.first_utm_medium ?? "Unknown"} />
+                <DetailRow label="Campaign" value={profile.acquisition.first_utm_campaign ?? "Unknown"} />
+                <DetailRow label="First landing page" value={profile.acquisition.first_landing_path ?? "Unknown"} />
+                <DetailRow label="First visit" value={formatDate(profile.acquisition.first_seen_at)} />
+                <DetailRow label="Signup" value={formatDate(profile.acquisition.signup_completed_at)} />
+                <DetailRow label="Last source before signup" value={profile.acquisition.last_source} />
+                <DetailRow label="Last landing page" value={profile.acquisition.last_landing_path ?? "Unknown"} />
+              </dl>
+            </section>
+          ) : null}
 
           <div className="mt-6 grid gap-6 lg:grid-cols-2">
             <InfoCard title="Members" icon={ShieldCheck}>

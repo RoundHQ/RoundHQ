@@ -4,6 +4,7 @@ import {
   getPlatformTrialSettingsForClient,
   getTrialEndIso,
 } from "@/lib/admin/trial-settings";
+import { completeSignupAnalytics } from "@/lib/analytics/server";
 
 export const DEFAULT_ROLE_PERMISSIONS = [
   ["Admin", "technician", true],
@@ -170,6 +171,10 @@ export async function ensureWorkspace(supabase: SupabaseClient, user: User) {
   if (seedError) {
     throw seedError;
   }
+
+  void completeSignupAnalytics({ userId: user.id, organizationId }).catch((error) => {
+    console.error("analytics_signup_completion_failed", error instanceof Error ? error.message : "Unknown analytics signup error");
+  });
 
   return organizationId;
 }

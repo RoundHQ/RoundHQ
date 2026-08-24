@@ -5,6 +5,7 @@ import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { ArrowRight, BadgeCheck, ShieldCheck } from "lucide-react";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { trackPublicAnalyticsEvent } from "@/components/analytics/public-analytics-tracker";
 
 const signupBenefits = [
   "30-day free trial",
@@ -36,6 +37,7 @@ export default function SignupPage() {
     setLoading(true);
     setError("");
     setSuccess("");
+    trackPublicAnalyticsEvent("signup_started");
 
     try {
       if (!supabaseConfigured) {

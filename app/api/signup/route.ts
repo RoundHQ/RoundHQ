@@ -13,6 +13,8 @@ import {
 } from "@/lib/supabase/admin";
 import { getSubscriptionPlan, normalizePlanKey } from "@/lib/billing/plans";
 import { getCanonicalBaseUrl } from "@/lib/urls";
+import { recordPendingSignupAttribution } from "@/lib/analytics/server";
+import { ANALYTICS_SESSION_COOKIE, ANALYTICS_VISITOR_COOKIE } from "@/lib/analytics/public";
 
 export const runtime = "nodejs";
 
@@ -201,6 +203,13 @@ export async function POST(request: NextRequest) {
     hashedToken: linkProperties.hashed_token,
   });
   const userId = data.user.id;
+  await recordPendingSignupAttribution({
+    userId,
+    visitorId: request.cookies.get(ANALYTICS_VISITOR_COOKIE)?.value,
+    sessionId: request.cookies.get(ANALYTICS_SESSION_COOKIE)?.value,
+  }).catch((analyticsError) => {
+    console.error("analytics_signup_attribution_failed", getSignupErrorMessage(analyticsError, "Unable to store signup attribution."));
+  });
 
   try {
     await sendPlatformEmail({
