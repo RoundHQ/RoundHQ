@@ -1552,7 +1552,7 @@ export default function SettingsPage({
         [resolvedExportData]
     );
     const showAiReceptionistSettings = canManageAiReceptionistSettings;
-    const canManageCustomerMessages = smsBilling?.billingEnabled === true;
+    const canManageCustomerMessages = smsBilling?.billingEnabled === true || smsBilling?.feeWaived === true;
 
     useEffect(() => {
         setSmsBilling(smsEntitlement);
@@ -4145,7 +4145,7 @@ export default function SettingsPage({
                         {!smsBilling?.isActive ? (
                             <Card
                                 title="Text Messaging"
-                                description="Activate paid text messaging for this RoundHQ account."
+                                description="Activate text messaging for this RoundHQ account."
                                 icon={MessageSquare}
                             >
                                 <div className="space-y-5">
@@ -4178,7 +4178,7 @@ export default function SettingsPage({
                             </Card>
                         ) : (
                             <>
-                                <Card title="Text Messaging" description="Paid text messaging is active for your RoundHQ account." icon={MessageSquare}>
+                                <Card title="Text Messaging" description={smsBilling.feeWaived ? "Text messaging is active with fees waived by RoundHQ." : "Paid text messaging is active for your RoundHQ account."} icon={MessageSquare}>
                                     <div className="grid gap-4 sm:grid-cols-3">
                                         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
                                             <p className="text-xs font-bold uppercase tracking-[0.12em] text-emerald-700">Status</p>
@@ -4186,7 +4186,7 @@ export default function SettingsPage({
                                         </div>
                                         <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                                             <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">Current price</p>
-                                            <p className="mt-1 font-extrabold text-slate-950">{formatSmsPrice(smsBilling.pricePerMessagePence)} per message</p>
+                                            <p className="mt-1 font-extrabold text-slate-950">{smsBilling.feeWaived ? "Fee waived" : `${formatSmsPrice(smsBilling.pricePerMessagePence)} per message`}</p>
                                         </div>
                                         <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                                             <p className="text-xs font-bold uppercase tracking-[0.12em] text-slate-500">This billing period</p>

@@ -9,6 +9,7 @@ export type SmsUsageSummary = {
 
 export type SmsEntitlement = {
   billingEnabled: boolean;
+  feeWaived: boolean;
   termsAccepted: boolean;
   termsAcceptedAt: string | null;
   termsAcceptedBy: string | null;
@@ -41,7 +42,10 @@ export function getDefaultSmsUsageSummary(): SmsUsageSummary {
 
 export function canUseSms(account: {
   smsBillingEnabled: boolean;
+  smsFeeWaived?: boolean;
   smsTermsAccepted: boolean;
 }) {
-  return account.smsBillingEnabled && account.smsTermsAccepted;
+  return account.smsFeeWaived === true || (
+    account.smsBillingEnabled && account.smsTermsAccepted
+  );
 }

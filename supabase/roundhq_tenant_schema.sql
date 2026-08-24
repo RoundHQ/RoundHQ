@@ -147,6 +147,7 @@ create table if not exists public.customer_account_settings (
 
 alter table public.customer_account_settings
   add column if not exists sms_billing_enabled boolean not null default false,
+  add column if not exists sms_fee_waived boolean not null default false,
   add column if not exists sms_terms_accepted boolean not null default false,
   add column if not exists sms_terms_accepted_at timestamptz null,
   add column if not exists sms_terms_accepted_by uuid null references auth.users(id) on delete set null,
@@ -3192,7 +3193,7 @@ create table if not exists public.sms_usage_records (
   provider_message_id text null,
   recipient text not null,
   quantity integer not null default 1 check (quantity > 0),
-  unit_price_pence integer not null check (unit_price_pence > 0),
+  unit_price_pence integer not null check (unit_price_pence >= 0),
   total_price_pence integer not null check (total_price_pence = quantity * unit_price_pence),
   status text not null default 'sent' check (status in ('sent', 'delivered')),
   created_at timestamptz not null default now(),
@@ -3210,8 +3211,8 @@ create table if not exists public.sms_billing_events (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.organizations(id) on delete cascade,
   actor_user_id uuid null references auth.users(id) on delete set null,
-  event_type text not null check (event_type in ('billing_enabled', 'billing_disabled', 'terms_accepted')),
-  price_per_message_pence integer not null check (price_per_message_pence > 0),
+  event_type text not null check (event_type in ('billing_enabled', 'billing_disabled', 'terms_accepted', 'fee_waived', 'fee_reinstated')),
+  price_per_message_pence integer not null check (price_per_message_pence >= 0),
   created_at timestamptz not null default now()
 );
 

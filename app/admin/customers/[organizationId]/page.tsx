@@ -655,19 +655,23 @@ export default async function AdminCustomerProfilePage({
                       </div>
                       <div className="min-w-0 flex-1">
                         <h3 className="text-sm font-extrabold text-slate-950">Text Messaging</h3>
-                        <p className="mt-1 text-sm leading-6 text-slate-600">Allow this customer to activate paid SMS. They must accept the charge separately in their dashboard.</p>
+                        <p className="mt-1 text-sm leading-6 text-slate-600">Allow paid SMS, or waive the per-message fee for this customer.</p>
                       </div>
                     </div>
                     <label className="mt-4 flex items-start gap-3 rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-700">
                       <input type="checkbox" name="sms_billing_enabled" defaultChecked={profile.settings.smsBillingEnabled} className="mt-1 size-4 accent-[#19c653]" />
                       <span><span className="block font-bold text-slate-900">SMS Billing enabled</span><span className="mt-1 block leading-5 text-slate-600">Charge {formatPence(profile.settings.smsPricePerMessagePence)} for each sent text message.</span></span>
                     </label>
+                    <label className="mt-3 flex items-start gap-3 rounded-md border border-slate-200 bg-white p-4 text-sm text-slate-700">
+                      <input type="checkbox" name="sms_fee_waived" defaultChecked={profile.settings.smsFeeWaived} className="mt-1 size-4 accent-[#19c653]" />
+                      <span><span className="block font-bold text-slate-900">Waive SMS message fees</span><span className="mt-1 block leading-5 text-slate-600">Texts remain available and recorded, but are charged at £0.00. The customer does not need to accept paid SMS terms.</span></span>
+                    </label>
                     <dl className="mt-4 divide-y divide-slate-200 rounded-md border border-slate-200 bg-white px-4">
-                      <DetailRow label="Billing availability" value={profile.settings.smsBillingEnabled ? "Enabled" : "Disabled"} />
-                      <DetailRow label="Customer consent" value={profile.settings.smsTermsAccepted ? "Accepted" : "Not accepted"} />
-                      <DetailRow label="Current status" value={profile.settings.smsBillingEnabled && profile.settings.smsTermsAccepted ? "Active" : "Inactive"} />
+                      <DetailRow label="Billing availability" value={profile.settings.smsFeeWaived ? "Fee waived" : profile.settings.smsBillingEnabled ? "Enabled" : "Disabled"} />
+                      <DetailRow label="Customer consent" value={profile.settings.smsFeeWaived ? "Not required" : profile.settings.smsTermsAccepted ? "Accepted" : "Not accepted"} />
+                      <DetailRow label="Current status" value={profile.settings.smsFeeWaived || profile.settings.smsBillingEnabled && profile.settings.smsTermsAccepted ? "Active" : "Inactive"} />
                       <DetailRow label="Accepted date" value={formatDate(profile.settings.smsTermsAcceptedAt)} />
-                      <DetailRow label="Current rate" value={`${formatPence(profile.settings.smsPricePerMessagePence)} / message`} />
+                      <DetailRow label="Current rate" value={profile.settings.smsFeeWaived ? "Fee waived" : `${formatPence(profile.settings.smsPricePerMessagePence)} / message`} />
                       <DetailRow label="This billing period" value={`${profile.usage.sms.messageCount} messages · ${formatPence(profile.usage.sms.totalPricePence)}`} />
                     </dl>
                   </div>

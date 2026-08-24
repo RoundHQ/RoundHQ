@@ -67,6 +67,7 @@ type CustomerAccountSettingsRow = {
   internal_notes: string | null;
   support_priority: string | null;
   sms_billing_enabled: boolean | null;
+  sms_fee_waived: boolean | null;
   sms_terms_accepted: boolean | null;
   sms_terms_accepted_at: string | null;
   sms_terms_accepted_by: string | null;
@@ -487,7 +488,7 @@ export async function getAdminCustomerProfile(organizationId: string) {
     supabase
       .from("customer_account_settings")
       .select(
-        "account_status, disabled_reason, feature_access, internal_notes, support_priority, sms_billing_enabled, sms_terms_accepted, sms_terms_accepted_at, sms_terms_accepted_by, sms_price_per_message_pence, updated_at"
+        "account_status, disabled_reason, feature_access, internal_notes, support_priority, sms_billing_enabled, sms_fee_waived, sms_terms_accepted, sms_terms_accepted_at, sms_terms_accepted_by, sms_price_per_message_pence, updated_at"
       )
       .eq("organization_id", organizationId)
       .maybeSingle(),

@@ -333,9 +333,9 @@ export async function processCustomerMessageById(
       throw new Error("Customer messaging is disabled until provider setup is complete.");
     }
 
-    if (data.channel === "sms") {
-      await requireSmsEntitlement(supabase, data.organization_id);
-    }
+    const smsEntitlement = data.channel === "sms"
+      ? await requireSmsEntitlement(supabase, data.organization_id)
+      : null;
 
     const providerMessageId =
       mode === "test"
@@ -369,6 +369,7 @@ export async function processCustomerMessageById(
         initiatedBy: data.initiated_by,
         providerMessageId,
         recipient: data.recipient,
+        pricePerMessagePence: smsEntitlement?.feeWaived ? 0 : undefined,
       });
     }
     return updated;

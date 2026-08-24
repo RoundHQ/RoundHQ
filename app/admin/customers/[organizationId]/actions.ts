@@ -82,10 +82,11 @@ export async function updateCustomerAccountAction(
   const internalNotes = getText(formData, "internal_notes");
   const subscriptionPlan = normalizePlanKey(getText(formData, "subscription_plan"));
   const smsBillingEnabled = formData.get("sms_billing_enabled") === "on";
+  const smsFeeWaived = formData.get("sms_fee_waived") === "on";
   const supabase = createServiceRoleClient();
   const { data: existingSettings, error: existingSettingsError } = await supabase
     .from("customer_account_settings")
-    .select("sms_billing_enabled,sms_price_per_message_pence")
+    .select("sms_billing_enabled,sms_fee_waived,sms_price_per_message_pence")
     .eq("organization_id", organizationId)
     .maybeSingle();
   if (existingSettingsError) throw new Error(existingSettingsError.message);
@@ -99,6 +100,7 @@ export async function updateCustomerAccountAction(
       internal_notes: internalNotes,
       feature_access: getFeatureAccess(formData),
       sms_billing_enabled: smsBillingEnabled,
+      sms_fee_waived: smsFeeWaived,
       updated_at: new Date().toISOString(),
     },
     {
@@ -115,6 +117,17 @@ export async function updateCustomerAccountAction(
       organization_id: organizationId,
       event_type: smsBillingEnabled ? "billing_enabled" : "billing_disabled",
       price_per_message_pence: Number(existingSettings?.sms_price_per_message_pence ?? 10),
+    });
+    if (auditError) throw new Error(auditError.message);
+  }
+
+  if (existingSettings?.sms_fee_waived !== smsFeeWaived) {
+    const { error: auditError } = await supabase.from("sms_billing_events").insert({
+      organization_id: organizationId,
+      event_type: smsFeeWaived ? "fee_waived" : "fee_reinstated",
+      price_per_message_pence: smsFeeWaived
+        ? 0
+        : Number(existingSettings?.sms_price_per_message_pence ?? 10),
     });
     if (auditError) throw new Error(auditError.message);
   }

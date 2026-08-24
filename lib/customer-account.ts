@@ -17,6 +17,7 @@ export type CustomerAccountSettings = {
   internalNotes: string;
   supportPriority: CustomerSupportPriority;
   smsBillingEnabled: boolean;
+  smsFeeWaived: boolean;
   smsTermsAccepted: boolean;
   smsTermsAcceptedAt: string | null;
   smsTermsAcceptedBy: string | null;
@@ -34,6 +35,7 @@ type CustomerAccountSettingsRow = {
   internal_notes: string | null;
   support_priority: string | null;
   sms_billing_enabled: boolean | null;
+  sms_fee_waived: boolean | null;
   sms_terms_accepted: boolean | null;
   sms_terms_accepted_at: string | null;
   sms_terms_accepted_by: string | null;
@@ -51,6 +53,7 @@ export function getDefaultCustomerAccountSettings(
     internalNotes: "",
     supportPriority: "standard",
     smsBillingEnabled: false,
+    smsFeeWaived: false,
     smsTermsAccepted: false,
     smsTermsAcceptedAt: null,
     smsTermsAcceptedBy: null,
@@ -92,6 +95,7 @@ export function mapCustomerAccountSettingsRow(
     internalNotes: row.internal_notes?.trim() ?? "",
     supportPriority: normalizeSupportPriority(row.support_priority),
     smsBillingEnabled: row.sms_billing_enabled === true,
+    smsFeeWaived: row.sms_fee_waived === true,
     smsTermsAccepted: row.sms_terms_accepted === true,
     smsTermsAcceptedAt: row.sms_terms_accepted_at,
     smsTermsAcceptedBy: row.sms_terms_accepted_by,
@@ -114,7 +118,7 @@ export async function getCustomerAccountSettings(
   const { data, error } = await supabase
     .from("customer_account_settings")
     .select(
-      "account_status, disabled_reason, feature_access, internal_notes, support_priority, sms_billing_enabled, sms_terms_accepted, sms_terms_accepted_at, sms_terms_accepted_by, sms_price_per_message_pence, updated_at"
+      "account_status, disabled_reason, feature_access, internal_notes, support_priority, sms_billing_enabled, sms_fee_waived, sms_terms_accepted, sms_terms_accepted_at, sms_terms_accepted_by, sms_price_per_message_pence, updated_at"
     )
     .eq("organization_id", organizationId)
     .maybeSingle();

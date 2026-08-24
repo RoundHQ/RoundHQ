@@ -84,10 +84,11 @@ export async function getSmsEntitlement(
 
   return {
     billingEnabled: account.smsBillingEnabled,
+    feeWaived: account.smsFeeWaived,
     termsAccepted: account.smsTermsAccepted,
     termsAcceptedAt: account.smsTermsAcceptedAt,
     termsAcceptedBy: account.smsTermsAcceptedBy,
-    pricePerMessagePence: account.smsPricePerMessagePence,
+    pricePerMessagePence: account.smsFeeWaived ? 0 : account.smsPricePerMessagePence,
     isActive: canUseSms(account),
     usage,
   };
@@ -96,16 +97,22 @@ export async function getSmsEntitlement(
 export async function requireSmsEntitlement(
   supabase: SupabaseClient,
   organizationId: string
-) {
+): Promise<{ feeWaived: boolean }> {
   const { data, error } = await supabase
     .from("customer_account_settings")
-    .select("sms_billing_enabled,sms_terms_accepted")
+    .select("sms_billing_enabled,sms_fee_waived,sms_terms_accepted")
     .eq("organization_id", organizationId)
     .maybeSingle();
 
-  if (error || !data || !data.sms_billing_enabled || !data.sms_terms_accepted) {
+  const feeWaived = data?.sms_fee_waived === true;
+  const canSend = feeWaived || (
+    data?.sms_billing_enabled === true && data?.sms_terms_accepted === true
+  );
+  if (error || !data || !canSend) {
     throw new SmsEntitlementError();
   }
+
+  return { feeWaived };
 }
 
 export async function recordSmsUsage(options: {

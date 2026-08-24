@@ -37,9 +37,11 @@ assert.equal(canUseSms({ smsBillingEnabled: false, smsTermsAccepted: false }), f
 assert.equal(canUseSms({ smsBillingEnabled: true, smsTermsAccepted: false }), false);
 assert.equal(canUseSms({ smsBillingEnabled: false, smsTermsAccepted: true }), false);
 assert.equal(canUseSms({ smsBillingEnabled: true, smsTermsAccepted: true }), true);
+assert.equal(canUseSms({ smsBillingEnabled: false, smsFeeWaived: true, smsTermsAccepted: false }), true);
 
 const defaults = getDefaultCustomerAccountSettings();
 assert.equal(defaults.smsBillingEnabled, false, "existing accounts must default to SMS off");
+assert.equal(defaults.smsFeeWaived, false, "existing accounts must not have fees waived");
 assert.equal(defaults.smsTermsAccepted, false, "existing accounts must not have consent");
 assert.equal(defaults.smsPricePerMessagePence, 10);
 
@@ -50,6 +52,7 @@ const mapped = mapCustomerAccountSettingsRow({
   internal_notes: null,
   support_priority: "standard",
   sms_billing_enabled: true,
+  sms_fee_waived: true,
   sms_terms_accepted: true,
   sms_terms_accepted_at: "2026-08-24T12:00:00.000Z",
   sms_terms_accepted_by: "user-1",
@@ -57,6 +60,7 @@ const mapped = mapCustomerAccountSettingsRow({
   updated_at: null,
 });
 assert.equal(canUseSms(mapped), true);
+assert.equal(mapped.smsFeeWaived, true);
 assert.equal(mapped.smsTermsAcceptedBy, "user-1");
 
 const migration = fs.readFileSync(path.join(projectRoot, "supabase", "20260824_paid_sms_billing.sql"), "utf8");
@@ -65,6 +69,10 @@ assert.match(migration, /sms_terms_accepted boolean not null default false/);
 assert.match(migration, /create table if not exists public\.sms_usage_records/);
 assert.match(migration, /unique \(customer_message_id\)/);
 assert.match(migration, /Members read SMS usage records/);
+
+const waiverMigration = fs.readFileSync(path.join(projectRoot, "supabase", "20260824_sms_fee_waiver.sql"), "utf8");
+assert.match(waiverMigration, /sms_fee_waived boolean not null default false/);
+assert.match(waiverMigration, /fee_waived/);
 
 const messageRoute = fs.readFileSync(path.join(projectRoot, "app", "api", "customer-messages", "route.ts"), "utf8");
 assert.match(messageRoute, /SmsEntitlementError/);
