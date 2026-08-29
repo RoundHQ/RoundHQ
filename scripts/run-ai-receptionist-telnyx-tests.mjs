@@ -57,11 +57,16 @@ const {
 } = require(path.join(projectRoot, "lib", "ai-receptionist-leads.ts"));
 const {
   getAiReceptionistRecordingForPlayback,
+  getTelnyxRecordingIdFromCallLog,
 } = require(path.join(projectRoot, "lib", "ai-receptionist", "recordings.ts"));
+const {
+  getTelnyxRecordingDownloadUrl,
+} = require(path.join(projectRoot, "lib", "ai-receptionist", "telnyx-platform.ts"));
 const {
   handleTelnyxCallStatus,
   handleTelnyxIncomingCall,
   handleTelnyxRecordingComplete,
+  handleTelnyxWebhook,
 } = require(path.join(
   projectRoot,
   "lib",
@@ -69,6 +74,8 @@ const {
   "providers",
   "telnyx.ts"
 ));
+
+
 const {
   sendAiReceptionistSms,
 } = require(path.join(
@@ -97,6 +104,52 @@ assert.equal(
   decryptAiReceptionistSecretFromStorage(encryptedTelnyxApiKey),
   telnyxApiKey,
   "Telnyx API key should be encrypted at rest and decryptable server-side"
+);
+
+assert.equal(
+  getTelnyxRecordingIdFromCallLog({
+    provider: "telnyx",
+    raw_payload: { recording_id: "recording-from-webhook" },
+  }),
+  "recording-from-webhook"
+);
+
+const recordingApiRequests = [];
+const refreshedRecordingUrl = await getTelnyxRecordingDownloadUrl({
+  config: {
+    apiKey: telnyxApiKey,
+    publicKey: telnyxPublicKey,
+    connectionId: "telnyx-app-1",
+    messagingProfileId: "messaging-profile-1",
+    billingGroupId: "",
+  },
+  recordingId: "recording-from-webhook",
+  fetchImpl: async (url, options) => {
+    recordingApiRequests.push({ url: String(url), options });
+    return new Response(
+      JSON.stringify({
+        data: {
+          id: "recording-from-webhook",
+          download_urls: {
+            mp3: "https://recordings.example.test/fresh.mp3?signature=current",
+          },
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  },
+});
+assert.equal(
+  refreshedRecordingUrl,
+  "https://recordings.example.test/fresh.mp3?signature=current"
+);
+assert.equal(
+  recordingApiRequests[0].url,
+  "https://api.telnyx.com/v2/recordings/recording-from-webhook"
+);
+assert.equal(
+  recordingApiRequests[0].options.headers.authorization,
+  `Bearer ${telnyxApiKey}`
 );
 
 function buildSettingsRow(organization_id, telnyx_phone_number, business_name) {
@@ -137,6 +190,16 @@ function createTables() {
     ai_receptionist_settings: [
       buildSettingsRow(organizationAId, telnyxPhoneNumberA, "RoundHQ Test Co A"),
       buildSettingsRow(organizationBId, telnyxPhoneNumberB, "RoundHQ Test Co B"),
+    ],
+    customer_account_settings: [
+      {
+        organization_id: organizationAId,
+        feature_access: { aiReceptionist: true },
+      },
+      {
+        organization_id: organizationBId,
+        feature_access: { aiReceptionist: true },
+      },
     ],
     ai_receptionist_call_logs: [],
     customer_leads: [],
@@ -271,6 +334,12 @@ function buildTelnyxBody(eventType, id, payload) {
     },
   });
 }
+function buildClientState(calledNumber) {
+  return Buffer.from(
+    JSON.stringify({ called_number: calledNumber }),
+    "utf8"
+  ).toString("base64");
+}
 
 function signedHeaders(rawBody, options = {}) {
   const timestamp =
@@ -305,6 +374,8 @@ function okJsonResponse(body = {}) {
 }
 
 const incomingTables = createTables();
+incomingTables.ai_receptionist_settings[0].realtime_enabled = true;
+incomingTables.ai_receptionist_settings[0].custom_conversation_enabled = true;
 const telnyxApiCalls = [];
 const incomingBody = buildTelnyxBody("call.initiated", "event-incoming-a", {
   call_control_id: "call-a",
@@ -328,11 +399,41 @@ assert.equal(incomingResponse.status, 200);
 assert.equal(incomingTables.ai_receptionist_call_logs.length, 1);
 assert.equal(incomingTables.ai_receptionist_call_logs[0].organization_id, organizationAId);
 assert.equal(incomingTables.ai_receptionist_call_logs[0].provider, "telnyx");
-assert.equal(telnyxApiCalls.length, 3, "incoming call should answer, speak, and record");
+assert.equal(telnyxApiCalls.length, 2, "incoming call should answer and play the greeting");
 assert.equal(
   telnyxApiCalls[0].options.headers.authorization,
   `Bearer ${telnyxApiKey}`
 );
+
+const speakEndedBody = buildTelnyxBody("call.speak.ended", "event-speak-a", {
+  call_control_id: "call-a",
+  call_session_id: "session-a",
+  client_state: buildClientState(telnyxPhoneNumberA),
+});
+const speakEndedResponse = await handleTelnyxWebhook(
+  context({
+    tables: incomingTables,
+    rawBody: speakEndedBody,
+    fetchImpl: async (url, options) => {
+      telnyxApiCalls.push({ url: String(url), options });
+      return okJsonResponse();
+    },
+  })
+);
+assert.equal(speakEndedResponse.status, 200);
+assert.equal(telnyxApiCalls.length, 3, "recording should start after the greeting ends");
+const recordRequest = telnyxApiCalls[2];
+const recordRequestBody = JSON.parse(recordRequest.options.body);
+assert.match(recordRequest.url, /\/record_start$/);
+assert.equal(recordRequestBody.transcription, true);
+assert.equal(recordRequestBody.transcription_language, "en-GB");
+assert.equal(recordRequestBody.recording_track, "inbound");
+assert.equal(
+  JSON.parse(Buffer.from(recordRequestBody.client_state, "base64").toString("utf8"))
+    .called_number,
+  telnyxPhoneNumberA
+);
+assert.ok(recordRequestBody.command_id, "recording command should be idempotent");
 
 const incomingBTables = createTables();
 const incomingBBody = buildTelnyxBody("call.initiated", "event-incoming-b", {
@@ -352,6 +453,8 @@ const incomingBResponse = await handleTelnyxIncomingCall(
 assert.equal(incomingBResponse.status, 200);
 assert.equal(incomingBTables.ai_receptionist_call_logs[0].organization_id, organizationBId);
 
+// Legacy realtime settings are intentionally normalized to voicemail.
+
 const unknownTables = createTables();
 const unknownBody = buildTelnyxBody("call.initiated", "event-unknown", {
   call_control_id: "call-unknown",
@@ -363,6 +466,19 @@ const unknownResponse = await handleTelnyxIncomingCall(
 );
 assert.equal(unknownResponse.status, 403);
 assert.equal(unknownTables.ai_receptionist_call_logs.length, 0);
+
+const disabledFeatureTables = createTables();
+disabledFeatureTables.customer_account_settings[0].feature_access.aiReceptionist = false;
+const disabledFeatureResponse = await handleTelnyxIncomingCall(
+  context({
+    tables: disabledFeatureTables,
+    rawBody: incomingBody,
+    fetchImpl: async () => okJsonResponse(),
+  })
+);
+assert.equal(disabledFeatureResponse.status, 403);
+assert.match(String(disabledFeatureResponse.body.error), /not enabled/i);
+assert.equal(disabledFeatureTables.ai_receptionist_call_logs.length, 0);
 
 const invalidSignatureResponse = await handleTelnyxIncomingCall(
   context({
@@ -406,6 +522,90 @@ assert.equal(metadata.recording_id, "call-recording-a");
 assert.equal(metadata.recording_url, undefined, "raw provider recording URL should not be exposed in lead activity");
 assert.equal(metadata.provider, "telnyx");
 assert.match(metadata.transcript, /John Smith/);
+
+const asynchronousTables = createTables();
+const asynchronousIncomingBody = buildTelnyxBody(
+  "call.initiated",
+  "event-async-incoming",
+  {
+    call_control_id: "call-async",
+    call_session_id: "session-async",
+    from: "+447700900010",
+    to: telnyxPhoneNumberA,
+  }
+);
+await handleTelnyxWebhook(
+  context({
+    tables: asynchronousTables,
+    rawBody: asynchronousIncomingBody,
+    fetchImpl: async () => okJsonResponse(),
+  })
+);
+const asynchronousRecordingBody = buildTelnyxBody(
+  "call.recording.saved",
+  "event-async-recording",
+  {
+    call_control_id: "call-async",
+    call_session_id: "session-async",
+    recording_id: "recording-async",
+    recording_urls: {
+      mp3: "https://api.telnyx.com/recordings/recording-async.mp3",
+    },
+    duration_millis: 61000,
+    client_state: buildClientState(telnyxPhoneNumberA),
+  }
+);
+const asynchronousRecordingResponse = await handleTelnyxWebhook(
+  context({
+    tables: asynchronousTables,
+    rawBody: asynchronousRecordingBody,
+  })
+);
+assert.equal(asynchronousRecordingResponse.status, 200);
+assert.equal(asynchronousRecordingResponse.body.pending, true);
+assert.equal(
+  asynchronousTables.customer_leads.length,
+  0,
+  "recording callback should wait for the asynchronous transcript"
+);
+assert.equal(
+  asynchronousTables.ai_receptionist_call_logs[0].recording_url,
+  "https://api.telnyx.com/recordings/recording-async.mp3"
+);
+
+const asynchronousTranscriptBody = buildTelnyxBody(
+  "call.recording.transcription.saved",
+  "event-async-transcript",
+  {
+    call_control_id: "call-async",
+    call_session_id: "session-async",
+    recording_id: "recording-async",
+    recording_transcription_id: "transcription-async",
+    status: "completed",
+    transcription_text:
+      "My name is Sarah Jones. I need gutter cleaning at 14 Station Road.",
+    client_state: buildClientState(telnyxPhoneNumberA),
+  }
+);
+const asynchronousTranscriptResponse = await handleTelnyxWebhook(
+  context({
+    tables: asynchronousTables,
+    rawBody: asynchronousTranscriptBody,
+  })
+);
+assert.equal(asynchronousTranscriptResponse.status, 200);
+assert.equal(asynchronousTables.customer_leads.length, 1);
+assert.equal(asynchronousTables.customer_leads[0].service, "Gutter cleaning");
+assert.equal(asynchronousTables.customer_leads[0].phone, "+447700900010");
+assert.equal(
+  asynchronousTables.ai_receptionist_call_logs[0].recording_url,
+  "https://api.telnyx.com/recordings/recording-async.mp3",
+  "transcription callback should preserve recording details from the earlier event"
+);
+assert.equal(
+  asynchronousTables.ai_receptionist_call_logs[0].lead_id,
+  asynchronousTranscriptResponse.body.leadId
+);
 
 const duplicateTables = createTables();
 const firstDuplicateResponse = await handleTelnyxRecordingComplete(
@@ -494,6 +694,25 @@ const recordingBFromA = await getAiReceptionistRecordingForPlayback(
 );
 assert.equal(recordingA.recording_url, "https://api.telnyx.com/recordings/a.mp3");
 assert.equal(recordingBFromA, null, "customer A should not access customer B recordings");
+
+recordingAccessTables.ai_receptionist_call_logs.push({
+  id: "log-c",
+  organization_id: organizationAId,
+  provider: "telnyx",
+  call_sid: "recording-access-c",
+  recording_url: null,
+  raw_payload: { recording_id: "provider-recording-c" },
+});
+const recordingC = await getAiReceptionistRecordingForPlayback(
+  createFakeSupabase(recordingAccessTables),
+  organizationAId,
+  "recording-access-c"
+);
+assert.equal(
+  getTelnyxRecordingIdFromCallLog(recordingC),
+  "provider-recording-c",
+  "playback should work from a stored Telnyx recording ID even without a webhook URL"
+);
 
 const smsTables = createTables();
 const smsCalls = [];

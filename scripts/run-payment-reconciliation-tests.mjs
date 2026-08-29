@@ -48,6 +48,7 @@ if (!globalThis.crypto?.randomUUID) {
 const {
   buildReconciliationReviewRows,
   createLearnedRuleFromRow,
+  getAcceptedProfilePaymentDateUpdate,
   getImportSummary,
   isConfirmedReconciliationRow,
   parseStatementCsv,
@@ -229,6 +230,42 @@ const partialRows = buildReconciliationReviewRows({
   ignoreRules: [],
 });
 assert.equal(partialRows[0].selectedAllocations[0].isPartial, true, "GBP 20 against GBP 25 should be partial");
+assert.equal(
+  getAcceptedProfilePaymentDateUpdate(
+    partialRows[0],
+    partialRows[0].selectedAllocations[0]
+  ),
+  null,
+  "partial payments should remain customer credit rather than marking the profile fully paid"
+);
+
+assert.deepEqual(
+  getAcceptedProfilePaymentDateUpdate(
+    visitDatePaymentRows[0],
+    visitDatePaymentRows[0].selectedAllocations[0]
+  ),
+  {
+    type: "visit",
+    customerId: 1,
+    targetId: "visit-18",
+    paymentDate: "2026-06-20",
+  },
+  "an accepted visit payment should populate the profile Payment Date from the bank transaction"
+);
+
+assert.deepEqual(
+  getAcceptedProfilePaymentDateUpdate(
+    monthlyPaymentRows[0],
+    monthlyPaymentRows[0].selectedAllocations[0]
+  ),
+  {
+    type: "monthly_payment",
+    customerId: 1,
+    targetId: "2026-06-01",
+    paymentDate: "2026-06-25",
+  },
+  "an accepted monthly payment should populate the matching profile Payment Date"
+);
 
 const creditRows = buildReconciliationReviewRows({
   rows: parseStatementCsv("Date,Description,Amount\n25/06/2026,John Smith,60\n").rows,

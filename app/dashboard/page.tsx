@@ -10,12 +10,14 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { getCustomerAccountSettings } from "@/lib/customer-account";
+import { getSmsEntitlement } from "@/lib/messaging/sms-billing-server";
 import { getOrCreateAiReceptionistSettings } from "@/lib/ai-receptionist-settings";
 import {
   getAiReceptionistCallHistory,
   getAiReceptionistDashboardStats,
 } from "@/lib/ai-receptionist/call-logs";
-import { SHOW_AI_RECEPTIONIST_UI } from "@/lib/ai-receptionist/ui-visibility";
+import { getOpenAiRealtimeSipReadiness } from "@/lib/ai-receptionist/realtime/openai-sip";
+
 import type { SubscriptionPlanKey } from "@/lib/billing/plans";
 import { isStripeConfigured } from "@/lib/stripe/server";
 import { ensureWorkspace } from "@/lib/workspace";
@@ -99,56 +101,17 @@ async function prepareSupportWorkspaceAccess(options: {
     throw new Error(memberError.message);
   }
 
-  const { data: staffByUser, error: staffLookupError } = await serviceSupabase
+  // Support access is deliberately not a customer staff account. Remove any
+  // legacy record created by older support-view behaviour before loading data.
+  const { error: supportStaffCleanupError } = await serviceSupabase
     .from("staff_members")
-    .select("id")
+    .delete()
     .eq("organization_id", options.organizationId)
-    .eq("auth_user_id", options.user.id)
-    .maybeSingle();
+    .eq("auth_user_id", options.user.id);
 
-  if (staffLookupError) {
-    throw new Error(staffLookupError.message);
+  if (supportStaffCleanupError) {
+    throw new Error(supportStaffCleanupError.message);
   }
-
-  let existingStaff = staffByUser;
-
-  if (!existingStaff) {
-    const staffByEmailResult = await serviceSupabase
-      .from("staff_members")
-      .select("id")
-      .eq("organization_id", options.organizationId)
-      .eq("email", email)
-      .maybeSingle();
-
-    if (staffByEmailResult.error) {
-      throw new Error(staffByEmailResult.error.message);
-    }
-
-    existingStaff = staffByEmailResult.data;
-  }
-
-  const staffPayload = {
-    organization_id: options.organizationId,
-    auth_user_id: options.user.id,
-    email,
-    full_name: fullName,
-    role: "Admin",
-    is_active: true,
-    is_system_admin: true,
-    updated_at: now,
-  };
-
-  const staffResult = existingStaff?.id
-    ? await serviceSupabase
-        .from("staff_members")
-        .update(staffPayload)
-        .eq("id", existingStaff.id)
-    : await serviceSupabase.from("staff_members").insert(staffPayload);
-
-  if (staffResult.error) {
-    throw new Error(staffResult.error.message);
-  }
-
   return {
     organizationId: options.organizationId,
     workspaceName:
@@ -200,7 +163,15 @@ export default async function DashboardPage({
       ? organizations[0].name.trim()
       : "RoundHQ Workspace";
   const accountSettings = await getCustomerAccountSettings(supabase, organizationId);
-  const canManageAiReceptionistSettings = SHOW_AI_RECEPTIONIST_UI
+  const smsEntitlement = await getSmsEntitlement(
+    supabase,
+    organizationId,
+    accountSettings,
+    subscription.current_period_end
+  );
+  const aiReceptionistPilotEnabled =
+    accountSettings.featureAccess.aiReceptionist;
+  const canManageAiReceptionistSettings = aiReceptionistPilotEnabled
     ? await getWorkspaceAdminAccess(supabase, organizationId, user)
     : false;
   const aiReceptionistSettings = canManageAiReceptionistSettings
@@ -211,6 +182,9 @@ export default async function DashboardPage({
     : null;
   const aiReceptionistCallHistory = canManageAiReceptionistSettings
     ? await getAiReceptionistCallHistory(supabase, organizationId)
+    : null;
+  const aiReceptionistRealtimeReadiness = canManageAiReceptionistSettings
+    ? getOpenAiRealtimeSipReadiness()
     : null;
 
   if (!supportAccess && accountSettings.accountStatus === "disabled") {
@@ -244,6 +218,7 @@ export default async function DashboardPage({
   return (
     <JobsApp
       featureAccess={supportAccess ? undefined : accountSettings.featureAccess}
+      smsEntitlement={smsEntitlement}
       supportAccess={supportAccess}
       subscriptionPlan={subscription.plan}
       subscriptionStaffAddonQuantity={subscription.staff_addon_quantity}
@@ -251,6 +226,7 @@ export default async function DashboardPage({
       subscriptionTrialEndsAt={subscription.trial_ends_at}
       workspaceName={workspaceName}
       aiReceptionistSettings={aiReceptionistSettings}
+      aiReceptionistRealtimeReadiness={aiReceptionistRealtimeReadiness}
       canManageAiReceptionistSettings={canManageAiReceptionistSettings}
       aiReceptionistStats={aiReceptionistStats}
       aiReceptionistCallHistory={aiReceptionistCallHistory}

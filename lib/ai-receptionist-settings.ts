@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-export const AI_RECEPTIONIST_SETTINGS_SELECT = [
+const AI_RECEPTIONIST_LEGACY_PUBLIC_SETTINGS_COLUMNS = [
   "organization_id",
   "enabled",
   "business_name",
@@ -8,13 +8,11 @@ export const AI_RECEPTIONIST_SETTINGS_SELECT = [
   "fallback_phone_number",
   "notification_email",
   "telephony_provider",
-  "telnyx_api_key",
   "telnyx_connection_id",
   "telnyx_messaging_profile_id",
   "telnyx_public_key",
   "telnyx_phone_number",
   "twilio_account_sid",
-  "twilio_auth_token",
   "twilio_phone_number",
   "realtime_enabled",
   "transfer_to_number",
@@ -28,6 +26,44 @@ export const AI_RECEPTIONIST_SETTINGS_SELECT = [
   "lead_source_label",
   "created_at",
   "updated_at",
+] as const;
+
+const AI_RECEPTIONIST_PUBLIC_SETTINGS_COLUMNS = [
+  ...AI_RECEPTIONIST_LEGACY_PUBLIC_SETTINGS_COLUMNS,
+  "voice_accent",
+  "custom_conversation_enabled",
+  "conversation_instructions",
+] as const;
+
+const AI_RECEPTIONIST_MANAGED_NUMBER_COLUMNS = [
+  "phone_setup_mode",
+  "existing_business_phone_number",
+  "telnyx_phone_number_id",
+  "telnyx_number_order_id",
+  "telnyx_provisioning_status",
+  "telnyx_provisioning_reference",
+  "telnyx_provisioning_error",
+] as const;
+
+export const AI_RECEPTIONIST_LEGACY_SETTINGS_SELECT =
+  AI_RECEPTIONIST_LEGACY_PUBLIC_SETTINGS_COLUMNS.join(",");
+
+export const AI_RECEPTIONIST_SETTINGS_SELECT = [
+  ...AI_RECEPTIONIST_PUBLIC_SETTINGS_COLUMNS,
+  ...AI_RECEPTIONIST_MANAGED_NUMBER_COLUMNS,
+].join(",");
+
+export const AI_RECEPTIONIST_PRIVATE_LEGACY_SETTINGS_SELECT = [
+  ...AI_RECEPTIONIST_LEGACY_PUBLIC_SETTINGS_COLUMNS,
+  "telnyx_api_key",
+  "twilio_auth_token",
+].join(",");
+
+export const AI_RECEPTIONIST_PRIVATE_SETTINGS_SELECT = [
+  ...AI_RECEPTIONIST_PUBLIC_SETTINGS_COLUMNS,
+  ...AI_RECEPTIONIST_MANAGED_NUMBER_COLUMNS,
+  "telnyx_api_key",
+  "twilio_auth_token",
 ].join(",");
 
 export const DEFAULT_AI_RECEPTIONIST_GREETING =
@@ -70,8 +106,17 @@ export type AiReceptionistBusinessHours = Record<
   AiReceptionistDayKey,
   AiReceptionistBusinessHour
 >;
+export type AiReceptionistVoiceAccent = "scottish" | "british" | "neutral";
 
 export type AiReceptionistTelephonyProvider = "telnyx" | "twilio";
+export type AiReceptionistPhoneSetupMode = "new_number" | "call_forwarding";
+export type AiReceptionistPhoneProvisioningStatus =
+  | "not_configured"
+  | "ordering"
+  | "pending"
+  | "action_required"
+  | "active"
+  | "failed";
 
 export type AiReceptionistSettings = {
   enabled: boolean;
@@ -80,6 +125,10 @@ export type AiReceptionistSettings = {
   fallbackPhoneNumber: string;
   notificationEmail: string;
   telephonyProvider: AiReceptionistTelephonyProvider;
+  phoneSetupMode: AiReceptionistPhoneSetupMode;
+  existingBusinessPhoneNumber: string;
+  phoneProvisioningStatus: AiReceptionistPhoneProvisioningStatus;
+  phoneProvisioningError: string;
   telnyxPhoneNumber: string;
   telnyxConnectionId: string;
   telnyxMessagingProfileId: string;
@@ -89,6 +138,9 @@ export type AiReceptionistSettings = {
   twilioPhoneNumber: string;
   twilioAuthTokenConfigured: boolean;
   realtimeEnabled: boolean;
+  voiceAccent: AiReceptionistVoiceAccent;
+  customConversationEnabled: boolean;
+  conversationInstructions: string;
   transferToNumber: string;
   newLeadSmsEnabled: boolean;
   newLeadSmsPhoneNumber: string;
@@ -123,11 +175,21 @@ export type AiReceptionistSettingsRow = {
   telnyx_messaging_profile_id?: string | null;
   telnyx_public_key?: string | null;
   telnyx_phone_number?: string | null;
+  phone_setup_mode?: string | null;
+  existing_business_phone_number?: string | null;
+  telnyx_phone_number_id?: string | null;
+  telnyx_number_order_id?: string | null;
+  telnyx_provisioning_status?: string | null;
+  telnyx_provisioning_reference?: string | null;
+  telnyx_provisioning_error?: string | null;
   twilio_account_sid?: string | null;
   twilio_auth_token?: string | null;
   twilio_phone_number?: string | null;
   realtime_enabled?: boolean | null;
   transfer_to_number?: string | null;
+  voice_accent?: string | null;
+  custom_conversation_enabled?: boolean | null;
+  conversation_instructions?: string | null;
   new_lead_sms_enabled?: boolean | null;
   new_lead_sms_phone_number?: string | null;
   business_hours_enabled: boolean | null;
@@ -165,8 +227,8 @@ const DEFAULT_WEEKEND_HOURS = {
 };
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
-const TWILIO_ACCOUNT_SID_PATTERN = /^AC[a-zA-Z0-9]{8,}$/;
-const TELNYX_CONNECTION_ID_PATTERN = /^[a-zA-Z0-9_-]{6,}$/;
+
+
 
 export const DEFAULT_AI_RECEPTIONIST_BUSINESS_HOURS: AiReceptionistBusinessHours = {
   monday: DEFAULT_WEEKDAY_HOURS,
@@ -191,6 +253,45 @@ function normalizeTelephonyProvider(
   value: unknown
 ): AiReceptionistTelephonyProvider {
   return getText(value).toLowerCase() === "twilio" ? "twilio" : "telnyx";
+}
+
+function normalizePhoneSetupMode(
+  value: unknown
+): AiReceptionistPhoneSetupMode {
+  return getText(value) === "call_forwarding"
+    ? "call_forwarding"
+    : "new_number";
+}
+
+function normalizePhoneProvisioningStatus(
+  value: unknown,
+  phoneNumber: string
+): AiReceptionistPhoneProvisioningStatus {
+  const status = getText(value);
+
+  if (
+    status === "ordering" ||
+    status === "pending" ||
+    status === "action_required" ||
+    status === "active" ||
+    status === "failed"
+  ) {
+    return status;
+  }
+
+  return phoneNumber ? "active" : "not_configured";
+}
+
+export function normalizeAiReceptionistVoiceAccent(
+  value: unknown
+): AiReceptionistVoiceAccent {
+  const accent = getText(value).toLowerCase();
+
+  if (accent === "british" || accent === "neutral") {
+    return accent;
+  }
+
+  return "scottish";
 }
 
 export function normalizeAiReceptionistList(
@@ -256,6 +357,10 @@ export function getDefaultAiReceptionistSettings(
     fallbackPhoneNumber: "",
     notificationEmail: "",
     telephonyProvider: "telnyx",
+    phoneSetupMode: "new_number",
+    existingBusinessPhoneNumber: "",
+    phoneProvisioningStatus: "not_configured",
+    phoneProvisioningError: "",
     telnyxPhoneNumber: "",
     telnyxConnectionId: "",
     telnyxMessagingProfileId: "",
@@ -265,6 +370,9 @@ export function getDefaultAiReceptionistSettings(
     twilioPhoneNumber: "",
     twilioAuthTokenConfigured: false,
     realtimeEnabled: false,
+    voiceAccent: "scottish",
+    customConversationEnabled: false,
+    conversationInstructions: "",
     transferToNumber: "",
     newLeadSmsEnabled: false,
     newLeadSmsPhoneNumber: "",
@@ -275,7 +383,7 @@ export function getDefaultAiReceptionistSettings(
     questionsToAsk: [...DEFAULT_AI_RECEPTIONIST_QUESTIONS],
     emergencyKeywords: [...DEFAULT_AI_RECEPTIONIST_EMERGENCY_KEYWORDS],
     consentMessage: DEFAULT_AI_RECEPTIONIST_CONSENT,
-    leadSourceLabel: "AI Receptionist",
+    leadSourceLabel: "Voicemail",
     createdAt: null,
     updatedAt: null,
     exists: false,
@@ -287,6 +395,7 @@ export function getDefaultAiReceptionistSettings(
 export function normalizeAiReceptionistSettings(
   value: Partial<AiReceptionistSettings> | null | undefined
 ): AiReceptionistSettings {
+  const telnyxPhoneNumber = getText(value?.telnyxPhoneNumber);
   const questionsToAsk = Array.isArray(value?.questionsToAsk)
     ? normalizeAiReceptionistList(value.questionsToAsk, [])
     : normalizeAiReceptionistList(
@@ -310,7 +419,14 @@ export function normalizeAiReceptionistSettings(
     fallbackPhoneNumber: getText(value?.fallbackPhoneNumber),
     notificationEmail: getText(value?.notificationEmail).toLowerCase(),
     telephonyProvider: normalizeTelephonyProvider(value?.telephonyProvider),
-    telnyxPhoneNumber: getText(value?.telnyxPhoneNumber),
+    phoneSetupMode: normalizePhoneSetupMode(value?.phoneSetupMode),
+    existingBusinessPhoneNumber: getText(value?.existingBusinessPhoneNumber),
+    phoneProvisioningStatus: normalizePhoneProvisioningStatus(
+      value?.phoneProvisioningStatus,
+      telnyxPhoneNumber
+    ),
+    phoneProvisioningError: getText(value?.phoneProvisioningError),
+    telnyxPhoneNumber,
     telnyxConnectionId: getText(value?.telnyxConnectionId),
     telnyxMessagingProfileId: getText(value?.telnyxMessagingProfileId),
     telnyxPublicKey: getText(value?.telnyxPublicKey),
@@ -319,6 +435,9 @@ export function normalizeAiReceptionistSettings(
     twilioPhoneNumber: getText(value?.twilioPhoneNumber),
     twilioAuthTokenConfigured: Boolean(value?.twilioAuthTokenConfigured),
     realtimeEnabled: false,
+    voiceAccent: normalizeAiReceptionistVoiceAccent(value?.voiceAccent),
+    customConversationEnabled: Boolean(value?.customConversationEnabled),
+    conversationInstructions: getText(value?.conversationInstructions),
     transferToNumber: getText(value?.transferToNumber),
     newLeadSmsEnabled: Boolean(value?.newLeadSmsEnabled),
     newLeadSmsPhoneNumber: getText(value?.newLeadSmsPhoneNumber),
@@ -330,7 +449,7 @@ export function normalizeAiReceptionistSettings(
       value?.consentMessage,
       DEFAULT_AI_RECEPTIONIST_CONSENT
     ),
-    leadSourceLabel: getText(value?.leadSourceLabel) || "AI Receptionist",
+    leadSourceLabel: "Voicemail",
     createdAt: value?.createdAt ?? null,
     updatedAt: value?.updatedAt ?? null,
     exists: Boolean(value?.exists),
@@ -353,6 +472,13 @@ export function mapAiReceptionistSettingsRow(
     fallbackPhoneNumber: row.fallback_phone_number ?? "",
     notificationEmail: row.notification_email ?? "",
     telephonyProvider: normalizeTelephonyProvider(row.telephony_provider),
+    phoneSetupMode: normalizePhoneSetupMode(row.phone_setup_mode),
+    existingBusinessPhoneNumber: row.existing_business_phone_number ?? "",
+    phoneProvisioningStatus: normalizePhoneProvisioningStatus(
+      row.telnyx_provisioning_status,
+      row.telnyx_phone_number ?? ""
+    ),
+    phoneProvisioningError: row.telnyx_provisioning_error ?? "",
     telnyxPhoneNumber: row.telnyx_phone_number ?? "",
     telnyxConnectionId: row.telnyx_connection_id ?? "",
     telnyxMessagingProfileId: row.telnyx_messaging_profile_id ?? "",
@@ -362,6 +488,9 @@ export function mapAiReceptionistSettingsRow(
     twilioPhoneNumber: row.twilio_phone_number ?? "",
     twilioAuthTokenConfigured: Boolean(row.twilio_auth_token?.trim()),
     realtimeEnabled: false,
+    voiceAccent: normalizeAiReceptionistVoiceAccent(row.voice_accent),
+    customConversationEnabled: false,
+    conversationInstructions: row.conversation_instructions ?? "",
     transferToNumber: row.transfer_to_number ?? "",
     newLeadSmsEnabled: Boolean(row.new_lead_sms_enabled),
     newLeadSmsPhoneNumber: row.new_lead_sms_phone_number ?? "",
@@ -376,7 +505,7 @@ export function mapAiReceptionistSettingsRow(
       DEFAULT_AI_RECEPTIONIST_EMERGENCY_KEYWORDS
     ),
     consentMessage: row.consent_message ?? DEFAULT_AI_RECEPTIONIST_CONSENT,
-    leadSourceLabel: row.lead_source_label ?? "AI Receptionist",
+    leadSourceLabel: row.lead_source_label ?? "Voicemail",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     exists: true,
@@ -407,6 +536,9 @@ export function mapAiReceptionistSettingsToRow(
     twilio_account_sid: settings.twilioAccountSid,
     twilio_phone_number: settings.twilioPhoneNumber,
     realtime_enabled: false,
+    voice_accent: settings.voiceAccent,
+    custom_conversation_enabled: false,
+    conversation_instructions: settings.conversationInstructions,
     transfer_to_number: settings.transferToNumber,
     new_lead_sms_enabled: settings.newLeadSmsEnabled,
     new_lead_sms_phone_number: settings.newLeadSmsPhoneNumber,
@@ -456,12 +588,6 @@ export function validateAiReceptionistSettings(
     errors.push("Enter a valid fallback phone number.");
   }
 
-  if (
-    settings.twilioPhoneNumber &&
-    !isValidAiReceptionistPhoneNumber(settings.twilioPhoneNumber)
-  ) {
-    errors.push("Enter a valid Twilio phone number.");
-  }
 
   if (
     settings.telnyxPhoneNumber &&
@@ -485,77 +611,28 @@ export function validateAiReceptionistSettings(
   }
 
   if (
-    settings.twilioAccountSid &&
-    !TWILIO_ACCOUNT_SID_PATTERN.test(settings.twilioAccountSid)
+    settings.existingBusinessPhoneNumber &&
+    !isValidAiReceptionistPhoneNumber(settings.existingBusinessPhoneNumber)
   ) {
-    errors.push("Enter a valid Twilio Account SID.");
-  }
-
-  if (
-    settings.telnyxConnectionId &&
-    !TELNYX_CONNECTION_ID_PATTERN.test(settings.telnyxConnectionId)
-  ) {
-    errors.push("Enter a valid Telnyx connection or call control app ID.");
-  }
-
-  const hasAnyTelnyxConnectionValue = Boolean(
-    settings.telnyxPhoneNumber ||
-      settings.telnyxConnectionId ||
-      settings.telnyxMessagingProfileId ||
-      settings.telnyxPublicKey ||
-      settings.telnyxApiKeyConfigured
-  );
-
-  if (
-    (settings.telephonyProvider === "telnyx" || hasAnyTelnyxConnectionValue) &&
-    hasAnyTelnyxConnectionValue &&
-    (!settings.telnyxPhoneNumber ||
-      !settings.telnyxPublicKey ||
-      !settings.telnyxApiKeyConfigured)
-  ) {
-    errors.push(
-      "Add the Telnyx phone number, API key, and public key to connect Telnyx."
-    );
+    errors.push("Enter a valid existing business phone number.");
   }
 
   if (
     settings.enabled &&
-    settings.telephonyProvider === "telnyx" &&
     (!settings.telnyxPhoneNumber ||
-      !settings.telnyxPublicKey ||
-      !settings.telnyxApiKeyConfigured)
+      settings.phoneProvisioningStatus !== "active")
   ) {
     errors.push(
-      "Connect Telnyx before enabling AI Receptionist voicemail-to-lead."
+      "Finish setting up the receptionist phone number before enabling voicemail-to-lead."
     );
   }
 
   if (
     settings.newLeadSmsEnabled &&
-    (!settings.telnyxMessagingProfileId ||
-      !settings.newLeadSmsPhoneNumber ||
-      !settings.telnyxApiKeyConfigured)
+    (!settings.telnyxPhoneNumber || !settings.newLeadSmsPhoneNumber)
   ) {
     errors.push(
-      "Add a Telnyx messaging profile, SMS destination number, and API key before enabling SMS notifications."
-    );
-  }
-
-  const hasAnyTwilioConnectionValue = Boolean(
-    settings.twilioAccountSid ||
-      settings.twilioPhoneNumber ||
-      settings.twilioAuthTokenConfigured
-  );
-
-  if (
-    (settings.telephonyProvider === "twilio" || hasAnyTwilioConnectionValue) &&
-    hasAnyTwilioConnectionValue &&
-    (!settings.twilioAccountSid ||
-      !settings.twilioPhoneNumber ||
-      !settings.twilioAuthTokenConfigured)
-  ) {
-    errors.push(
-      "Add the Twilio Account SID, Auth Token, and phone number to connect Twilio."
+      "Finish setting up the receptionist number and add an SMS destination before enabling new-lead messages."
     );
   }
 
@@ -567,12 +644,21 @@ export function validateAiReceptionistSettings(
     errors.push("Consent message must be 1,000 characters or fewer.");
   }
 
-  if (settings.enabled && !settings.businessName) {
-    errors.push("Business name is required when AI Receptionist is enabled.");
+  if (settings.conversationInstructions.length > 8000) {
+    errors.push("Conversation instructions must be 8,000 characters or fewer.");
   }
 
-  if (settings.enabled && settings.questionsToAsk.length === 0) {
-    errors.push("Add at least one question before enabling AI Receptionist.");
+  if (
+    settings.customConversationEnabled &&
+    !settings.conversationInstructions
+  ) {
+    errors.push(
+      "Add conversation instructions before enabling the fully custom live conversation."
+    );
+  }
+
+  if (settings.enabled && !settings.businessName) {
+    errors.push("Business name is required when voicemail-to-lead is enabled.");
   }
 
   return {
@@ -597,11 +683,22 @@ export async function getOrCreateAiReceptionistSettings(
   supabase: SupabaseClient,
   organizationId: string
 ) {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("ai_receptionist_settings")
     .select(AI_RECEPTIONIST_SETTINGS_SELECT)
     .eq("organization_id", organizationId)
     .maybeSingle();
+
+  if (error) {
+    const legacyResult = await supabase
+      .from("ai_receptionist_settings")
+      .select(AI_RECEPTIONIST_LEGACY_SETTINGS_SELECT)
+      .eq("organization_id", organizationId)
+      .maybeSingle();
+
+    data = legacyResult.data;
+    error = legacyResult.error;
+  }
 
   if (error) {
     return getDefaultAiReceptionistSettings({
@@ -615,11 +712,24 @@ export async function getOrCreateAiReceptionistSettings(
   }
 
   const defaults = getDefaultAiReceptionistSettings();
-  const { data: insertedData, error: insertError } = await supabase
+  const insertResult = await supabase
     .from("ai_receptionist_settings")
     .insert(mapAiReceptionistSettingsToRow(defaults, organizationId))
     .select(AI_RECEPTIONIST_SETTINGS_SELECT)
     .maybeSingle();
+  let insertedData = insertResult.data;
+  let insertError = insertResult.error;
+
+  if (insertError) {
+    const legacyInsertResult = await supabase
+      .from("ai_receptionist_settings")
+      .select(AI_RECEPTIONIST_LEGACY_SETTINGS_SELECT)
+      .eq("organization_id", organizationId)
+      .maybeSingle();
+
+    insertedData = legacyInsertResult.data;
+    insertError = legacyInsertResult.error;
+  }
 
   if (insertError) {
     return getDefaultAiReceptionistSettings({

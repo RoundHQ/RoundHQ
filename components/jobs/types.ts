@@ -107,6 +107,9 @@ export type Customer = {
   address: string;
   postcode?: string;
   town?: string;
+  savedAddresses?: CustomerAddress[];
+  savedSites?: CustomerSite[];
+  serviceAddressId?: string;
   phone?: string;
   email?: string;
   contactEmails?: string[];
@@ -138,6 +141,22 @@ export type Customer = {
   longitude?: number | null;
 
   createdAt: string;
+};
+
+export type CustomerAddress = {
+  id: string;
+  label: string;
+  address: string;
+  town?: string;
+  postcode?: string;
+};
+
+export type CustomerSite = {
+  id: string;
+  name: string;
+  address: string;
+  town?: string;
+  postcode?: string;
 };
 
 export type LineItem = {
@@ -206,7 +225,7 @@ export const RECURRING_INVOICE_FREQUENCY_OPTIONS = [
 export type RecurringInvoiceFrequency =
   (typeof RECURRING_INVOICE_FREQUENCY_OPTIONS)[number];
 
-export const DOCUMENT_DELIVERY_METHOD_OPTIONS = ["email"] as const;
+export const DOCUMENT_DELIVERY_METHOD_OPTIONS = ["email", "text"] as const;
 
 export type DocumentDeliveryMethod =
   (typeof DOCUMENT_DELIVERY_METHOD_OPTIONS)[number];
@@ -241,6 +260,7 @@ export type Quote = {
     | "scheduled"
     | "manual_required"
     | "skipped";
+  sentAt?: string;
 };
 
 export type Invoice = {
@@ -271,6 +291,9 @@ export type Invoice = {
   stripePaymentStatus?: StripeInvoicePaymentStatus;
   stripePaymentIntentId?: string;
   stripePaymentCompletedAt?: string;
+  sentAt?: string;
+  refundedAmount?: number;
+  voidedAt?: string;
 };
 
 export type QuoteFollowUpState = {
@@ -434,6 +457,7 @@ export type RecurringInvoiceTemplate = {
   preferredSendMethod?: DocumentDeliveryMethod;
   sendTo?: string;
   isActive: boolean;
+  deletedAt?: string;
   lastGeneratedDate?: string;
   createdAt?: string;
   updatedAt?: string;

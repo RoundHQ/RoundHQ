@@ -7,7 +7,6 @@ import {
   ChevronUp,
   Clock,
   Phone,
-  PhoneForwarded,
   Plus,
   Save,
   Send,
@@ -18,14 +17,20 @@ import {
   type AiReceptionistBusinessHours,
   type AiReceptionistDayKey,
   type AiReceptionistSettings,
+  type AiReceptionistVoiceAccent,
 } from "@/lib/ai-receptionist-settings";
 import {
   updateAiReceptionistSettingsAction,
   type AiReceptionistSettingsActionState,
 } from "@/app/settings/ai-receptionist/actions";
+import AiReceptionistPhoneSetup, {
+  type AiReceptionistPhoneSetupState,
+} from "@/components/ai-receptionist/ai-receptionist-phone-setup";
+import type { OpenAiRealtimeSipReadiness } from "@/lib/ai-receptionist/realtime/openai-sip";
 
 type Props = {
   initialSettings: AiReceptionistSettings;
+  realtimeReadiness?: OpenAiRealtimeSipReadiness | null;
   workspaceName: string;
 };
 
@@ -46,6 +51,16 @@ function Section({
   title: string;
   children: ReactNode;
 }) {
+  const hidden = [
+    "Live AI Conversation",
+    "Questions",
+    "Business Hours",
+    "Emergency Keywords",
+  ].includes(title);
+  if (hidden) {
+    return null;
+  }
+
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-[0_18px_46px_rgba(15,23,42,0.06)] sm:p-6">
       <h2 className="text-lg font-extrabold tracking-normal text-slate-950">
@@ -163,9 +178,20 @@ function moveListItem(values: string[], index: number, direction: -1 | 1) {
 
 export default function AiReceptionistSettingsForm({
   initialSettings,
+  realtimeReadiness,
   workspaceName,
 }: Props) {
   const [enabled, setEnabled] = useState(initialSettings.enabled);
+  const [realtimeEnabled, setRealtimeEnabled] = useState(false);
+  const [voiceAccent, setVoiceAccent] = useState<AiReceptionistVoiceAccent>(
+    initialSettings.voiceAccent
+  );
+  const [customConversationEnabled, setCustomConversationEnabled] = useState(
+    initialSettings.customConversationEnabled
+  );
+  const [conversationInstructions, setConversationInstructions] = useState(
+    initialSettings.conversationInstructions
+  );
   const [businessName, setBusinessName] = useState(initialSettings.businessName);
   const [notificationEmail, setNotificationEmail] = useState(
     initialSettings.notificationEmail
@@ -173,29 +199,13 @@ export default function AiReceptionistSettingsForm({
   const [fallbackPhoneNumber, setFallbackPhoneNumber] = useState(
     initialSettings.fallbackPhoneNumber
   );
-  const [telephonyProvider, setTelephonyProvider] = useState(
-    initialSettings.telephonyProvider
-  );
-  const [telnyxPhoneNumber, setTelnyxPhoneNumber] = useState(
-    initialSettings.telnyxPhoneNumber
-  );
-  const [telnyxConnectionId, setTelnyxConnectionId] = useState(
-    initialSettings.telnyxConnectionId
-  );
-  const [telnyxMessagingProfileId, setTelnyxMessagingProfileId] = useState(
-    initialSettings.telnyxMessagingProfileId
-  );
-  const [telnyxPublicKey, setTelnyxPublicKey] = useState(
-    initialSettings.telnyxPublicKey
-  );
-  const [telnyxApiKey, setTelnyxApiKey] = useState("");
-  const [twilioAccountSid, setTwilioAccountSid] = useState(
-    initialSettings.twilioAccountSid
-  );
-  const [twilioPhoneNumber, setTwilioPhoneNumber] = useState(
-    initialSettings.twilioPhoneNumber
-  );
-  const [twilioAuthToken, setTwilioAuthToken] = useState("");
+  const [phoneSetup, setPhoneSetup] = useState<AiReceptionistPhoneSetupState>({
+    phoneNumber: initialSettings.telnyxPhoneNumber,
+    setupMode: initialSettings.phoneSetupMode,
+    existingBusinessPhoneNumber: initialSettings.existingBusinessPhoneNumber,
+    provisioningStatus: initialSettings.phoneProvisioningStatus,
+    provisioningError: initialSettings.phoneProvisioningError,
+  });
   const [newLeadSmsEnabled, setNewLeadSmsEnabled] = useState(
     initialSettings.newLeadSmsEnabled
   );
@@ -244,22 +254,9 @@ export default function AiReceptionistSettingsForm({
   const normalizedQuestions = normalizeDraftList(questions);
   const normalizedKeywords = normalizeDraftList(emergencyKeywords);
   const statusLabel = enabled ? "Enabled" : "Disabled";
-  const telnyxApiKeyConfigured =
-    initialSettings.telnyxApiKeyConfigured || Boolean(telnyxApiKey.trim());
-  const telnyxConnected = Boolean(
-    telnyxPhoneNumber.trim() &&
-      telnyxPublicKey.trim() &&
-      telnyxApiKeyConfigured
+  const providerConnected = Boolean(
+    phoneSetup.phoneNumber.trim() && phoneSetup.provisioningStatus === "active"
   );
-  const twilioAuthTokenConfigured =
-    initialSettings.twilioAuthTokenConfigured || Boolean(twilioAuthToken.trim());
-  const twilioConnected = Boolean(
-    twilioAccountSid.trim() &&
-      twilioPhoneNumber.trim() &&
-      twilioAuthTokenConfigured
-  );
-  const providerConnected =
-    telephonyProvider === "twilio" ? twilioConnected : telnyxConnected;
 
   function updateBusinessHours(
     day: AiReceptionistDayKey,
@@ -313,17 +310,8 @@ export default function AiReceptionistSettingsForm({
         name="emergency_keywords_json"
         value={JSON.stringify(normalizedKeywords)}
       />
-      <input
-        type="hidden"
-        name="twilio_auth_token_configured"
-        value={twilioAuthTokenConfigured ? "true" : "false"}
-      />
-      <input
-        type="hidden"
-        name="telnyx_api_key_configured"
-        value={telnyxApiKeyConfigured ? "true" : "false"}
-      />
       <input type="hidden" name="realtime_enabled" value="false" />
+      <input type="hidden" name="custom_conversation_enabled" value="false" />
 
       {actionState.message ? (
         <div
@@ -348,7 +336,7 @@ export default function AiReceptionistSettingsForm({
               onChange={(event) => setEnabled(event.target.checked)}
               className="size-5 accent-[#19c653]"
             />
-            Enable AI Receptionist
+            Enable voicemail-to-lead
           </label>
           <span
             className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-xs font-black uppercase tracking-wide ${
@@ -361,25 +349,261 @@ export default function AiReceptionistSettingsForm({
           </span>
         </div>
 
+        {false ? (
+        <fieldset className="hidden" aria-hidden="true">
+          <legend className="text-sm font-black text-slate-800">
+            Answering mode
+          </legend>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <label
+              className={`cursor-pointer rounded-md border p-4 transition ${
+                !realtimeEnabled
+                  ? "border-[#19c653] bg-emerald-50 ring-2 ring-[#19c653]/15"
+                  : "border-slate-200 bg-white hover:border-slate-300"
+              }`}
+            >
+              <span className="flex items-start gap-3">
+                <input
+                  type="radio"
+                  name="realtime_enabled"
+                  value="false"
+                  checked={!realtimeEnabled}
+                  onChange={() => setRealtimeEnabled(false)}
+                  className="mt-1 size-4 accent-[#19c653]"
+                />
+                <span>
+                  <span className="block text-sm font-black text-slate-950">
+                    Voicemail to lead
+                  </span>
+                  <span className="mt-1 block text-sm font-semibold leading-5 text-slate-500">
+                    Plays a greeting, records a message, and creates a lead from the transcript.
+                  </span>
+                </span>
+              </span>
+            </label>
+            <label
+              className={`cursor-pointer rounded-md border p-4 transition ${
+                realtimeEnabled
+                  ? "border-[#19c653] bg-emerald-50 ring-2 ring-[#19c653]/15"
+                  : "border-slate-200 bg-white hover:border-slate-300"
+              }`}
+            >
+              <span className="flex items-start gap-3">
+                <input
+                  type="radio"
+                  name="realtime_enabled"
+                  value="true"
+                  checked={realtimeEnabled}
+                  onChange={() => setRealtimeEnabled(true)}
+                  className="mt-1 size-4 accent-[#19c653]"
+                />
+                <span>
+                  <span className="block text-sm font-black text-slate-950">
+                    Live AI conversation
+                  </span>
+                  <span className="mt-1 block text-sm font-semibold leading-5 text-slate-500">
+                    The AI speaks with the caller, asks your questions, and creates a lead after the call.
+                  </span>
+                </span>
+              </span>
+            </label>
+          </div>
+        </fieldset>
+        ) : null}
+
         <div className="mt-4 flex gap-3 rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-900">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          AI Receptionist is currently running in Voicemail-to-Lead mode. Live AI conversations will be added later.
+          {realtimeEnabled
+            ? "Live AI is a testing feature. Calls are recorded and transcribed, and the working voicemail flow is used if the live transfer cannot start."
+            : "Voicemail mode answers with a fixed greeting, records the caller after the beep, and creates a lead after transcription."}
         </div>
+
+        {realtimeEnabled && realtimeReadiness && !realtimeReadiness.ready ? (
+          <div
+            role="alert"
+            className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+          >
+            <div className="flex gap-3 font-bold">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+              Live AI is unavailable on the RoundHQ server, so calls are using
+              voicemail.
+            </div>
+            <ul className="mt-3 space-y-1 pl-7 font-semibold">
+              <li>
+                OpenAI API key:{" "}
+                {realtimeReadiness.apiKeyConfigured &&
+                realtimeReadiness.apiKeyValid
+                  ? "Ready"
+                  : realtimeReadiness.apiKeyConfigured
+                    ? "Present, but not a secret key beginning sk-"
+                    : "Missing"}
+              </li>
+              <li>
+                OpenAI project ID:{" "}
+                {realtimeReadiness.projectIdConfigured &&
+                realtimeReadiness.projectIdValid
+                  ? "Ready"
+                  : realtimeReadiness.projectIdConfigured
+                    ? "Present, but it must begin proj_"
+                    : "Missing"}
+              </li>
+              <li>
+                OpenAI webhook signing secret:{" "}
+                {realtimeReadiness.webhookSecretConfigured
+                  ? "Ready"
+                  : "Missing"}
+              </li>
+            </ul>
+            <p className="mt-3 pl-7 font-semibold">
+              Correct the item above in the Production environment and redeploy
+              before placing another test call.
+            </p>
+          </div>
+        ) : null}
+
+        {realtimeEnabled && realtimeReadiness?.ready ? (
+          <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+            Live AI server configuration is ready.
+          </div>
+        ) : null}
+
+        {realtimeEnabled ? (
+          <label className="mt-5 block max-w-md">
+            <span className="mb-2 block text-sm font-black text-slate-800">
+              Voice accent
+            </span>
+            <select
+              name="voice_accent"
+              value={voiceAccent}
+              onChange={(event) =>
+                setVoiceAccent(event.target.value as AiReceptionistVoiceAccent)
+              }
+              className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
+            >
+              <option value="scottish">Scottish</option>
+              <option value="british">British</option>
+              <option value="neutral">Voice default</option>
+            </select>
+            <span className="mt-2 block text-xs font-semibold leading-5 text-slate-500">
+              Scottish is a best-effort speaking style applied to OpenAI&apos;s
+              voice. Exact regional pronunciation still depends on the voice
+              service.
+            </span>
+          </label>
+        ) : (
+          <input type="hidden" name="voice_accent" value={voiceAccent} />
+        )}
 
         {enabled && !providerConnected ? (
           <div className="mt-4 flex gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
             <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-            AI Receptionist is enabled, but no phone provider is connected yet.
+            Voicemail-to-lead is enabled, but the phone number is not ready yet.
           </div>
         ) : null}
 
         {enabled && providerConnected ? (
           <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
-            AI Receptionist is enabled and connected to {telephonyProvider === "twilio" ? "Twilio legacy" : "Telnyx"}.
+            {realtimeEnabled ? "Live AI" : "Voicemail-to-lead"} is enabled on{" "}
+            {phoneSetup.phoneNumber}. Place a test call before routing live business
+            calls.
           </div>
         ) : null}
       </Section>
 
+      <Section title="Live AI Conversation">
+        <p className="text-sm font-semibold leading-6 text-slate-500">
+          Choose whether Live AI uses the guided greeting and question list, or
+          follows one fully editable set of conversation instructions.
+        </p>
+
+        <fieldset className="mt-4">
+          <legend className="sr-only">Live AI conversation control</legend>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label
+              className={`cursor-pointer rounded-md border p-4 transition ${
+                !customConversationEnabled
+                  ? "border-[#19c653] bg-emerald-50 ring-2 ring-[#19c653]/15"
+                  : "border-slate-200 bg-white hover:border-slate-300"
+              }`}
+            >
+              <span className="flex items-start gap-3">
+                <input
+                  type="radio"
+                  name="custom_conversation_enabled"
+                  value="false"
+                  checked={!customConversationEnabled}
+                  onChange={() => setCustomConversationEnabled(false)}
+                  className="mt-1 size-4 accent-[#19c653]"
+                />
+                <span>
+                  <span className="block text-sm font-black text-slate-950">
+                    Guided greeting and questions
+                  </span>
+                  <span className="mt-1 block text-sm font-semibold leading-5 text-slate-500">
+                    Uses the greeting, consent message, and question list below.
+                  </span>
+                </span>
+              </span>
+            </label>
+            <label
+              className={`cursor-pointer rounded-md border p-4 transition ${
+                customConversationEnabled
+                  ? "border-[#19c653] bg-emerald-50 ring-2 ring-[#19c653]/15"
+                  : "border-slate-200 bg-white hover:border-slate-300"
+              }`}
+            >
+              <span className="flex items-start gap-3">
+                <input
+                  type="radio"
+                  name="custom_conversation_enabled"
+                  value="true"
+                  checked={customConversationEnabled}
+                  onChange={() => setCustomConversationEnabled(true)}
+                  className="mt-1 size-4 accent-[#19c653]"
+                />
+                <span>
+                  <span className="block text-sm font-black text-slate-950">
+                    Fully custom conversation
+                  </span>
+                  <span className="mt-1 block text-sm font-semibold leading-5 text-slate-500">
+                    Replaces the predefined live greeting and question flow.
+                  </span>
+                </span>
+              </span>
+            </label>
+          </div>
+        </fieldset>
+
+        {customConversationEnabled ? (
+          <div className="mt-5">
+            <TextAreaField
+              label="Conversation instructions"
+              name="conversation_instructions"
+              value={conversationInstructions}
+              onChange={setConversationInstructions}
+              maxLength={8000}
+              rows={14}
+            />
+            <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">
+              Write the opening, exact phrases, questions, likely replies, and
+              closing. Put wording the AI must say exactly in quotation marks.
+              You can use {"{{business_name}}"} for the saved business name.
+            </p>
+          </div>
+        ) : (
+          <input
+            type="hidden"
+            name="conversation_instructions"
+            value={conversationInstructions}
+          />
+        )}
+
+        <div className="mt-4 flex gap-3 rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold leading-6 text-sky-900">
+          <AlertTriangle className="mt-1 size-4 shrink-0" />
+          RoundHQ still requires the AI to identify itself, say the editable
+          recording consent message once, and follow emergency safety rules.
+        </div>
+      </Section>
       <Section title="Business Details">
         <div className="grid gap-5 md:grid-cols-3">
           <TextField
@@ -416,6 +640,9 @@ export default function AiReceptionistSettingsForm({
       </Section>
 
       <Section title="Greeting & Consent">
+        <p className="mb-4 text-sm font-semibold leading-6 text-slate-500">
+          Callers hear this greeting and recording notice before leaving their message.
+        </p>
         <div className="grid gap-5 lg:grid-cols-2">
           <TextAreaField
             label="Greeting message"
@@ -436,7 +663,12 @@ export default function AiReceptionistSettingsForm({
         </div>
       </Section>
 
+      {!customConversationEnabled ? (
       <Section title="Questions">
+        <p className="mb-4 text-sm font-semibold text-slate-500">
+          Live AI asks these questions naturally when the caller has not already
+          provided the answer. Voicemail mode continues to use its standard prompt.
+        </p>
         <div className="space-y-3">
           {questions.map((question, index) => (
             <div
@@ -502,8 +734,13 @@ export default function AiReceptionistSettingsForm({
           </button>
         </div>
       </Section>
+      ) : null}
 
       <Section title="Business Hours">
+        <p className="mb-4 text-sm font-semibold text-slate-500">
+          Live AI uses these hours to explain whether the office is open. Both
+          answering modes continue to accept calls whenever the receptionist is enabled.
+        </p>
         <label className="mb-4 flex items-center gap-3 text-sm font-bold text-slate-700">
           <input
             type="checkbox"
@@ -560,6 +797,10 @@ export default function AiReceptionistSettingsForm({
       </Section>
 
       <Section title="Emergency Keywords">
+        <p className="mb-4 text-sm font-semibold text-slate-500">
+          Live AI watches for these words and marks the resulting lead as high priority.
+          It will never promise an emergency response or replace emergency services.
+        </p>
         <div className="flex flex-wrap gap-2">
           {emergencyKeywords.map((keyword, index) => (
             <span
@@ -611,179 +852,88 @@ export default function AiReceptionistSettingsForm({
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-lg font-extrabold tracking-normal text-slate-950">
-                  Phone Connection
+                  Voicemail number
                 </h2>
                 <span
                   className={`inline-flex rounded-full px-3 py-1 text-xs font-black uppercase tracking-wide ${
                     providerConnected
                       ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
-                      : "bg-slate-100 text-slate-600 ring-1 ring-slate-200"
+                      : phoneSetup.provisioningStatus === "ordering" ||
+                          phoneSetup.provisioningStatus === "pending"
+                        ? "bg-sky-50 text-sky-700 ring-1 ring-sky-200"
+                        : "bg-slate-100 text-slate-600 ring-1 ring-slate-200"
                   }`}
                 >
-                  {providerConnected ? "Connected" : "Not connected"}
+                  {providerConnected
+                    ? "Ready"
+                    : phoneSetup.provisioningStatus === "ordering" ||
+                        phoneSetup.provisioningStatus === "pending"
+                      ? "Setting up"
+                      : "Not configured"}
                 </span>
               </div>
-              <p className="mt-2 text-sm font-semibold text-slate-500">
-                Telnyx is the preferred provider for voicemail-to-lead and SMS.
-                API keys are encrypted server-side and never shown again.
+              <p className="mt-2 text-sm font-semibold leading-6 text-slate-500">
+                Keep your existing business number with call forwarding, or choose a new UK number for voicemail-to-lead.
               </p>
 
-              <label className="mt-5 block">
-                <span className="mb-2 block text-sm font-bold text-slate-700">
-                  Provider
-                </span>
-                <select
-                  name="telephony_provider"
-                  value={telephonyProvider}
-                  onChange={(event) =>
-                    setTelephonyProvider(
-                      event.target.value === "twilio" ? "twilio" : "telnyx"
-                    )
-                  }
-                  className="w-full rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold outline-none transition focus:border-[#19c653] focus:bg-white focus:ring-4 focus:ring-[#19c653]/12"
-                >
-                  <option value="telnyx">Telnyx</option>
-                  <option value="twilio">Twilio legacy</option>
-                </select>
-              </label>
-
-              {telephonyProvider === "telnyx" ? (
-                <div className="mt-5 grid gap-4 md:grid-cols-2">
-                  <TextField
-                    label="Telnyx Phone Number"
-                    name="telnyx_phone_number"
-                    value={telnyxPhoneNumber}
-                    onChange={setTelnyxPhoneNumber}
-                    placeholder="+447712345678"
-                  />
-                  <TextField
-                    label="Telnyx API Key"
-                    name="telnyx_api_key"
-                    type="password"
-                    value={telnyxApiKey}
-                    onChange={setTelnyxApiKey}
-                    placeholder={
-                      initialSettings.telnyxApiKeyConfigured
-                        ? "Saved - enter a new key to replace"
-                        : "Enter API key"
-                    }
-                  />
-                  <TextField
-                    label="Telnyx Connection / App ID"
-                    name="telnyx_connection_id"
-                    value={telnyxConnectionId}
-                    onChange={setTelnyxConnectionId}
-                    placeholder="Call Control app or connection ID"
-                  />
-                  <TextField
-                    label="Telnyx Messaging Profile ID"
-                    name="telnyx_messaging_profile_id"
-                    value={telnyxMessagingProfileId}
-                    onChange={setTelnyxMessagingProfileId}
-                    placeholder="Messaging profile ID"
-                  />
-                  <div className="md:col-span-2">
-                    <TextAreaField
-                      label="Telnyx Public Key"
-                      name="telnyx_public_key"
-                      value={telnyxPublicKey}
-                      onChange={setTelnyxPublicKey}
-                      maxLength={1200}
-                      rows={4}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="mt-5 rounded-md border border-amber-200 bg-amber-50 p-4">
-                  <p className="text-sm font-bold text-amber-900">
-                    Twilio is legacy for AI Receptionist launch. Production
-                    voicemail-to-lead should use Telnyx.
-                  </p>
-                  <div className="mt-4 grid gap-4 md:grid-cols-3">
-                    <TextField
-                      label="Twilio Account SID"
-                      name="twilio_account_sid"
-                      value={twilioAccountSid}
-                      onChange={setTwilioAccountSid}
-                      placeholder="AC..."
-                    />
-                    <TextField
-                      label="Twilio Auth Token"
-                      name="twilio_auth_token"
-                      type="password"
-                      value={twilioAuthToken}
-                      onChange={setTwilioAuthToken}
-                      placeholder={
-                        initialSettings.twilioAuthTokenConfigured
-                          ? "Saved - enter a new token to replace"
-                          : "Enter auth token"
-                      }
-                    />
-                    <TextField
-                      label="Twilio Phone Number"
-                      name="twilio_phone_number"
-                      value={twilioPhoneNumber}
-                      onChange={setTwilioPhoneNumber}
-                      placeholder="+447712345678"
-                    />
-                  </div>
-                </div>
-              )}
+              <AiReceptionistPhoneSetup
+                value={phoneSetup}
+                onChange={setPhoneSetup}
+              />
 
               <div className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4">
-                <div className="flex items-start gap-3">
-                  <PhoneForwarded className="mt-0.5 size-5 shrink-0 text-slate-500" />
-                  <div className="grid min-w-0 flex-1 gap-4 md:grid-cols-2">
-                    <label className="flex items-center gap-3 text-sm font-bold text-slate-700">
-                      <input
-                        type="checkbox"
-                        name="new_lead_sms_enabled"
-                        checked={newLeadSmsEnabled}
-                        onChange={(event) =>
-                          setNewLeadSmsEnabled(event.target.checked)
-                        }
-                        className="size-5 accent-[#19c653]"
-                      />
-                      Send new lead SMS
-                    </label>
-                    <TextField
-                      label="New lead SMS number"
-                      name="new_lead_sms_phone_number"
-                      value={newLeadSmsPhoneNumber}
-                      onChange={setNewLeadSmsPhoneNumber}
-                      placeholder="+447700900123"
+                <div className="grid min-w-0 gap-4 md:grid-cols-2">
+                  <label className="flex items-center gap-3 text-sm font-bold text-slate-700">
+                    <input
+                      type="checkbox"
+                      name="new_lead_sms_enabled"
+                      checked={newLeadSmsEnabled}
+                      onChange={(event) =>
+                        setNewLeadSmsEnabled(event.target.checked)
+                      }
+                      disabled={!providerConnected}
+                      className="size-5 accent-[#19c653] disabled:opacity-50"
                     />
-                    <TextField
-                      label="Test SMS number"
-                      name="test_sms_number"
-                      value={testSmsNumber}
-                      onChange={setTestSmsNumber}
-                      placeholder="+447700900123"
-                    />
-                    <button
-                      type="submit"
-                      name="action_intent"
-                      value="send_test_sms"
-                      disabled={isPending || !testSmsNumber.trim()}
-                      className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <Send className="size-4" />
-                      Send test SMS
-                    </button>
-                  </div>
+                    Send new lead SMS
+                  </label>
+                  <TextField
+                    label="New lead SMS number"
+                    name="new_lead_sms_phone_number"
+                    value={newLeadSmsPhoneNumber}
+                    onChange={setNewLeadSmsPhoneNumber}
+                    placeholder="+447700900123"
+                  />
+                  <TextField
+                    label="Test SMS number"
+                    name="test_sms_number"
+                    value={testSmsNumber}
+                    onChange={setTestSmsNumber}
+                    placeholder="+447700900123"
+                  />
+                  <button
+                    type="submit"
+                    name="action_intent"
+                    value="send_test_sms"
+                    disabled={
+                      isPending || !providerConnected || !testSmsNumber.trim()
+                    }
+                    className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Send className="size-4" />
+                    Send test SMS
+                  </button>
                 </div>
               </div>
             </div>
           </div>
         </section>
-
         <button
           type="submit"
           disabled={isPending}
           className="inline-flex min-h-24 items-center justify-center gap-3 rounded-lg bg-[#19c653] px-5 py-4 text-sm font-black text-white shadow-[0_18px_46px_rgba(25,198,83,0.24)] transition hover:bg-[#22d861] disabled:cursor-not-allowed disabled:opacity-60"
         >
           <Save className="size-5" />
-          {isPending ? "Saving..." : "Save AI Receptionist settings"}
+          {isPending ? "Saving..." : "Save voicemail settings"}
         </button>
       </div>
 

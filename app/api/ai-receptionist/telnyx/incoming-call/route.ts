@@ -3,7 +3,7 @@ import {
   buildTelnyxWebhookContext,
   toTelnyxNextResponse,
 } from "@/app/api/ai-receptionist/telnyx/route-utils";
-import { handleTelnyxIncomingCall } from "@/lib/ai-receptionist/providers/telnyx";
+import { handleTelnyxWebhook } from "@/lib/ai-receptionist/providers/telnyx";
 
 export const runtime = "nodejs";
 
@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
       return context.response;
     }
 
-    return toTelnyxNextResponse(await handleTelnyxIncomingCall(context.context));
+    return toTelnyxNextResponse(await handleTelnyxWebhook(context.context));
   } catch (error) {
     return Response.json(
       {

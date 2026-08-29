@@ -82,7 +82,8 @@ export function formatCustomerProfitDate(value: string | null | undefined) {
     return "No visits";
   }
 
-  return new Date(`${normalized}T12:00:00`).toLocaleDateString(undefined, {
+  return new Date(`${normalized}T12:00:00`).toLocaleDateString("en-GB", {
+    timeZone: "Europe/London",
     day: "numeric",
     month: "short",
   });

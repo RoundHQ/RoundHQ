@@ -17,6 +17,8 @@ import {
 import {
     GRASS_CUT_AREA_OPTIONS,
     type Customer,
+    type CustomerAddress,
+    type CustomerSite,
     type CustomerType,
     type DayName,
     type GrassCutArea,
@@ -51,6 +53,19 @@ const ROUND_DAY_OPTIONS: DayName[] = [
     "Sunday",
 ];
 
+function getInitialSavedSites(customer: Customer): CustomerSite[] {
+    const saved = customer.savedSites ?? [];
+    if (saved.length > 0) return saved;
+    if (!customer.siteAddress?.trim()) return [];
+
+    return [{
+        id: "legacy-primary-site",
+        name: customer.siteName?.trim() || "Main site",
+        address: customer.siteAddress.trim(),
+        town: customer.siteTown?.trim() || undefined,
+        postcode: customer.sitePostcode?.trim() || undefined,
+    }];
+}
 function buildInitialCustomer(
     existing: Customer | undefined,
     defaultRotationWeeks: RotationWeeks,
@@ -66,6 +81,7 @@ function buildInitialCustomer(
         return {
             ...existing,
             contactEmails: getCustomerEmailAddresses(existing),
+            savedSites: getInitialSavedSites(existing),
             rotationWeeksOverride: normalizeNullableRotationWeeks(
                 existing.rotationWeeksOverride
             ),
@@ -98,6 +114,7 @@ function buildInitialCustomer(
         grassCutAreas: ["All"],
         grassCutAmount: 0,
         assignedStaffId: defaultAssignedStaffId,
+        savedSites: [],
         siteName: "",
         siteAddress: "",
         siteTown: "",
@@ -384,6 +401,29 @@ export default function CustomerForm({
         setForm((prev) => ({ ...prev, [key]: value }));
     }
 
+    function updateSavedAddress(id: string, key: keyof CustomerAddress, value: string) {
+        setForm((previous) => ({ ...previous, savedAddresses: (previous.savedAddresses ?? []).map((entry) => entry.id === id ? { ...entry, [key]: value } : entry) }));
+    }
+
+    function addSavedAddress() {
+        setForm((previous) => ({ ...previous, savedAddresses: [...(previous.savedAddresses ?? []), { id: crypto.randomUUID(), label: "Additional address", address: "" }] }));
+    }
+
+    function removeSavedAddress(id: string) {
+        setForm((previous) => ({ ...previous, savedAddresses: (previous.savedAddresses ?? []).filter((entry) => entry.id !== id), serviceAddressId: previous.serviceAddressId === id ? undefined : previous.serviceAddressId }));
+    }
+
+    function updateSavedSite(id: string, key: keyof CustomerSite, value: string) {
+        setForm((previous) => ({ ...previous, savedSites: (previous.savedSites ?? []).map((entry) => entry.id === id ? { ...entry, [key]: value } : entry) }));
+    }
+
+    function addSavedSite() {
+        setForm((previous) => ({ ...previous, savedSites: [...(previous.savedSites ?? []), { id: crypto.randomUUID(), name: "New site", address: "" }] }));
+    }
+
+    function removeSavedSite(id: string) {
+        setForm((previous) => ({ ...previous, savedSites: (previous.savedSites ?? []).filter((entry) => entry.id !== id) }));
+    }
     function updateGrassCuttingCustomer(isGrassCuttingCustomer: boolean) {
         setForm((prev) => ({
             ...prev,
@@ -477,6 +517,20 @@ export default function CustomerForm({
         const cleanedContactEmails = showCommercialTools
             ? normalizeContactEmails(form.contactEmails)
             : [];
+        const cleanedSites = showCommercialTools
+            ? (form.savedSites ?? []).flatMap((site, index) => {
+                const address = site.address.trim();
+                if (!address) return [];
+                return [{
+                    id: site.id.trim() || `site-${index + 1}`,
+                    name: site.name.trim() || `Site ${index + 1}`,
+                    address,
+                    town: site.town?.trim() || undefined,
+                    postcode: site.postcode?.trim() || undefined,
+                }];
+            })
+            : [];
+        const primarySite = cleanedSites[0];
 
         return {
             ...form,
@@ -497,10 +551,22 @@ export default function CustomerForm({
             grassCutAreas: form.isGrassCuttingCustomer
                 ? normalizeGrassCutAreas(form.grassCutAreas, true)
                 : [],
-            siteName: form.siteName?.trim() || undefined,
-            siteAddress: form.siteAddress?.trim() || undefined,
-            siteTown: form.siteTown?.trim() || undefined,
-            sitePostcode: form.sitePostcode?.trim() || undefined,
+            savedAddresses: (form.savedAddresses ?? []).flatMap((address, index) => {
+                const value = address.address.trim();
+                if (!value) return [];
+                return [{
+                    id: address.id.trim() || `address-${index + 1}`,
+                    label: address.label.trim() || `Address ${index + 1}`,
+                    address: value,
+                    town: address.town?.trim() || undefined,
+                    postcode: address.postcode?.trim() || undefined,
+                }];
+            }),
+            savedSites: cleanedSites,
+            siteName: primarySite?.name,
+            siteAddress: primarySite?.address,
+            siteTown: primarySite?.town,
+            sitePostcode: primarySite?.postcode,
             notes: form.notes?.trim() || undefined,
             accessNotes: form.accessNotes?.trim() || undefined,
             assignedStaffId: form.isGrassCuttingCustomer
@@ -508,7 +574,6 @@ export default function CustomerForm({
                 : null,
         };
     }, [form, normalizedDefaultRotationWeeks, showCommercialTools]);
-
     useEffect(() => {
         editCollaborationRef.current = editCollaboration;
     }, [editCollaboration]);
@@ -871,69 +936,49 @@ export default function CustomerForm({
                     </div>
                 </section>
 
+                <section className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                        <div>
+                            <h3 className="text-sm font-bold uppercase tracking-wide text-slate-500">Additional addresses</h3>
+                            <p className="mt-1 text-xs text-slate-500">Save extra work addresses for quotes, invoices, and service rounds.</p>
+                        </div>
+                        <button type="button" onClick={addSavedAddress} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Add address</button>
+                    </div>
+                    {(form.savedAddresses ?? []).map((entry) => (
+                        <div key={entry.id} className="grid gap-3 rounded-xl border border-slate-200 bg-white p-3 md:grid-cols-4">
+                            <input className="rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Label" value={entry.label} onChange={(event) => updateSavedAddress(entry.id, "label", event.target.value)} />
+                            <div className="md:col-span-2">
+                                <AddressAutocompleteInput value={entry.address} onChange={(value) => updateSavedAddress(entry.id, "address", value)} onSelectAddress={({ town, postcode }) => { updateSavedAddress(entry.id, "town", town); updateSavedAddress(entry.id, "postcode", postcode); }} placeholder="Start typing an address..." />
+                            </div>
+                            <button type="button" onClick={() => removeSavedAddress(entry.id)} className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700">Remove</button>
+                            <input className="rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Town" value={entry.town ?? ""} onChange={(event) => updateSavedAddress(entry.id, "town", event.target.value)} />
+                            <input className="rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Postcode" value={entry.postcode ?? ""} onChange={(event) => updateSavedAddress(entry.id, "postcode", event.target.value)} />
+                            {form.isGrassCuttingCustomer ? <label className="flex items-center gap-2 text-sm font-medium text-slate-700 md:col-span-2"><input type="radio" name="service-address" checked={form.serviceAddressId === entry.id} onChange={() => update("serviceAddressId", entry.id)} />Use for this service round</label> : null}
+                        </div>
+                    ))}
+                </section>
+
                 {showCommercialTools && (
-                    <section className="space-y-4">
-                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                            <h3 className="text-sm font-bold uppercase tracking-wide text-slate-500">
-                                Site Details
-                            </h3>
-                            <p className="text-xs text-slate-400">
-                                Use this when the work site differs from the main customer address.
-                            </p>
+                    <section className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <h3 className="text-sm font-bold uppercase tracking-wide text-slate-500">Sites</h3>
+                                <p className="mt-1 text-xs text-slate-500">Save every commercial work location. The first site is your primary site for existing workflows.</p>
+                            </div>
+                            <button type="button" onClick={addSavedSite} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">Add site</button>
                         </div>
-
-                        <div className="grid gap-4 md:grid-cols-2">
-                            <div>
-                                <label className="mb-2 block text-sm font-medium text-slate-700">
-                                    Site Name
-                                </label>
-                                <input
-                                    className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
-                                    placeholder="Site or business location name"
-                                    value={form.siteName ?? ""}
-                                    onChange={(e) => update("siteName", e.target.value)}
-                                />
+                        {(form.savedSites ?? []).map((site, index) => (
+                            <div key={site.id} className="grid gap-3 rounded-xl border border-slate-200 bg-white p-3 md:grid-cols-4">
+                                <div><label className="mb-1 block text-xs font-semibold text-slate-500">Site name</label><input className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Site name" value={site.name} onChange={(event) => updateSavedSite(site.id, "name", event.target.value)} /></div>
+                                <div className="md:col-span-2"><label className="mb-1 block text-xs font-semibold text-slate-500">Site address</label><AddressAutocompleteInput value={site.address} onChange={(value) => updateSavedSite(site.id, "address", value)} onSelectAddress={({ town, postcode }) => { updateSavedSite(site.id, "town", town); updateSavedSite(site.id, "postcode", postcode); }} placeholder="Start typing a site address..." /></div>
+                                <button type="button" onClick={() => removeSavedSite(site.id)} className="self-end rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700">Remove</button>
+                                <input className="rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Town" value={site.town ?? ""} onChange={(event) => updateSavedSite(site.id, "town", event.target.value)} />
+                                <input className="rounded-lg border border-slate-200 px-3 py-2 text-sm" placeholder="Postcode" value={site.postcode ?? ""} onChange={(event) => updateSavedSite(site.id, "postcode", event.target.value)} />
+                                {index === 0 ? <p className="self-center text-xs font-medium text-emerald-700 md:col-span-2">Primary site</p> : null}
                             </div>
-
-                            <div>
-                                <label className="mb-2 block text-sm font-medium text-slate-700">
-                                    Site Address
-                                </label>
-                                <input
-                                    className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
-                                    placeholder="Site address"
-                                    value={form.siteAddress ?? ""}
-                                    onChange={(e) => update("siteAddress", e.target.value)}
-                                />
-                            </div>
-
-                            <div>
-                                <label className="mb-2 block text-sm font-medium text-slate-700">
-                                    Site Town / City
-                                </label>
-                                <input
-                                    className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
-                                    placeholder="Town or city"
-                                    value={form.siteTown ?? ""}
-                                    onChange={(e) => update("siteTown", e.target.value)}
-                                />
-                            </div>
-
-                            <div>
-                                <label className="mb-2 block text-sm font-medium text-slate-700">
-                                    Site Postcode
-                                </label>
-                                <input
-                                    className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
-                                    placeholder="Site postcode"
-                                    value={form.sitePostcode ?? ""}
-                                    onChange={(e) => update("sitePostcode", e.target.value)}
-                                />
-                            </div>
-                        </div>
+                        ))}
                     </section>
                 )}
-
                 {form.isGrassCuttingCustomer && (
                     <section className="space-y-4">
                         <h3 className="text-sm font-bold uppercase tracking-wide text-slate-500">

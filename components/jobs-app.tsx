@@ -42,6 +42,7 @@ import CustomersPage from "@/components/jobs/customers-page";
 import CustomerProfitPage from "@/components/jobs/customer-profit-page";
 import CustomerLeadsPage from "@/components/jobs/customer-leads-page";
 import CustomerProfilePage from "@/components/jobs/customer-profile-page";
+import FollowUpPage from "@/components/jobs/follow-up-page";
 import HistoryPage from "@/components/jobs/history-page";
 import ActionsPage from "@/components/jobs/actions-page";
 import MapPage from "@/components/jobs/map-page";
@@ -71,6 +72,7 @@ import SettingsPage, {
 } from "@/components/jobs/settings-page";
 import HelpProvider from "@/components/help/HelpProvider";
 import type { HelpTourActions, HelpTourPage } from "@/components/help/helpTours";
+import type { SmsEntitlement } from "@/lib/messaging/sms-billing";
 import {
   getEditResourceKey,
   normalizeEditInactiveAction,
@@ -86,6 +88,7 @@ import type { RouteChangeRecord } from "@/components/jobs/route-efficiency";
 import {
   DEFAULT_GRASS_CUT_SEASON_END,
   DEFAULT_GRASS_CUT_SEASON_START,
+  formatStoredDate,
   getCustomerEmailAddresses,
   getCustomerDisplayAddress,
   getCustomerTotals,
@@ -111,6 +114,7 @@ import {
 } from "@/components/jobs/document-delivery";
 import {
   createLearnedRuleFromRow,
+  getAcceptedProfilePaymentDateUpdate,
   normalizeStatementText,
   type ReconciliationReviewRow,
 } from "@/lib/payments/reconciliation";
@@ -183,11 +187,13 @@ import {
   type PlatformAnnouncementRow,
 } from "@/lib/platform-announcements";
 import type { AiReceptionistSettings } from "@/lib/ai-receptionist-settings";
+import type { OpenAiRealtimeSipReadiness } from "@/lib/ai-receptionist/realtime/openai-sip";
 import type {
   AiReceptionistCallHistoryItem,
   AiReceptionistDashboardStats,
 } from "@/lib/ai-receptionist/call-logs";
-import { SHOW_AI_RECEPTIONIST_UI } from "@/lib/ai-receptionist/ui-visibility";
+import { formatUkDate, formatUkDateTime, getBusinessDate, getBusinessIsoDate } from "@/lib/dates";
+
 import {
   ADMIN_ONLY_STAFF_PAGE_KEYS,
   DEFAULT_ROLE_PAGE_ACCESS,
@@ -262,6 +268,7 @@ type PdfLogoBackground = "none" | "dark" | "light";
 
 type AppSettings = {
   businessName: string;
+  businessTimezone: string;
   tradingName: string;
   businessEmail: string;
   businessPhone: string;
@@ -337,27 +344,41 @@ type AppSettings = {
   emailFromName: string;
   emailFromAddress: string;
   emailReplyTo: string;
+  smsSenderMode: "platform_default" | "business_name" | "business_mobile";
+  smsSenderValue: string;
+  customerMessagingQuietHoursStart: string;
+  customerMessagingQuietHoursEnd: string;
   smtpHost: string;
   smtpPort: number;
   smtpSecure: boolean;
   smtpUsername: string;
   smtpPassword: string;
   quoteFollowUpMethod: WorkflowMessageMethod;
+  quoteFollowUpDelayDays: number;
   quoteFollowUpEmailSubjectTemplate: string;
   quoteFollowUpEmailTemplate: string;
   quoteFollowUpTextTemplate: string;
   invoiceReminderMethod: WorkflowMessageMethod;
+  invoiceFollowUpDelayDays: number;
   invoiceReminderEmailSubjectTemplate: string;
   invoiceReminderEmailTemplate: string;
   invoiceReminderTextTemplate: string;
   autoSendVisitCompletionTexts: boolean;
+  autoSendServiceRoundCompletionTexts: boolean;
   visitCompletionTextTemplate: string;
 
+  serviceRemindersEnabled: boolean;
+  serviceReminderLeadDays: number;
+  serviceReminderSendTime: string;
+  serviceReminderTemplate: string;
   showWeatherWidget: boolean;
   showRevenueWidget: boolean;
   showJobsWidget: boolean;
   showUnpaidWidget: boolean;
   showRecentActivityWidget: boolean;
+  vatThresholdCardEnabled: boolean;
+  vatThresholdAmount: number;
+  vatWarningPercent: number;
 
   publicLiabilityInsurance: string;
   termsAndConditionsUrl: string;
@@ -381,6 +402,7 @@ type PageKey =
     | "expenses"
     | "paymentReconciliation"
     | "customerProfile"
+    | "followUp"
     | "actions"
     | "map"
     | "staff"
@@ -412,6 +434,7 @@ const WORKSPACE_ROUTE_PAGE_KEYS = [
   "map",
   "staff",
   "quotes",
+  "followUp",
   "quoteForm",
   "invoices",
   "invoiceForm",
@@ -487,6 +510,7 @@ type Quote = {
       | "scheduled"
       | "manual_required"
       | "skipped";
+  sentAt?: string;
 };
 
 type Invoice = {
@@ -517,6 +541,9 @@ type Invoice = {
   stripePaymentStatus?: StripeInvoicePaymentStatus;
   stripePaymentIntentId?: string;
   stripePaymentCompletedAt?: string;
+  sentAt?: string;
+  refundedAmount?: number;
+  voidedAt?: string;
 };
 
 type RecurringInvoiceTemplateRecord = RecurringInvoiceTemplate;
@@ -612,6 +639,7 @@ type PendingQuoteSchedule = {
   quoteNumber: string;
   title: string;
   customerName: string;
+  customerEmail?: string;
   notes?: string;
   scheduledDate?: string;
   startTime?: string;
@@ -633,10 +661,17 @@ type WorkflowMessageTarget =
         quoteId: string;
       }
     | {
+        kind: "quote_send";
+        quoteId: string;
+      }
+    | {
         kind: "invoice_overdue";
         invoiceId: string;
+      }
+    | {
+        kind: "invoice_send";
+        invoiceId: string;
       };
-
 type DocumentSendMetadata = {
   method?: DocumentDeliveryMethod;
   recipient?: string;
@@ -793,6 +828,7 @@ type QuoteRow = {
   auto_scheduling_preference?: string | null;
   auto_scheduling_disabled?: boolean | null;
   service_round_scheduling_preference?: string | null;
+  sent_at: string | null;
   auto_scheduled_job_id?: string | null;
   scheduling_status?: string | null;
   created_at: string | null;
@@ -823,6 +859,7 @@ type QuoteWriteRow = {
   service_round_scheduling_preference?: ServiceRoundSchedulingPreference | null;
   auto_scheduled_job_id?: string | null;
   scheduling_status?: Quote["schedulingStatus"] | null;
+  sent_at?: string | null;
 };
 
 type InvoiceRow = {
@@ -853,6 +890,9 @@ type InvoiceRow = {
   stripe_payment_status: string | null;
   stripe_payment_intent_id: string | null;
   stripe_payment_completed_at: string | null;
+  sent_at: string | null;
+  refunded_amount: number | null;
+  voided_at: string | null;
   created_at: string | null;
 };
 
@@ -884,6 +924,9 @@ type InvoiceWriteRow = {
   stripe_payment_status?: StripeInvoicePaymentStatus | null;
   stripe_payment_intent_id?: string | null;
   stripe_payment_completed_at?: string | null;
+  sent_at?: string | null;
+  refunded_amount?: number | null;
+  voided_at?: string | null;
 };
 
 type RecurringInvoiceTemplateRow = {
@@ -913,6 +956,7 @@ type RecurringInvoiceTemplateRow = {
   send_to: string | null;
   is_active: boolean | null;
   last_generated_date: string | null;
+  deleted_at?: string | null;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -1205,9 +1249,9 @@ type PaymentAuditEventWriteRow = {
 
 const CUSTOMER_SELECT_FIELDS = "*";
 const QUOTE_SELECT_FIELDS =
-    "id,quote_number,customer_id,customer_name,customer_type,customer_address,customer_town,customer_postcode,site_name,site_address,site_town,site_postcode,date,status,items,notes,total,work_type,estimated_duration_minutes,auto_scheduling_preference,auto_scheduling_disabled,service_round_scheduling_preference,auto_scheduled_job_id,scheduling_status,created_at";
+    "id,quote_number,customer_id,customer_name,customer_type,customer_address,customer_town,customer_postcode,site_name,site_address,site_town,site_postcode,date,status,items,notes,total,work_type,estimated_duration_minutes,auto_scheduling_preference,auto_scheduling_disabled,service_round_scheduling_preference,auto_scheduled_job_id,scheduling_status,sent_at,created_at";
 const INVOICE_SELECT_FIELDS =
-    "id,invoice_number,customer_id,customer_name,customer_type,customer_address,customer_town,customer_postcode,site_name,site_address,site_town,site_postcode,date,due_date,status,items,notes,terms,vat_rate,vat_amount,total,linked_quote_id,stripe_checkout_session_id,stripe_payment_link_url,stripe_payment_status,stripe_payment_intent_id,stripe_payment_completed_at,created_at";
+    "id,invoice_number,customer_id,customer_name,customer_type,customer_address,customer_town,customer_postcode,site_name,site_address,site_town,site_postcode,date,due_date,status,items,notes,terms,vat_rate,vat_amount,total,linked_quote_id,stripe_checkout_session_id,stripe_payment_link_url,stripe_payment_status,stripe_payment_intent_id,stripe_payment_completed_at,sent_at,refunded_amount,voided_at,created_at";
 const RECURRING_INVOICE_TEMPLATE_SELECT_FIELDS = "*";
 const SCHEDULED_JOB_SELECT_FIELDS = "*";
 const MONTHLY_PAYMENT_SELECT_FIELDS =
@@ -1239,6 +1283,7 @@ const ONBOARDING_COMPLETED_STORAGE_KEY = "roundhq_onboarding_completed";
 
 const DEFAULT_APP_SETTINGS: AppSettings = {
   businessName: "Your Business",
+  businessTimezone: "Europe/London",
   tradingName: "",
   businessEmail: "",
   businessPhone: "",
@@ -1316,12 +1361,17 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   emailFromName: "",
   emailFromAddress: "",
   emailReplyTo: "",
+  smsSenderMode: "platform_default",
+  smsSenderValue: "",
+  customerMessagingQuietHoursStart: "20:00",
+  customerMessagingQuietHoursEnd: "08:00",
   smtpHost: "",
   smtpPort: 587,
   smtpSecure: false,
   smtpUsername: "",
   smtpPassword: "",
   quoteFollowUpMethod: "email",
+  quoteFollowUpDelayDays: 3,
   quoteFollowUpEmailSubjectTemplate:
       "Following up on quote {{documentNumber}} from {{businessName}}",
   quoteFollowUpEmailTemplate: [
@@ -1339,6 +1389,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   quoteFollowUpTextTemplate:
       "Hi {{customerName}}, just following up on quote {{documentNumber}} from {{businessName}}. Quote total: {{total}}. Let me know if you would like to go ahead or if you have any questions.",
   invoiceReminderMethod: "email",
+  invoiceFollowUpDelayDays: 1,
   invoiceReminderEmailSubjectTemplate:
       "Reminder: invoice {{documentNumber}} from {{businessName}} is overdue",
   invoiceReminderEmailTemplate: [
@@ -1357,8 +1408,13 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   invoiceReminderTextTemplate:
       "Hi {{customerName}}, this is a reminder that invoice {{documentNumber}} from {{businessName}} is overdue. Total: {{total}}. Due date: {{dueDate}}. Please let me know once payment has been made.",
   autoSendVisitCompletionTexts: false,
+  autoSendServiceRoundCompletionTexts: false,
   visitCompletionTextTemplate:
       "Hi {{customerName}}, your service visit has been completed today. Payment due: {{amount}}. {{paymentDetails}} Reference: {{paymentReference}}. Thanks, {{businessName}}",
+  serviceRemindersEnabled: false,
+  serviceReminderLeadDays: 1,
+  serviceReminderSendTime: "18:00",
+  serviceReminderTemplate: "Hi {{customerName}}, this is a reminder that {{businessName}} is due on {{serviceDate}} for {{serviceType}}. Approximate arrival: {{arrivalWindow}}.",
 
   showWeatherWidget: true,
   showRevenueWidget: true,
@@ -1366,6 +1422,9 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   showUnpaidWidget: true,
   showRecentActivityWidget: true,
 
+  vatThresholdCardEnabled: false,
+  vatThresholdAmount: 90000,
+  vatWarningPercent: 80,
   publicLiabilityInsurance: "£1,000,000",
   termsAndConditionsUrl: "",
 };
@@ -1429,6 +1488,7 @@ const PAGE_PERMISSION_OVERRIDES: Record<PageKey, StaffPageAccessKey> = {
   history: "history",
   leads: "dashboard",
   customers: "customers",
+  followUp: "actions",
   customerProfit: "customers",
   payments: "customers",
   expenses: "expenses",
@@ -1461,6 +1521,7 @@ const CUSTOMER_FEATURE_PAGE_OVERRIDES: Record<PageKey, CustomerFeatureKey> = {
   payments: "payments",
   expenses: "expenses",
   paymentReconciliation: "payments",
+  followUp: "actions",
   customerProfile: "customers",
   actions: "actions",
   map: "map",
@@ -2002,7 +2063,22 @@ function formatTemplateCurrency(
 function getBusinessDisplayName(settings: Pick<AppSettings, "tradingName" | "businessName">) {
   return settings.tradingName.trim() || settings.businessName.trim() || "Your Business";
 }
+function getCompletionPaymentDetails(
+    settings: Pick<AppSettings, "bankAccountName" | "bankSortCode" | "bankAccountNumber">
+) {
+  const details: string[] = [];
+  if (settings.bankAccountName.trim()) {
+    details.push(`Account Name: ${settings.bankAccountName.trim()}`);
+  }
+  if (settings.bankAccountNumber.trim()) {
+    details.push(`Account Number: ${settings.bankAccountNumber.trim()}`);
+  }
+  if (settings.bankSortCode.trim()) {
+    details.push(`Sort Code: ${settings.bankSortCode.trim()}`);
+  }
 
+  return details.length > 0 ? ["Pay by bank transfer:", ...details].join("\n") : "";
+}
 function applyMessageTemplate(
     template: string,
     values: Record<string, string | number | undefined>
@@ -2663,9 +2739,14 @@ function normalizeStoredRoundBaseKey(key: string) {
   return getBaseRoundKey(legacyMatch[1] as WeekName, legacyMatch[2] as DayName);
 }
 
-function getTodayPanelState(date: Date, rotationWeeks: RotationWeeks): TodayPanelState {
-  const { dayLabel, selectedDay } = getWorkdayFromDate(date);
-  const week = getCycleWeek(date, rotationWeeks);
+function getTodayPanelState(
+    date: Date,
+    rotationWeeks: RotationWeeks,
+    timeZone = "Europe/London"
+): TodayPanelState {
+  const businessDate = getBusinessDate(date, timeZone);
+  const { dayLabel, selectedDay } = getWorkdayFromDate(businessDate);
+  const week = getCycleWeek(businessDate, rotationWeeks);
 
   return {
     week,
@@ -2989,6 +3070,7 @@ function formatDatabaseError(error: { code?: string; message: string }) {
               message.includes("customers_rotation_weeks_override_check") ||
               message.includes("customers_week_check") ||
               message.includes("customers_cut_frequency_check") ||
+              message.includes("saved_sites") ||
               message.includes("site_name") ||
               message.includes("site_address") ||
               message.includes("site_town") ||
@@ -3034,6 +3116,7 @@ function formatDatabaseError(error: { code?: string; message: string }) {
               message.includes("customer_address") ||
               message.includes("customer_town") ||
               message.includes("customer_postcode") ||
+              message.includes("saved_sites") ||
               message.includes("site_name") ||
               message.includes("site_address") ||
               message.includes("site_town") ||
@@ -3670,6 +3753,7 @@ function mapQuoteRowToQuote(row: QuoteRow): Quote {
     ),
     autoScheduledJobId: normalizeOptionalText(row.auto_scheduled_job_id ?? null),
     schedulingStatus: normalizeQuoteSchedulingStatus(row.scheduling_status),
+    sentAt: row.sent_at ?? undefined,
   };
 }
 
@@ -3702,6 +3786,7 @@ function mapQuoteToRow(quote: Quote): QuoteWriteRow {
         quote.serviceRoundSchedulingPreference ?? "default",
     auto_scheduled_job_id: quote.autoScheduledJobId ?? null,
     scheduling_status: quote.schedulingStatus ?? null,
+    sent_at: quote.sentAt ?? null,
   };
 }
 
@@ -3736,6 +3821,9 @@ function mapInvoiceRowToInvoice(row: InvoiceRow): Invoice {
     ),
     stripePaymentIntentId: row.stripe_payment_intent_id ?? undefined,
     stripePaymentCompletedAt: row.stripe_payment_completed_at ?? undefined,
+    sentAt: row.sent_at ?? undefined,
+    refundedAmount: Number(row.refunded_amount ?? 0),
+    voidedAt: row.voided_at ?? undefined,
   };
 }
 
@@ -3776,6 +3864,9 @@ function mapInvoiceToRow(invoice: Invoice): InvoiceWriteRow {
     stripe_payment_status: invoice.stripePaymentStatus ?? null,
     stripe_payment_intent_id: invoice.stripePaymentIntentId ?? null,
     stripe_payment_completed_at: invoice.stripePaymentCompletedAt ?? null,
+    sent_at: invoice.sentAt ?? null,
+    refunded_amount: Number(invoice.refundedAmount ?? 0),
+    voided_at: invoice.voidedAt ?? null,
   };
 }
 
@@ -3820,6 +3911,7 @@ function mapRecurringInvoiceTemplateRowToTemplate(
     lastGeneratedDate: row.last_generated_date ?? undefined,
     createdAt: row.created_at ?? undefined,
     updatedAt: row.updated_at ?? undefined,
+    deletedAt: row.deleted_at ?? undefined,
   };
 }
 
@@ -4314,6 +4406,7 @@ const NAV_SECTIONS: {
     items: [
       { key: "dashboard", label: "Overview", icon: LayoutDashboard },
       { key: "leads", label: "Leads", icon: Inbox },
+      { key: "followUp", label: "Follow-up", icon: Mail },
     ],
   },
   {
@@ -4375,6 +4468,7 @@ const NAV_TOUR_TARGETS: Partial<Record<PageKey, string>> = {
   quotes: "sidebar-quotes",
   invoices: "sidebar-invoices",
   commercialDocs: "sidebar-documents",
+  followUp: "sidebar-follow-up",
   payments: "sidebar-payments",
   expenses: "sidebar-expenses",
   paymentReconciliation: "sidebar-reconciliation",
@@ -4453,6 +4547,11 @@ function getCustomerFeatureKey(page: PageKey) {
   return CUSTOMER_FEATURE_PAGE_OVERRIDES[page];
 }
 
+type ScheduledJobCompletionDelivery = {
+  sms?: boolean;
+  email?: boolean;
+};
+
 function ScheduledJobProfileSection({
                                       job,
                                       checklist,
@@ -4466,6 +4565,8 @@ function ScheduledJobProfileSection({
                                       onOpenCustomer,
                                       onUpdateChecklist,
                                       onToggleCompleted,
+                                      completionMessagesEnabled,
+                                      onRetryCompletionText,
                                       onDeleteJob,
                                       onSaveJob,
                                       onEditQuote,
@@ -4485,15 +4586,18 @@ function ScheduledJobProfileSection({
       key: ScheduledJobChecklistKey,
       checked: boolean
   ) => void;
-  onToggleCompleted: (jobId: string) => Promise<void>;
+  onToggleCompleted: (jobId: string, delivery?: ScheduledJobCompletionDelivery) => Promise<void>;
+  completionMessagesEnabled: boolean;
+  onRetryCompletionText: (jobId: string) => Promise<void>;
   onDeleteJob: (jobId: string) => Promise<void>;
   onSaveJob: (job: ScheduledJob) => Promise<ScheduledJob | null>;
   onEditQuote: (quoteId: string) => void;
   onEditInvoice: (invoiceId: string) => void;
 }) {
   const [isCompleting, setIsCompleting] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
+  const [isRetryingCompletionText, setIsRetryingCompletionText] = useState(false);
+  const [completionMessageNotice, setCompletionMessageNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);  const [isEditing, setIsEditing] = useState(false);
   const [isSavingDetails, setIsSavingDetails] = useState(false);
   const [draftTitle, setDraftTitle] = useState(job.title);
   const [draftDate, setDraftDate] = useState(
@@ -4630,7 +4734,7 @@ function ScheduledJobProfileSection({
   const jobNavigationUrl = jobMapQuery
       ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(jobMapQuery)}&travelmode=driving`
       : null;
-  const jobDateLabel = new Date(job.date).toLocaleDateString(undefined, {
+  const jobDateLabel = formatUkDate(job.date, {
     weekday: "long",
     day: "numeric",
     month: "long",
@@ -4875,15 +4979,60 @@ function ScheduledJobProfileSection({
   }
 
   async function handleToggleCompleted() {
-    if (isCompleting || isDeleting) {
+    if (isCompleting || isDeleting || isRetryingCompletionText) {
+      return;
+    }
+
+    const delivery: ScheduledJobCompletionDelivery | undefined =
+      job.status === "Completed"
+        ? undefined
+        : {
+            sms: completionMessagesEnabled && phoneValue
+              ? window.confirm("Send the completed-work invoice to this customer by text message?")
+              : false,
+            email: primaryContactEmail
+              ? window.confirm("Send the completed-work invoice to this customer by email?")
+              : false,
+          };
+
+    try {
+      setIsCompleting(true);
+      setCompletionMessageNotice(null);
+      await onToggleCompleted(job.id, delivery);
+      setCompletionMessageNotice({
+        type: "success",
+        text: job.status === "Completed" ? "Job moved back to Scheduled." : "Job marked as completed.",
+      });
+    } catch (error) {
+      setCompletionMessageNotice({
+        type: "error",
+        text: error instanceof Error && error.message.trim()
+          ? error.message
+          : "The job was updated, but the completion notification could not be sent.",
+      });
+    } finally {
+      setIsCompleting(false);
+    }
+  }
+  async function handleRetryCompletionText() {
+    if (isCompleting || isDeleting || isRetryingCompletionText) {
       return;
     }
 
     try {
-      setIsCompleting(true);
-      await onToggleCompleted(job.id);
+      setIsRetryingCompletionText(true);
+      setCompletionMessageNotice(null);
+      await onRetryCompletionText(job.id);
+      setCompletionMessageNotice({ type: "success", text: "Completion text sent." });
+    } catch (error) {
+      setCompletionMessageNotice({
+        type: "error",
+        text: error instanceof Error && error.message.trim()
+          ? error.message
+          : "The completion text could not be retried.",
+      });
     } finally {
-      setIsCompleting(false);
+      setIsRetryingCompletionText(false);
     }
   }
 
@@ -4945,6 +5094,17 @@ function ScheduledJobProfileSection({
                     : "Mark Completed"}
             </button>
 
+            {job.status === "Completed" && completionMessagesEnabled ? (
+              <button
+                  type="button"
+                  onClick={handleRetryCompletionText}
+                  disabled={isCompleting || isDeleting || isRetryingCompletionText}
+                  className="inline-flex items-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:text-sky-300"
+              >
+                <Mail size={16} />
+                {isRetryingCompletionText ? "Retrying..." : "Retry completion text"}
+              </button>
+            ) : null}
             <button
                 onClick={handleDeleteJob}
                 disabled={isDeleting || isCompleting}
@@ -4956,6 +5116,18 @@ function ScheduledJobProfileSection({
           </div>
         </div>
 
+        {completionMessageNotice ? (
+          <div
+            role={completionMessageNotice.type === "error" ? "alert" : "status"}
+            className={`rounded-2xl border px-4 py-3 text-sm font-medium ${
+              completionMessageNotice.type === "error"
+                ? "border-rose-200 bg-rose-50 text-rose-700"
+                : "border-emerald-200 bg-emerald-50 text-emerald-700"
+            }`}
+          >
+            {completionMessageNotice.text}
+          </div>
+        ) : null}
         <section className="overflow-hidden rounded-[28px] bg-white p-6 shadow-sm ring-1 ring-slate-200/70">
           <div className="rounded-[24px] bg-gradient-to-r from-[#153c3f] via-[#1d474a] to-[#244d51] px-6 py-6 text-white shadow-sm">
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/65">
@@ -5482,7 +5654,7 @@ function ScheduledJobProfileSection({
                       <div>
                         <p className="font-semibold text-slate-900">{primaryQuote.quoteNumber}</p>
                         <p className="mt-1 text-xs text-slate-500">
-                          {new Date(primaryQuote.date).toLocaleDateString()} - {formatMoney(primaryQuote.total)}
+                          {formatStoredDate(primaryQuote.date)} - {formatMoney(primaryQuote.total)}
                         </p>
                       </div>
                       <span className={`rounded-full px-3 py-1 text-xs font-semibold ${getDocumentStatusClasses(primaryQuote.status)}`}>
@@ -5524,7 +5696,7 @@ function ScheduledJobProfileSection({
                       <div>
                         <p className="font-semibold text-slate-900">{primaryInvoice.invoiceNumber}</p>
                         <p className="mt-1 text-xs text-slate-500">
-                          {new Date(primaryInvoice.date).toLocaleDateString()} - {formatMoney(primaryInvoice.total)}
+                          {formatStoredDate(primaryInvoice.date)} - {formatMoney(primaryInvoice.total)}
                         </p>
                       </div>
                       <span className={`rounded-full px-3 py-1 text-xs font-semibold ${getDocumentStatusClasses(primaryInvoice.status)}`}>
@@ -5564,7 +5736,7 @@ function ScheduledJobProfileSection({
                                 {linkedQuote.quoteNumber}
                               </p>
                               <p className="mt-1 text-xs text-slate-500">
-                                {new Date(linkedQuote.date).toLocaleDateString()} · {formatMoney(linkedQuote.total)}
+                                {formatUkDate(linkedQuote.date)} · {formatMoney(linkedQuote.total)}
                               </p>
                             </div>
                             <span className={`rounded-full px-3 py-1 text-xs font-semibold ${getDocumentStatusClasses(linkedQuote.status)}`}>
@@ -5604,7 +5776,7 @@ function ScheduledJobProfileSection({
                                 {linkedInvoice.invoiceNumber}
                               </p>
                               <p className="mt-1 text-xs text-slate-500">
-                                {new Date(linkedInvoice.date).toLocaleDateString()} · {formatMoney(linkedInvoice.total)}
+                                {formatUkDate(linkedInvoice.date)} · {formatMoney(linkedInvoice.total)}
                               </p>
                             </div>
                             <span className={`rounded-full px-3 py-1 text-xs font-semibold ${getDocumentStatusClasses(linkedInvoice.status)}`}>
@@ -5634,6 +5806,7 @@ function ScheduledJobProfileSection({
 
 type JobsAppProps = {
   featureAccess?: Partial<CustomerFeatureAccess>;
+  smsEntitlement?: SmsEntitlement;
   supportAccess?: {
     organizationId: string;
     workspaceName: string;
@@ -5644,6 +5817,7 @@ type JobsAppProps = {
   subscriptionTrialEndsAt?: string | null;
   workspaceName?: string;
   aiReceptionistSettings?: AiReceptionistSettings | null;
+  aiReceptionistRealtimeReadiness?: OpenAiRealtimeSipReadiness | null;
   canManageAiReceptionistSettings?: boolean;
   aiReceptionistStats?: AiReceptionistDashboardStats | null;
   aiReceptionistCallHistory?: {
@@ -5745,6 +5919,10 @@ function getWorkspaceRouteUrl(route: WorkspaceRouteState) {
     params.set("page", route.page);
   }
 
+  if (route.page !== "settings") {
+    params.delete("tab");
+  }
+
   params.delete("customer");
   params.delete("job");
   params.delete("jobBack");
@@ -5780,6 +5958,7 @@ function getWorkspaceRouteUrl(route: WorkspaceRouteState) {
 
 export default function JobsApp({
   featureAccess,
+  smsEntitlement,
   supportAccess,
   subscriptionPlan,
   subscriptionStaffAddonQuantity,
@@ -5787,12 +5966,18 @@ export default function JobsApp({
   subscriptionTrialEndsAt,
   workspaceName,
   aiReceptionistSettings,
+  aiReceptionistRealtimeReadiness,
   canManageAiReceptionistSettings = false,
   aiReceptionistStats,
   aiReceptionistCallHistory,
 }: JobsAppProps = {}) {
   const supportOrganizationId = supportAccess?.organizationId ?? null;
+  const [activeSmsEntitlement, setActiveSmsEntitlement] = useState(smsEntitlement);
+  const canUseSms = activeSmsEntitlement?.isActive === true;
   const isSupportAccess = Boolean(supportOrganizationId);
+  useEffect(() => {
+    setActiveSmsEntitlement(smsEntitlement);
+  }, [smsEntitlement]);
   const customerFeatureAccess = useMemo(
       () => normalizeCustomerFeatureAccess(featureAccess),
       [featureAccess]
@@ -5948,6 +6133,11 @@ export default function JobsApp({
   >(DEFAULT_PERSISTED_APP_STATE.recurringInvoiceTemplates);
   const [recurringInvoiceTemplatesFallbackActive, setRecurringInvoiceTemplatesFallbackActive] =
       useState(DEFAULT_PERSISTED_APP_STATE.recurringInvoiceTemplatesFallbackActive);
+  useEffect(() => {
+    activeRecurringInvoiceTemplateIdsRef.current = new Set(
+      recurringInvoiceTemplates.filter((template) => template.isActive && !template.deletedAt).map((template) => template.id)
+    );
+  }, [recurringInvoiceTemplates]);
 
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(
       initialWorkspaceRoute.selectedCustomerId
@@ -5991,6 +6181,7 @@ export default function JobsApp({
       DEFAULT_STAFF_TABLES_READY
   );
   const isProcessingRecurringInvoicesRef = useRef(false);
+  const activeRecurringInvoiceTemplateIdsRef = useRef(new Set<string>());
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
   const [rolePermissions, setRolePermissions] = useState<RolePermission[]>([]);
   const [isHydrating, setIsHydrating] = useState(true);
@@ -5999,6 +6190,8 @@ export default function JobsApp({
   const [canSyncAppState, setCanSyncAppState] = useState(true);
   const [isClearingHistory, setIsClearingHistory] = useState(false);
   const [todayReferenceDate, setTodayReferenceDate] = useState(() => new Date());
+  const manualDashboardDateSelectionRef = useRef(false);
+  const lastBusinessDateRef = useRef(getBusinessIsoDate(new Date(), DEFAULT_APP_SETTINGS.businessTimezone));
   const [appSettings, setAppSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [platformAnnouncement, setPlatformAnnouncement] =
       useState<PlatformAnnouncement | null>(null);
@@ -6202,8 +6395,8 @@ export default function JobsApp({
   const roundKey = getRoundKeyForCycle(baseRoundKey, activeRoundCycle);
   const isLocked = !!lockedRounds[roundKey];
   const todayPanel = useMemo(
-      () => getTodayPanelState(todayReferenceDate, activeRotationWeeks),
-      [activeRotationWeeks, todayReferenceDate]
+      () => getTodayPanelState(todayReferenceDate, activeRotationWeeks, appSettings.businessTimezone),
+      [activeRotationWeeks, appSettings.businessTimezone, todayReferenceDate]
   );
   const todayBaseRoundKey = todayPanel.selectedDay
       ? getBaseRoundKey(todayPanel.week, todayPanel.selectedDay)
@@ -6505,12 +6698,45 @@ export default function JobsApp({
           .from("organizations")
           .update({
             default_rotation_weeks: merged.defaultRotationWeeks,
+            business_timezone: merged.businessTimezone,
             updated_at: new Date().toISOString(),
           })
           .eq("id", getWritableOrganizationId());
 
       if (error) {
         throw error;
+      }
+
+      const communicationResponse = await fetch("/api/communication-settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          timezone: merged.businessTimezone,
+          emailFromName: merged.emailFromName,
+          emailFromAddress: merged.emailFromAddress,
+          emailReplyTo: merged.emailReplyTo,
+          smsSenderMode: merged.smsSenderMode,
+          smsSenderValue: merged.smsSenderValue,
+          quietHoursStart: merged.customerMessagingQuietHoursStart,
+          quietHoursEnd: merged.customerMessagingQuietHoursEnd,
+          quoteFollowUpDelayDays: merged.quoteFollowUpDelayDays,
+          invoiceFollowUpDelayDays: merged.invoiceFollowUpDelayDays,
+          serviceRemindersEnabled: merged.serviceRemindersEnabled,
+          serviceReminderLeadDays: merged.serviceReminderLeadDays,
+          serviceReminderSendTime: merged.serviceReminderSendTime,
+          serviceReminderTemplate: merged.serviceReminderTemplate,
+          completionMessagesEnabled: merged.autoSendVisitCompletionTexts,
+          completionMessageTemplate: merged.visitCompletionTextTemplate,
+          vatThresholdCardEnabled: merged.vatThresholdCardEnabled,
+          vatThresholdAmount: merged.vatThresholdAmount,
+          vatWarningPercent: merged.vatWarningPercent,
+        }),
+      });
+      const communicationResult = await communicationResponse.json().catch(() => null) as
+        | { error?: string }
+        | null;
+      if (!communicationResponse.ok) {
+        throw new Error(communicationResult?.error || "Unable to save customer communication settings.");
       }
 
       const customersNeedingRotationClamp = customers
@@ -6962,21 +7188,24 @@ export default function JobsApp({
   );
 
   useEffect(() => {
-    const now = new Date();
-    const nextMidnight = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        now.getDate() + 1
-    );
-    const timeoutId = window.setTimeout(
-        () => setTodayReferenceDate(new Date()),
-        nextMidnight.getTime() - now.getTime() + 1000
-    );
+    const refreshBusinessDate = () => {
+      const now = new Date();
+      const businessDate = getBusinessIsoDate(now, appSettings.businessTimezone);
+      if (!businessDate || businessDate === lastBusinessDateRef.current) return;
 
-    return () => {
-      window.clearTimeout(timeoutId);
+      lastBusinessDateRef.current = businessDate;
+      setTodayReferenceDate(now);
+      if (page === "dashboard" && !manualDashboardDateSelectionRef.current) {
+        const panel = getTodayPanelState(now, activeRotationWeeks, appSettings.businessTimezone);
+        if (panel.selectedDay) {
+          setSelectedWeek(panel.week);
+          setSelectedDay(panel.selectedDay);
+        }
+      }
     };
-  }, [todayReferenceDate]);
+    const intervalId = window.setInterval(refreshBusinessDate, 60_000);
+    return () => window.clearInterval(intervalId);
+  }, [activeRotationWeeks, appSettings.businessTimezone, page]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -7591,7 +7820,8 @@ export default function JobsApp({
         if (nextWorkflowTablesReady.recurringInvoiceTemplates) {
           const existingRecurringInvoiceTemplates = (
               (recurringInvoiceTemplatesResult.data ?? []) as RecurringInvoiceTemplateRow[]
-          ).map(mapRecurringInvoiceTemplateRowToTemplate);
+          ).filter((row) => !row.deleted_at)
+            .map(mapRecurringInvoiceTemplateRowToTemplate);
 
           nextRecurringInvoiceTemplates = nextRecurringInvoiceTemplatesFallbackActive
               ? nextState.recurringInvoiceTemplates.length > 0
@@ -7610,7 +7840,9 @@ export default function JobsApp({
             recurringInvoiceTemplates: true,
           };
           nextRecurringInvoiceTemplates = sortRecurringInvoiceTemplates(
-              nextState.recurringInvoiceTemplates
+              nextState.recurringInvoiceTemplates.filter(
+                (template) => !template.deletedAt
+              )
           );
           nextRecurringInvoiceTemplatesFallbackActive = true;
         }
@@ -7685,7 +7917,7 @@ export default function JobsApp({
           }
         }
 
-        if (nextStaffTablesReady.staffMembers) {
+        if (nextStaffTablesReady.staffMembers && !isSupportAccess) {
           let matchedStaffMember = findMatchingStaffMember(
               nextStaffMembers,
               user.id,
@@ -7847,8 +8079,14 @@ export default function JobsApp({
         setLockedRounds(nextState.lockedRounds);
         setActiveRoundCycles(nextState.activeRoundCycles);
         setPendingCashPaymentDates(nextState.pendingCashPaymentDates);
-        setSelectedWeek(nextState.selectedWeek);
-        setSelectedDay(nextState.selectedDay);
+        const initialPanel = getTodayPanelState(
+            new Date(),
+            nextState.appSettings.defaultRotationWeeks,
+            nextState.appSettings.businessTimezone
+        );
+        const startOnToday = initialWorkspaceRoute.page === "dashboard" && initialPanel.selectedDay;
+        setSelectedWeek(startOnToday ? initialPanel.week : nextState.selectedWeek);
+        setSelectedDay(startOnToday ? initialPanel.selectedDay as DayName : nextState.selectedDay);
         setStaffMembers(nextStaffMembers);
         setRolePermissions(nextRolePermissions);
         const resolvedAppSettings = mergeAppSettings({
@@ -9044,7 +9282,7 @@ export default function JobsApp({
       mediaReferences.length > 0
         ? `Photos/video supplied:\n${mediaReferences.join("\n")}`
         : "",
-      `Created from lead received ${new Date(lead.submittedAt).toLocaleString()}.`,
+      `Created from lead received ${formatUkDateTime(lead.submittedAt)}.`,
     ];
 
     return sections
@@ -9116,10 +9354,15 @@ export default function JobsApp({
     }
 
     const normalizedMonth = getInputDateValue(paymentMonth);
+    const normalizedPaymentDate = paymentDate ? getInputDateValue(paymentDate) : null;
     const supabase = createSupabaseClient();
 
     if (!normalizedMonth) {
-      return;
+      throw new Error("Unable to save the payment because its payment month is invalid.");
+    }
+
+    if (paymentDate && !normalizedPaymentDate) {
+      throw new Error("Unable to save the payment because its payment date is invalid.");
     }
 
     if (!paymentDate) {
@@ -9155,7 +9398,7 @@ export default function JobsApp({
                 mapMonthlyPaymentToWriteRow({
                   customerId,
                   paymentMonth: normalizedMonth,
-                  paymentDate,
+                  paymentDate: normalizedPaymentDate,
                 })
             ),
             {
@@ -9681,7 +9924,7 @@ export default function JobsApp({
     }
   }
 
-  async function createInvoicePaymentLink(invoiceId: string) {
+  async function createInvoicePaymentLink(invoiceId: string, fallbackInvoice?: Invoice) {
     const response = await fetch("/api/invoices/payment-link", {
       method: "POST",
       headers: {
@@ -9709,7 +9952,7 @@ export default function JobsApp({
     }
 
     const existingInvoice =
-        invoices.find((invoice) => invoice.id === invoiceId) ?? null;
+        invoices.find((invoice) => invoice.id === invoiceId) ?? fallbackInvoice ?? null;
     const updatedInvoice: Invoice | null = existingInvoice
         ? {
             ...existingInvoice,
@@ -9873,11 +10116,13 @@ export default function JobsApp({
             ? existingQuote.status
             : "Sent";
     const quoteSaved =
-        nextStatus === existingQuote.status ||
-        (await saveQuoteRecord({
-          ...existingQuote,
-          status: nextStatus,
-        }));
+        nextStatus === existingQuote.status && existingQuote.sentAt
+          ? true
+          : await saveQuoteRecord({
+              ...existingQuote,
+              status: nextStatus,
+              sentAt: existingQuote.sentAt ?? new Date().toISOString(),
+            });
 
     if (!quoteSaved) {
       return;
@@ -9887,7 +10132,7 @@ export default function JobsApp({
         quoteId,
         createDocumentHistoryEntry(
             "sent",
-            `Sent by email${
+            `Sent by ${metadata.method === "text" ? "text" : "email"}${
                 metadata.recipient ? ` to ${metadata.recipient.trim()}` : ""
             }.`,
             metadata
@@ -9981,11 +10226,13 @@ export default function JobsApp({
             ? existingInvoice.status
             : "Sent";
     const invoiceSaved =
-        nextStatus === existingInvoice.status ||
-        (await saveInvoiceRecord({
-          ...existingInvoice,
-          status: nextStatus,
-        }));
+        nextStatus === existingInvoice.status && existingInvoice.sentAt
+          ? true
+          : await saveInvoiceRecord({
+              ...existingInvoice,
+              status: nextStatus,
+              sentAt: existingInvoice.sentAt ?? new Date().toISOString(),
+            });
 
     if (!invoiceSaved) {
       return;
@@ -9995,7 +10242,7 @@ export default function JobsApp({
         invoiceId,
         createDocumentHistoryEntry(
             "sent",
-            `Sent by email${
+            `Sent by ${metadata.method === "text" ? "text" : "email"}${
                 metadata.recipient ? ` to ${metadata.recipient.trim()}` : ""
             }.`,
             metadata
@@ -10138,29 +10385,41 @@ export default function JobsApp({
   }
 
   async function deleteRecurringInvoiceTemplate(templateId: string) {
+    if (!window.confirm("Delete this recurring invoice schedule? Existing invoices and payments will be kept.")) {
+      return false;
+    }
+
     const nextTemplates = recurringInvoiceTemplates.filter(
         (template) => template.id !== templateId
     );
+    activeRecurringInvoiceTemplateIdsRef.current.delete(templateId);
 
     try {
-      if (
-          !workflowTablesReady.recurringInvoiceTemplates ||
-          recurringInvoiceTemplatesFallbackActive
-      ) {
+      if (!workflowTablesReady.recurringInvoiceTemplates) {
         await syncRecurringInvoiceTemplatesFallback(nextTemplates);
       } else {
-        const supabase = createSupabaseClient();
-        const { error } = await supabase
-            .from("recurring_invoice_templates")
-            .delete()
-            .eq("id", templateId)
-            .eq("organization_id", getWritableOrganizationId());
-
-        if (error) {
-          throw error;
+        const response = await fetch(`/api/recurring-invoices/${encodeURIComponent(templateId)}`, {
+          method: "DELETE",
+        });
+        const result = await response.json().catch(() => null) as { error?: string } | null;
+        if (!response.ok) {
+          throw new Error(result?.error || "Unable to delete the recurring invoice schedule.");
         }
 
         setRecurringInvoiceTemplates(nextTemplates);
+        setRecurringInvoiceTemplatesFallbackActive(false);
+        if (isDatabaseReady && canSyncAppState) {
+          try {
+            await persistAppStateSnapshot(
+              buildPersistedAppState({
+                recurringInvoiceTemplates: nextTemplates,
+                recurringInvoiceTemplatesFallbackActive: false,
+              })
+            );
+          } catch (appStateError) {
+            console.error("recurring_invoice_template_fallback_cleanup_failed", appStateError);
+          }
+        }
       }
 
       setDatabaseError(
@@ -10543,7 +10802,7 @@ export default function JobsApp({
   }
 
   async function logQuoteFollowUpSent(quoteId: string) {
-    const today = getTodayDateInputValue();
+    const today = getBusinessIsoDate(new Date(), appSettings.businessTimezone);
     const nextQuoteFollowUps = {
       ...quoteFollowUps,
       [quoteId]: {
@@ -10572,7 +10831,7 @@ export default function JobsApp({
   }
 
   async function logInvoiceReminderSent(invoiceId: string) {
-    const today = getTodayDateInputValue();
+    const today = getBusinessIsoDate(new Date(), appSettings.businessTimezone);
     const nextInvoiceReminders = {
       ...invoiceReminders,
       [invoiceId]: {
@@ -10690,7 +10949,139 @@ export default function JobsApp({
     return invoiceCreated ? draftInvoice : null;
   }
 
-  async function toggleScheduledJobCompleted(jobId: string) {
+  async function sendScheduledJobCompletionText(
+      job: ScheduledJob,
+      options: { retryFailed?: boolean; invoice?: Invoice | null; delivery?: ScheduledJobCompletionDelivery } = {}
+  ) {
+    const delivery = options.delivery ?? {
+      sms: canUseSms && appSettings.autoSendVisitCompletionTexts,
+      email: false,
+    };
+    if (!delivery.sms && !delivery.email) {
+      return;
+    }
+
+    const customer = job.customerId != null ? customerMap.get(job.customerId) ?? null : null;
+    const invoice =
+      options.invoice ??
+      (job.invoiceIds ?? [])
+        .map((invoiceId) => invoices.find((entry) => entry.id === invoiceId) ?? null)
+        .find((entry): entry is Invoice => Boolean(entry)) ??
+      null;
+    if (!customer) {
+      throw new Error("The job was completed, but it is not linked to a customer for the invoice notification.");
+    }
+    if (!invoice) {
+      throw new Error("The job was completed, but an invoice could not be created for the completion notification.");
+    }
+
+    const message = [
+      `Hi ${customer.name},`,
+      "",
+      `Your work scheduled for ${formatIsoDateLabel(getInputDateValue(job.date) || job.date)} has been completed.`,
+      `Invoice ${invoice.invoiceNumber}: ${formatTemplateCurrency(invoice.total, appSettings.currencyCode)}`,
+      getCompletionPaymentDetails(appSettings),
+      `Payment reference: ${appSettings.bankPaymentReference.trim() || invoice.invoiceNumber}`,
+      invoice.stripePaymentLinkUrl?.trim() ? `Pay securely online: ${invoice.stripePaymentLinkUrl.trim()}` : "",
+      "",
+      `Thanks, ${getBusinessDisplayName(appSettings)}`,
+    ].filter(Boolean).join("\n");
+    const deliveries = [
+      delivery.sms ? { channel: "sms" as const, recipient: customer.phone?.trim() || "" } : null,
+      delivery.email ? { channel: "email" as const, recipient: customer.contactEmails?.find((email) => email.trim())?.trim() || customer.email?.trim() || "" } : null,
+    ].filter((entry): entry is { channel: "sms" | "email"; recipient: string } => Boolean(entry));
+
+    for (const item of deliveries) {
+      if (!item.recipient) {
+        throw new Error(item.channel === "email" ? "The customer does not have an email address for the invoice." : "The customer does not have a valid mobile number for the invoice text.");
+      }
+      const response = await fetch("/api/customer-messages", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          customerId: customer.id,
+          channel: item.channel,
+          kind: "job_completion",
+          recipient: item.recipient,
+          subject: item.channel === "email" ? `Invoice ${invoice.invoiceNumber} from ${getBusinessDisplayName(appSettings)}` : undefined,
+          body: message,
+          relatedType: "invoice",
+          relatedId: invoice.id,
+          occurrence: `job-completion:${job.id}`,
+          retryFailed: item.channel === "sms" && options.retryFailed === true,
+          includeDocumentLink: true,
+        }),
+      });
+      const result = await response.json().catch(() => null) as
+        | { error?: string; processingError?: string; message?: { status?: string; failure_reason?: string } }
+        | null;
+      if (!response.ok || result?.processingError || result?.message?.status === "failed") {
+        throw new Error(result?.error || result?.processingError || result?.message?.failure_reason || "The completion notification could not be sent.");
+      }
+    }
+  }
+  async function sendServiceRoundCompletionText(customer: Customer, visit: VisitLog) {
+    if (
+      !canUseSms ||
+      !appSettings.autoSendServiceRoundCompletionTexts ||
+      customer.paymentMethod !== "On Day Transfer"
+    ) {
+      return;
+    }
+
+    const recipient = customer.phone?.trim() || "";
+    if (!recipient) {
+      return;
+    }
+
+    const response = await fetch("/api/customer-messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        customerId: customer.id,
+        channel: "sms",
+        kind: "job_completion",
+        recipient,
+        body: applyMessageTemplate(appSettings.visitCompletionTextTemplate, {
+          customerName: customer.name,
+          serviceDate: formatIsoDateLabel(getInputDateValue(visit.visitDate) || visit.visitDate),
+          date: formatIsoDateLabel(getInputDateValue(visit.visitDate) || visit.visitDate),
+          serviceType: "Grass cutting",
+          businessName: getBusinessDisplayName(appSettings),
+          amount: formatTemplateCurrency(
+            Number(visit.priceAtVisit ?? customer.grassCutAmount ?? 0),
+            appSettings.currencyCode
+          ),
+          paymentDetails: getCompletionPaymentDetails(appSettings),
+          paymentReference: appSettings.bankPaymentReference.trim() || customer.name,
+        }),
+        relatedType: "job",
+        relatedId: String(visit.id),
+        occurrence: `service-round-completion:${visit.id}`,
+      }),
+    });
+    const result = (await response.json().catch(() => null)) as
+      | { error?: string; processingError?: string; message?: { status?: string; failure_reason?: string } }
+      | null;
+    if (!response.ok || result?.processingError || result?.message?.status === "failed") {
+      throw new Error(
+        result?.error ||
+          result?.processingError ||
+          result?.message?.failure_reason ||
+          "The completion text could not be sent."
+      );
+    }
+  }
+
+  async function retryScheduledJobCompletionText(jobId: string) {
+    const job = scheduledJobs.find((entry) => entry.id === jobId) ?? null;
+    if (!job || job.status !== "Completed") {
+      throw new Error("Only a completed job can retry its completion text.");
+    }
+
+    await sendScheduledJobCompletionText(job, { retryFailed: true });
+  }
+  async function toggleScheduledJobCompleted(jobId: string, delivery?: ScheduledJobCompletionDelivery) {
     const targetJob =
         scheduledJobs.find((scheduledJob) => scheduledJob.id === jobId) ?? null;
 
@@ -10699,6 +11090,10 @@ export default function JobsApp({
     }
 
     const isCompleting = targetJob.status !== "Completed";
+    const completionDelivery = delivery ?? {
+      sms: canUseSms && appSettings.autoSendVisitCompletionTexts,
+      email: false,
+    };
     const savedJob = await saveScheduledJobRecord({
       ...targetJob,
       status: isCompleting ? "Completed" : "Scheduled",
@@ -10715,23 +11110,38 @@ export default function JobsApp({
     }
 
     const ensuredInvoice = await ensureInvoiceForCompletedScheduledJob(savedJob);
-
-    if (!ensuredInvoice) {
-      return;
+    let completedJob = savedJob;
+    if (ensuredInvoice) {
+      const existingInvoiceIds = new Set(savedJob.invoiceIds ?? []);
+      if (!existingInvoiceIds.has(ensuredInvoice.id)) {
+        const savedCompletedJob = await saveScheduledJobRecord({
+          ...savedJob,
+          invoiceIds: [...existingInvoiceIds, ensuredInvoice.id],
+        });
+        completedJob = savedCompletedJob ?? {
+          ...savedJob,
+          invoiceIds: [...existingInvoiceIds, ensuredInvoice.id],
+        };
+      }
     }
 
-    const existingInvoiceIds = new Set(savedJob.invoiceIds ?? []);
-
-    if (existingInvoiceIds.has(ensuredInvoice.id)) {
-      return;
+    let invoiceForNotification = ensuredInvoice;
+    if (
+      invoiceForNotification &&
+      (completionDelivery.sms || completionDelivery.email) &&
+      appSettings.stripePaymentLinksEnabled
+    ) {
+      invoiceForNotification = await createInvoicePaymentLink(
+        invoiceForNotification.id,
+        invoiceForNotification
+      ) ?? invoiceForNotification;
     }
 
-    await saveScheduledJobRecord({
-      ...savedJob,
-      invoiceIds: [...existingInvoiceIds, ensuredInvoice.id],
+    await sendScheduledJobCompletionText(completedJob, {
+      invoice: invoiceForNotification,
+      delivery: completionDelivery,
     });
   }
-
   function updateScheduledJobChecklist(
       jobId: string,
       key: ScheduledJobChecklistKey,
@@ -11122,7 +11532,7 @@ export default function JobsApp({
   ]);
 
   const dashboardAttentionItems = useMemo<DashboardAttentionItem[]>(() => {
-    const today = getTodayDateInputValue();
+    const today = getBusinessIsoDate(new Date(), appSettings.businessTimezone);
     const linkedQuoteIds = new Set(
         invoices
             .map((invoice) => invoice.linkedQuoteId)
@@ -11136,27 +11546,35 @@ export default function JobsApp({
         continue;
       }
 
+      const sentDate =
+          getInputDateValue(quote.sentAt) ||
+          (quote.status === "Sent" ? getInputDateValue(quote.date) : "");
+      if (!sentDate) {
+        continue;
+      }
+
       const followUpState = quoteFollowUps[quote.id] ?? {
         followUpCount: 0,
       };
       const anchorDate =
           followUpState.followUpCount > 0
-              ? followUpState.lastFollowedUpOn ?? quote.date
-              : quote.date;
-      const intervalDays =
-          QUOTE_FOLLOW_UP_INTERVAL_DAYS[
-              Math.min(
-                  followUpState.followUpCount,
-                  QUOTE_FOLLOW_UP_INTERVAL_DAYS.length - 1
-              )
-          ];
+              ? followUpState.lastFollowedUpOn ?? sentDate
+              : sentDate;
+      const intervalDays = followUpState.followUpCount === 0
+          ? Math.max(0, appSettings.quoteFollowUpDelayDays)
+          : QUOTE_FOLLOW_UP_INTERVAL_DAYS[
+                Math.min(
+                    followUpState.followUpCount,
+                    QUOTE_FOLLOW_UP_INTERVAL_DAYS.length - 1
+                )
+            ];
       const daysSinceAnchor = getIsoDateDifferenceInDays(anchorDate, today);
 
       if (daysSinceAnchor < intervalDays) {
         continue;
       }
 
-      const daysSinceQuote = Math.max(0, getIsoDateDifferenceInDays(quote.date, today));
+      const daysSinceQuote = Math.max(0, getIsoDateDifferenceInDays(sentDate, today));
       items.push({
         id: `quote-${quote.id}`,
         kind: "quote_follow_up",
@@ -11169,7 +11587,7 @@ export default function JobsApp({
             ? `Last follow-up logged on ${formatIsoDateLabel(
                 followUpState.lastFollowedUpOn
             )}.`
-            : "No follow-up logged yet.",
+            : "Sent on " + formatIsoDateLabel(sentDate) + " with no follow-up logged yet.",
         documentId: quote.id,
         primaryActionLabel: "Open quote",
         secondaryActionLabel: "Send follow-up",
@@ -11181,7 +11599,7 @@ export default function JobsApp({
 
     if (hasPageAccess("invoices")) {
       for (const invoice of invoices) {
-      if (["Draft", "Paid", "Declined"].includes(invoice.status)) {
+      if (["Draft", "Paid", "Declined", "Void", "Voided"].includes(invoice.status) || invoice.voidedAt) {
         continue;
       }
 
@@ -11200,13 +11618,14 @@ export default function JobsApp({
           reminderState.reminderCount > 0
               ? reminderState.lastReminderSentOn ?? dueDate
               : dueDate;
-      const intervalDays =
-          INVOICE_REMINDER_INTERVAL_DAYS[
-              Math.min(
-                  reminderState.reminderCount,
-                  INVOICE_REMINDER_INTERVAL_DAYS.length - 1
-              )
-          ];
+      const intervalDays = reminderState.reminderCount === 0
+          ? Math.max(0, appSettings.invoiceFollowUpDelayDays)
+          : INVOICE_REMINDER_INTERVAL_DAYS[
+                Math.min(
+                    reminderState.reminderCount,
+                    INVOICE_REMINDER_INTERVAL_DAYS.length - 1
+                )
+            ];
       const daysSinceAnchor = getIsoDateDifferenceInDays(anchorDate, today);
 
       if (daysSinceAnchor < intervalDays) {
@@ -11235,17 +11654,18 @@ export default function JobsApp({
       }
     }
 
-    return items
-        .sort((left, right) => {
+    return items.sort((left, right) => {
           if (left.sortRank !== right.sortRank) {
             return left.sortRank - right.sortRank;
           }
 
           return right.sortValue - left.sortValue;
-        })
-        .map(({ sortRank, sortValue, ...item }) => item);
+        });
   }, [
     appSettings.paymentTermsDays,
+    appSettings.businessTimezone,
+    appSettings.invoiceFollowUpDelayDays,
+    appSettings.quoteFollowUpDelayDays,
     hasPageAccess,
     invoiceReminders,
     invoices,
@@ -11254,7 +11674,10 @@ export default function JobsApp({
   ]);
 
   const activeWorkflowQuote = useMemo(() => {
-    if (workflowMessageTarget?.kind !== "quote_follow_up") {
+    if (
+      workflowMessageTarget?.kind !== "quote_follow_up" &&
+      workflowMessageTarget?.kind !== "quote_send"
+    ) {
       return null;
     }
 
@@ -11262,7 +11685,10 @@ export default function JobsApp({
   }, [quotes, workflowMessageTarget]);
 
   const activeWorkflowInvoice = useMemo(() => {
-    if (workflowMessageTarget?.kind !== "invoice_overdue") {
+    if (
+      workflowMessageTarget?.kind !== "invoice_overdue" &&
+      workflowMessageTarget?.kind !== "invoice_send"
+    ) {
       return null;
     }
 
@@ -11287,18 +11713,52 @@ export default function JobsApp({
         ? [activeWorkflowCustomer.phone.trim()]
         : [];
 
+    if (workflowMessageTarget?.kind === "quote_send" && activeWorkflowQuote) {
+      return {
+        title: `Send ${activeWorkflowQuote.quoteNumber} by text`,
+        description: "Review the text before sending. A secure, expiring quote link is added automatically.",
+        defaultMethod: "text" as WorkflowMessageMethod,
+        allowedMethods: ["text"] as WorkflowMessageMethod[],
+        emailRecipients: [],
+        textRecipients,
+        initialEmailSubject: "",
+        initialEmailMessage: "",
+        initialTextMessage: `Hi ${activeWorkflowQuote.customerName}, your quote ${activeWorkflowQuote.quoteNumber} from ${brandName} is ready.`,
+      };
+    }
+
+    if (workflowMessageTarget?.kind === "invoice_send" && activeWorkflowInvoice) {
+      const paymentLine = activeWorkflowInvoice.stripePaymentLinkUrl?.trim()
+        ? ` Pay securely: ${activeWorkflowInvoice.stripePaymentLinkUrl.trim()}`
+        : "";
+      return {
+        title: `Send ${activeWorkflowInvoice.invoiceNumber} by text`,
+        description: "Review the text before sending. A secure, expiring invoice link is added automatically.",
+        defaultMethod: "text" as WorkflowMessageMethod,
+        allowedMethods: ["text"] as WorkflowMessageMethod[],
+        emailRecipients: [],
+        textRecipients,
+        initialEmailSubject: "",
+        initialEmailMessage: "",
+        initialTextMessage: `Hi ${activeWorkflowInvoice.customerName}, invoice ${activeWorkflowInvoice.invoiceNumber} from ${brandName} is ready.${paymentLine}`,
+      };
+    }
     if (workflowMessageTarget?.kind === "quote_follow_up" && activeWorkflowQuote) {
       const followUpCount = (quoteFollowUps[activeWorkflowQuote.id]?.followUpCount ?? 0) + 1;
+      const quoteSentDate =
+          getInputDateValue(activeWorkflowQuote.sentAt) ||
+          activeWorkflowQuote.date;
+      const businessToday = getBusinessIsoDate(new Date(), appSettings.businessTimezone);
       const daysSinceQuote = Math.max(
           0,
-          getIsoDateDifferenceInDays(activeWorkflowQuote.date, getTodayDateInputValue())
+          getIsoDateDifferenceInDays(quoteSentDate, businessToday)
       );
       const templateValues = {
         customerName: activeWorkflowQuote.customerName,
         businessName: brandName,
         documentNumber: activeWorkflowQuote.quoteNumber,
         total: formatTemplateCurrency(activeWorkflowQuote.total, appSettings.currencyCode),
-        quoteDate: formatIsoDateLabel(activeWorkflowQuote.date),
+        quoteDate: formatIsoDateLabel(quoteSentDate),
         daysSinceQuote,
         followUpNumber: followUpCount,
       };
@@ -11308,6 +11768,7 @@ export default function JobsApp({
         description:
             "Send a quick chase message from here and the dashboard will snooze this quote automatically.",
         defaultMethod: appSettings.quoteFollowUpMethod,
+        allowedMethods: ["email", "text"] as WorkflowMessageMethod[],
         emailRecipients,
         textRecipients,
         initialEmailSubject: applyMessageTemplate(
@@ -11330,9 +11791,10 @@ export default function JobsApp({
       const dueDate =
           getInputDateValue(activeWorkflowInvoice.dueDate) ||
           addDaysToIsoDate(activeWorkflowInvoice.date, appSettings.paymentTermsDays);
+      const businessToday = getBusinessIsoDate(new Date(), appSettings.businessTimezone);
       const daysOverdue = Math.max(
           0,
-          getIsoDateDifferenceInDays(dueDate, getTodayDateInputValue())
+          getIsoDateDifferenceInDays(dueDate, businessToday)
       );
       const templateValues = {
         customerName: activeWorkflowInvoice.customerName,
@@ -11349,6 +11811,7 @@ export default function JobsApp({
         description:
             "Send the reminder from here and the dashboard will snooze this invoice until the next chase window.",
         defaultMethod: appSettings.invoiceReminderMethod,
+        allowedMethods: ["email", "text"] as WorkflowMessageMethod[],
         emailRecipients,
         textRecipients,
         initialEmailSubject: applyMessageTemplate(
@@ -11377,6 +11840,15 @@ export default function JobsApp({
     workflowMessageTarget,
   ]);
 
+  function openQuoteTextDialog(quoteId: string) {
+    if (!canUseSms || !quotes.some((quote) => quote.id === quoteId)) return;
+    setWorkflowMessageTarget({ kind: "quote_send", quoteId });
+  }
+
+  function openInvoiceTextDialog(invoiceId: string) {
+    if (!canUseSms || !invoices.some((invoice) => invoice.id === invoiceId)) return;
+    setWorkflowMessageTarget({ kind: "invoice_send", invoiceId });
+  }
   function openQuoteFollowUpDialog(quoteId: string) {
     if (!quotes.some((quote) => quote.id === quoteId)) {
       return;
@@ -11411,25 +11883,72 @@ export default function JobsApp({
       return;
     }
 
-    if (!payload.emailRecipient) {
-      throw new Error("Choose an email recipient before sending.");
+    if (payload.method === "text" && !canUseSms) {
+      throw new Error("Text messaging is not enabled for this RoundHQ account.");
+    }
+    const isQuote = workflowMessageTarget.kind === "quote_follow_up" || workflowMessageTarget.kind === "quote_send";
+    const isFollowUp = workflowMessageTarget.kind === "quote_follow_up" || workflowMessageTarget.kind === "invoice_overdue";
+    const documentId = "quoteId" in workflowMessageTarget
+      ? workflowMessageTarget.quoteId
+      : workflowMessageTarget.invoiceId;
+    const followUpNumber = workflowMessageTarget.kind === "quote_follow_up"
+      ? (quoteFollowUps[documentId]?.followUpCount ?? 0) + 1
+      : workflowMessageTarget.kind === "invoice_overdue"
+        ? (invoiceReminders[documentId]?.reminderCount ?? 0) + 1
+        : 0;
+    const recipient = payload.method === "email"
+      ? payload.emailRecipient
+      : payload.textRecipient;
+    if (!recipient) {
+      throw new Error(payload.method === "email"
+        ? "Choose an email recipient before sending."
+        : "Add the customer's mobile number before sending.");
     }
 
-    await sendCustomerEmailMessage({
-      recipient: payload.emailRecipient,
-      subject: payload.emailSubject,
-      message: payload.emailMessage,
-      businessDetails: appSettings,
+    const response = await fetch("/api/customer-messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        customerId: activeWorkflowCustomer?.id ?? null,
+        channel: payload.method === "email" ? "email" : "sms",
+        kind: workflowMessageTarget.kind === "quote_follow_up"
+          ? "quote_follow_up"
+          : workflowMessageTarget.kind === "invoice_overdue"
+            ? "invoice_follow_up"
+            : isQuote
+              ? "quote"
+              : "invoice",
+        recipient,
+        subject: payload.method === "email" ? payload.emailSubject : undefined,
+        body: payload.method === "email" ? payload.emailMessage : payload.textMessage,
+        relatedType: isQuote ? "quote" : "invoice",
+        relatedId: documentId,
+        occurrence: isFollowUp
+          ? `manual-follow-up:${followUpNumber}`
+          : `manual-document:${Math.floor(Date.now() / 600_000)}`,
+        includeDocumentLink: true,
+      }),
     });
+    const result = await response.json().catch(() => null) as
+      | { error?: string; processingError?: string; message?: { status?: string } }
+      | null;
+    if (!response.ok || result?.processingError || result?.message?.status === "failed") {
+      throw new Error(
+        result?.error || result?.processingError || "Unable to send the message."
+      );
+    }
 
     if (workflowMessageTarget.kind === "quote_follow_up") {
       await logQuoteFollowUpSent(workflowMessageTarget.quoteId);
-    } else {
+    } else if (workflowMessageTarget.kind === "invoice_overdue") {
       await logInvoiceReminderSent(workflowMessageTarget.invoiceId);
+    } else if (workflowMessageTarget.kind === "quote_send") {
+      await markQuoteSent(workflowMessageTarget.quoteId, { method: "text", recipient });
+    } else {
+      await markInvoiceSent(workflowMessageTarget.invoiceId, { method: "text", recipient });
     }
 
     setWorkflowMessageTarget(null);
-
   }
 
   useEffect(() => {
@@ -11442,10 +11961,11 @@ export default function JobsApp({
         return;
       }
 
-      const today = getTodayDateInputValue();
+      const today = getBusinessIsoDate(new Date(), appSettings.businessTimezone);
       const dueTemplates = recurringInvoiceTemplates.filter(
           (template) =>
               template.isActive &&
+              !template.deletedAt &&
               Boolean(getInputDateValue(template.nextSendDate)) &&
               getInputDateValue(template.nextSendDate) <= today
       );
@@ -11460,6 +11980,9 @@ export default function JobsApp({
         let workingInvoices = [...invoices];
 
         for (const template of dueTemplates) {
+          if (!activeRecurringInvoiceTemplateIdsRef.current.has(template.id)) {
+            continue;
+          }
           let nextSendDate = getInputDateValue(template.nextSendDate);
           let nextDueDate =
               getInputDateValue(template.nextDueDate) ||
@@ -11474,6 +11997,9 @@ export default function JobsApp({
           let updatedTemplate = { ...template };
 
           while (nextSendDate && nextSendDate <= today) {
+            if (!activeRecurringInvoiceTemplateIdsRef.current.has(template.id)) {
+              break;
+            }
             const linkedCustomer =
                 template.customerId != null
                     ? customerMap.get(template.customerId) ?? null
@@ -11539,9 +12065,10 @@ export default function JobsApp({
           }
 
           if (
-              updatedTemplate.nextSendDate !== template.nextSendDate ||
-              updatedTemplate.nextDueDate !== template.nextDueDate ||
-              updatedTemplate.lastGeneratedDate !== template.lastGeneratedDate
+              activeRecurringInvoiceTemplateIdsRef.current.has(template.id) &&
+              (updatedTemplate.nextSendDate !== template.nextSendDate ||
+                updatedTemplate.nextDueDate !== template.nextDueDate ||
+                updatedTemplate.lastGeneratedDate !== template.lastGeneratedDate)
           ) {
             await saveRecurringInvoiceTemplate(updatedTemplate);
           }
@@ -11720,6 +12247,8 @@ export default function JobsApp({
     }
 
     const { quote, existingJob } = context;
+    const customer =
+        quote.customerId != null ? customerMap.get(quote.customerId) ?? null : null;
     const defaultQuoteAssignment = getDefaultJobAssignment();
 
     if (!navigateToPage("schedule")) {
@@ -11731,6 +12260,7 @@ export default function JobsApp({
       quoteNumber: quote.quoteNumber,
       title: existingJob?.title?.trim() || `Quoted Work - ${quote.customerName}`,
       customerName: quote.customerName,
+      customerEmail: customer ? getCustomerEmailAddresses(customer)[0] : undefined,
       notes: quote.notes ?? existingJob?.notes ?? "",
       scheduledDate: existingJob?.date,
       startTime: existingJob?.startTime,
@@ -11748,7 +12278,7 @@ export default function JobsApp({
     for (let offset = 0; offset < searchDays; offset += 1) {
       const date = new Date(today);
       date.setDate(today.getDate() + offset);
-      const panelState = getTodayPanelState(date, defaultRotationWeeks);
+      const panelState = getTodayPanelState(date, defaultRotationWeeks, appSettings.businessTimezone);
 
       if (!panelState.selectedDay) {
         continue;
@@ -11885,7 +12415,8 @@ export default function JobsApp({
 
   async function sendSchedulingNotifications(
       quote: Quote,
-      decision: SchedulingDecision
+      decision: SchedulingDecision,
+      options: { sendCustomer?: boolean; sendOperator?: boolean } = {}
   ) {
     const result: {
       customerEmailSent: boolean;
@@ -11896,6 +12427,8 @@ export default function JobsApp({
       customerEmailSent: false,
       operatorEmailSent: false,
     };
+    const sendCustomer = options.sendCustomer !== false;
+    const sendOperator = options.sendOperator !== false;
     const customer =
         quote.customerId != null ? customerMap.get(quote.customerId) ?? null : null;
     const customerRecipient = customer
@@ -11920,7 +12453,7 @@ export default function JobsApp({
       businessPhone: appSettings.businessPhone,
     });
 
-    if (customerRecipient) {
+    if (sendCustomer && customerRecipient) {
       try {
         await sendCustomerEmailMessage({
           recipient: customerRecipient,
@@ -11934,11 +12467,11 @@ export default function JobsApp({
             ? error.message
             : "Unable to send customer scheduling email.";
       }
-    } else {
+    } else if (sendCustomer) {
       result.customerEmailError = "No customer email address saved.";
     }
 
-    if (operatorRecipient) {
+    if (sendOperator && operatorRecipient) {
       try {
         await sendCustomerEmailMessage({
           recipient: operatorRecipient,
@@ -11952,7 +12485,7 @@ export default function JobsApp({
             ? error.message
             : "Unable to send operator scheduling email.";
       }
-    } else {
+    } else if (sendOperator) {
       result.operatorEmailError = "No operator email address configured.";
     }
 
@@ -12542,12 +13075,14 @@ export default function JobsApp({
       startTime,
       finishTime,
       assignedStaffId,
+      sendCustomerConfirmation,
     }: {
       quoteId: string;
       date: string;
       startTime: string;
       finishTime: string;
       assignedStaffId?: number | null;
+      sendCustomerConfirmation: boolean;
     }) {
     const context = getQuoteSchedulingContext(quoteId);
 
@@ -12569,6 +13104,74 @@ export default function JobsApp({
                         : undefined,
               }
             : getDefaultJobAssignment();
+    const manualDecision: SchedulingDecision = {
+      status: "scheduled",
+      effectiveMode: "suggest",
+      reason: "next_available",
+      reasonLabel: "scheduled manually",
+      slot: {
+        date,
+        startTime: trimmedStartTime,
+        finishTime: trimmedFinishTime,
+      },
+      estimatedDurationMinutes: quote.estimatedDurationMinutes ?? null,
+      workType: quote.workType,
+      postcode: getSchedulingQuotePostcode(quote),
+      rejectedCandidates: [],
+    };
+    const customer =
+        quote.customerId != null ? customerMap.get(quote.customerId) ?? null : null;
+    const customerRecipient = customer
+        ? getCustomerEmailAddresses(customer)[0]
+        : undefined;
+
+    async function finishManualQuoteScheduling() {
+      const emailStatus = sendCustomerConfirmation
+          ? await sendSchedulingNotifications(quote, manualDecision, {
+              sendCustomer: true,
+              sendOperator: false,
+            })
+          : undefined;
+
+      appendQuoteHistory(
+          quote.id,
+          createDocumentHistoryEntry(
+              "updated",
+              `Scheduled quote ${quote.quoteNumber} for ${date} ${trimmedStartTime}-${trimmedFinishTime}.`
+          )
+      );
+
+      if (emailStatus?.customerEmailSent) {
+        appendQuoteHistory(
+            quote.id,
+            createDocumentHistoryEntry(
+                "sent",
+                `Sent schedule confirmation by email${
+                    customerRecipient ? ` to ${customerRecipient}` : ""
+                }.`,
+                { method: "email", recipient: customerRecipient }
+            )
+        );
+      }
+
+      addSchedulingAuditLog(
+          buildSchedulingAuditLog(quote, manualDecision, emailStatus)
+      );
+      setPendingQuoteSchedule(null);
+
+      if (sendCustomerConfirmation) {
+        window.alert(
+            emailStatus?.customerEmailSent
+                ? "Job scheduled and the customer confirmation email was sent."
+                : `Job scheduled, but the customer confirmation email was not sent. ${
+                    emailStatus?.customerEmailError ||
+                    "Check the customer email and email settings."
+                }`
+        );
+      }
+
+      return true;
+    }
 
     if (existingJob) {
       const updatedJob: ScheduledJob = {
@@ -12613,8 +13216,7 @@ export default function JobsApp({
         return false;
       }
 
-      setPendingQuoteSchedule(null);
-      return true;
+      return finishManualQuoteScheduling();
     }
 
     const newJob: ScheduledJob = {
@@ -12657,8 +13259,7 @@ export default function JobsApp({
       return false;
     }
 
-    setPendingQuoteSchedule(null);
-    return true;
+    return finishManualQuoteScheduling();
   }
 
   async function acceptSchedulingRecommendation(recommendationId: string) {
@@ -12969,13 +13570,23 @@ export default function JobsApp({
       paymentDate: string | null
   ) {
     const existingVisit = visitLogs.find((visit) => visitIdsMatch(visit.id, visitId));
-    if (!existingVisit) return;
+    const normalizedPaymentDate = paymentDate ? getInputDateValue(paymentDate) : null;
+
+    if (!existingVisit) {
+      throw new Error(
+          "Unable to attach the accepted statement payment because its visit could not be found."
+      );
+    }
+
+    if (paymentDate && !normalizedPaymentDate) {
+      throw new Error("Unable to save the visit payment because its payment date is invalid.");
+    }
 
     await persistVisit({
       ...existingVisit,
-      paymentStatus: paymentDate ? "Paid" : "Not Paid",
-      paidAt: paymentDate ? toStoredDateTime(paymentDate) : null,
-      paid: Boolean(paymentDate),
+      paymentStatus: normalizedPaymentDate ? "Paid" : "Not Paid",
+      paidAt: normalizedPaymentDate ? toStoredDateTime(normalizedPaymentDate) : null,
+      paid: Boolean(normalizedPaymentDate),
     });
 
     setPendingCashPayment(existingVisit.customerId, false);
@@ -13354,17 +13965,16 @@ export default function JobsApp({
 
       for (const allocation of row.selectedAllocations) {
         const isPartialAllocation = allocation.isPartial === true;
+        const profilePaymentDateUpdate = getAcceptedProfilePaymentDateUpdate(
+            row,
+            allocation
+        );
 
-        if (
-            allocation.type === "monthly_payment" &&
-            allocation.targetId &&
-            row.selectedCustomerId != null &&
-            !isPartialAllocation
-        ) {
+        if (profilePaymentDateUpdate?.type === "monthly_payment") {
           await saveMonthlyPaymentDate(
-              row.selectedCustomerId,
-              allocation.targetId,
-              allocation.paymentDate ?? row.transactionDate
+              profilePaymentDateUpdate.customerId,
+              profilePaymentDateUpdate.targetId,
+              profilePaymentDateUpdate.paymentDate
           );
           auditEvents.push({
             id: crypto.randomUUID(),
@@ -13380,10 +13990,10 @@ export default function JobsApp({
           continue;
         }
 
-        if (allocation.type === "visit" && allocation.targetId && !isPartialAllocation) {
+        if (profilePaymentDateUpdate?.type === "visit") {
           await saveVisitPaymentDate(
-              allocation.targetId,
-              allocation.paymentDate ?? row.transactionDate
+              profilePaymentDateUpdate.targetId,
+              profilePaymentDateUpdate.paymentDate
           );
           auditEvents.push({
             id: crypto.randomUUID(),
@@ -13934,6 +14544,16 @@ export default function JobsApp({
         setPendingCashPayment(customerId, false);
       }
 
+
+      if (nextStatus === "completed" && existingVisit.status !== "completed") {
+        try {
+          await sendServiceRoundCompletionText(customer, persistedVisit);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "The completion text could not be sent.";
+          setDatabaseError(`The service round was marked complete, but ${message}`);
+        }
+      }
+
       return;
     }
 
@@ -13974,6 +14594,14 @@ export default function JobsApp({
       setPendingCashPayment(customerId, false);
     }
 
+    if (nextStatus === "completed") {
+      try {
+        await sendServiceRoundCompletionText(customer, persistedVisit);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "The completion text could not be sent.";
+        setDatabaseError(`The service round was marked complete, but ${message}`);
+      }
+    }
   }
 
   async function setVisitPaidStatus(visitId: number | string, paid: boolean) {
@@ -14042,6 +14670,29 @@ export default function JobsApp({
             ? getExpandedNavSections(null)
             : getExpandedNavSections(sectionTitle)
     );
+  }
+
+  function showDashboardToday() {
+    const panel = getTodayPanelState(
+        new Date(),
+        activeRotationWeeks,
+        appSettings.businessTimezone
+    );
+    if (!panel.selectedDay) return;
+    manualDashboardDateSelectionRef.current = false;
+    setTodayReferenceDate(new Date());
+    setSelectedWeek(panel.week);
+    setSelectedDay(panel.selectedDay);
+  }
+
+  function selectDashboardWeek(week: string) {
+    manualDashboardDateSelectionRef.current = true;
+    setSelectedWeek(week as WeekName);
+  }
+
+  function selectDashboardDay(day: string) {
+    manualDashboardDateSelectionRef.current = true;
+    setSelectedDay(day as DayName);
   }
 
   function navigateToPage(nextPage: PageKey) {
@@ -15439,8 +16090,13 @@ export default function JobsApp({
                       showJobsWidget={appSettings.showJobsWidget}
                       showUnpaidWidget={appSettings.showUnpaidWidget}
                       showRecentActivityWidget={appSettings.showRecentActivityWidget}
+                      showVatThresholdCard={appSettings.vatThresholdCardEnabled}
+                      vatRegistered={appSettings.vatRegistered}
+                      vatThresholdAmount={appSettings.vatThresholdAmount}
+                      vatWarningPercent={appSettings.vatWarningPercent}
+                      businessTimezone={appSettings.businessTimezone}
                       aiReceptionistStats={
-                        SHOW_AI_RECEPTIONIST_UI && canManageAiReceptionistSettings
+                        canManageAiReceptionistSettings
                           ? aiReceptionistStats
                           : null
                       }
@@ -15490,8 +16146,9 @@ export default function JobsApp({
                       }
                       weekOptions={activeWeekOptions}
                       dayOptions={DAY_OPTIONS}
-                      onWeekChange={(week) => setSelectedWeek(week as WeekName)}
-                      onDayChange={(day) => setSelectedDay(day as DayName)}
+                      onWeekChange={selectDashboardWeek}
+                      onDayChange={selectDashboardDay}
+                      onToday={showDashboardToday}
                       onOpenCustomer={
                           hasPageAccess("customerProfile") ? openCustomerProfile : undefined
                       }
@@ -15511,6 +16168,16 @@ export default function JobsApp({
                               ? openInvoiceReminderDialog
                               : undefined
                       }
+                  />
+              )}
+
+              {page === "followUp" && (
+                  <FollowUpPage
+                      items={dashboardAttentionItems}
+                      onOpenQuote={openEditQuoteForm}
+                      onOpenInvoice={openEditInvoiceForm}
+                      onSendQuoteFollowUp={openQuoteFollowUpDialog}
+                      onSendInvoiceReminder={openInvoiceReminderDialog}
                   />
               )}
 
@@ -15566,6 +16233,8 @@ export default function JobsApp({
                         updateScheduledJobChecklist(selectedScheduledJob.id, key, checked)
                       }
                       onToggleCompleted={toggleScheduledJobCompleted}
+                      completionMessagesEnabled={canUseSms && appSettings.autoSendVisitCompletionTexts}
+                      onRetryCompletionText={retryScheduledJobCompletionText}
                       onDeleteJob={deleteScheduledJobRecord}
                       onSaveJob={saveScheduledJobRecord}
                       onEditQuote={openEditQuoteForm}
@@ -15840,6 +16509,9 @@ export default function JobsApp({
                       customers={customers}
                       leadsReady={workflowTablesReady.customerLeads}
                       businessName={getBusinessDisplayName(appSettings)}
+                      showAiAssistantDetails={
+                        customerFeatureAccess.aiReceptionist
+                      }
                       onRefresh={refreshCustomerLeads}
                       onSendEmailReply={sendCustomerLeadEmailReply}
                       onConvertToCustomer={convertCustomerLeadToCustomer}
@@ -15925,6 +16597,7 @@ export default function JobsApp({
                       allowQuoteConversionWorkflows={hasGrowthPlan}
                       onMarkSent={markQuoteSent}
                       onMarkRead={markQuoteRead}
+                      onSendText={canUseSms ? openQuoteTextDialog : undefined}
                   />
                 )}
 
@@ -16069,6 +16742,7 @@ export default function JobsApp({
                       onMarkSent={markInvoiceSent}
                       onMarkRead={markInvoiceRead}
                       onCreatePaymentLink={createInvoicePaymentLink}
+                      onSendText={canUseSms ? openInvoiceTextDialog : undefined}
                       onSaveRecurringTemplate={saveRecurringInvoiceTemplate}
                       onDeleteRecurringTemplate={deleteRecurringInvoiceTemplate}
                   />
@@ -16169,15 +16843,14 @@ export default function JobsApp({
                       accountEmail={currentUserEmail}
                       showGrowthSettings={hasGrowthPlan}
                       workspaceName={supportAccess?.workspaceName ?? workspaceName}
-                      aiReceptionistSettings={
-                          SHOW_AI_RECEPTIONIST_UI ? aiReceptionistSettings : null
+                      smsEntitlement={activeSmsEntitlement}
+                      onSmsEntitlementChange={setActiveSmsEntitlement}
+                      aiReceptionistSettings={aiReceptionistSettings}
+                      aiReceptionistRealtimeReadiness={
+                        aiReceptionistRealtimeReadiness
                       }
-                      canManageAiReceptionistSettings={
-                          SHOW_AI_RECEPTIONIST_UI && canManageAiReceptionistSettings
-                      }
-                      aiReceptionistCallHistory={
-                          SHOW_AI_RECEPTIONIST_UI ? aiReceptionistCallHistory : null
-                      }
+                      canManageAiReceptionistSettings={canManageAiReceptionistSettings}
+                      aiReceptionistCallHistory={aiReceptionistCallHistory}
                       exportData={{
                         customers,
                         quotes,
@@ -16250,6 +16923,7 @@ export default function JobsApp({
                       initialEmailSubject={workflowMessageDialogConfig.initialEmailSubject}
                       initialEmailMessage={workflowMessageDialogConfig.initialEmailMessage}
                       initialTextMessage={workflowMessageDialogConfig.initialTextMessage}
+                      allowedMethods={workflowMessageDialogConfig.allowedMethods}
                       onClose={() => setWorkflowMessageTarget(null)}
                       onSend={sendWorkflowAttentionMessage}
                   />

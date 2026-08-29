@@ -56,6 +56,25 @@ const {
   path.join(projectRoot, "lib", "ai-receptionist", "realtime", "openai.ts")
 );
 const {
+  buildOpenAiRealtimeCallAcceptPayload,
+  buildOpenAiRealtimeInitialGreetingEvent,
+  buildOpenAiRealtimeSipUri,
+  decodeRoundHqCallReference,
+  encodeRoundHqCallReference,
+  getOpenAiRealtimeSipConfig,
+  getOpenAiRealtimeSipReadiness,
+  getRoundHqCallReferenceFromSipHeaders,
+  normalizeOpenAiRealtimeIncomingCall,
+} = require(
+  path.join(
+    projectRoot,
+    "lib",
+    "ai-receptionist",
+    "realtime",
+    "openai-sip.ts"
+  )
+);
+const {
   buildOpenAiAudioAppendEventFromTwilio,
   buildTwilioMediaEventFromOpenAiDelta,
   normalizeTwilioMediaStreamEvent,
@@ -112,6 +131,9 @@ const settings = {
   twilioAuthToken: "twilio-secret",
   twilioAuthTokenConfigured: true,
   realtimeEnabled: true,
+  voiceAccent: "scottish",
+  customConversationEnabled: false,
+  conversationInstructions: "",
   transferToNumber: "+447700900123",
   businessHoursEnabled: true,
   businessHours,
@@ -295,6 +317,31 @@ assert.equal(leadState.phone, "07712 345678");
 assert.equal(leadState.service_required, "Hedge trimming");
 assert.match(leadState.address, /12 High Street/i);
 
+let callerOnlyState = createEmptyAiReceptionistLeadState();
+callerOnlyState = updateAiReceptionistLeadStateFromTranscript(callerOnlyState, {
+  speaker: "caller",
+  text:
+    "I'm an AI virtual receptionist. Garden maintenance. My address is 18 Calderwood Road, East Kilbride, G74 3AB.",
+});
+assert.equal(
+  callerOnlyState.name,
+  "",
+  "assistant self-description must never become the caller name"
+);
+assert.equal(
+  callerOnlyState.address,
+  "18 Calderwood Road, East Kilbride, G74 3AB"
+);
+callerOnlyState = updateAiReceptionistLeadStateFromTranscript(callerOnlyState, {
+  speaker: "caller",
+  text: "I actually need pressure washing on the driveway.",
+});
+assert.equal(
+  callerOnlyState.service_required,
+  "Pressure washing",
+  "a specific service should replace an earlier generic classification"
+);
+
 const transcript = formatAiReceptionistRealtimeTranscript([
   { speaker: "ai", text: "Hello, thanks for calling.", atSeconds: 1 },
   { speaker: "caller", text: "Hi, I need my hedge cut.", atSeconds: 4 },
@@ -318,6 +365,105 @@ assert.equal(openAiEvent.type, "session.update");
 assert.equal(openAiEvent.session.audio.input.format.type, "audio/pcmu");
 assert.match(openAiEvent.session.instructions, /structured data live/);
 
+const sipConfig = getOpenAiRealtimeSipConfig({
+  OPENAI_API_KEY: "sk-test",
+  OPENAI_PROJECT_ID: "proj_roundhq_test",
+  OPENAI_WEBHOOK_SECRET: "whsec_test",
+});
+const readySipConfiguration = getOpenAiRealtimeSipReadiness({
+  OPENAI_API_KEY: "sk-test",
+  OPENAI_PROJECT_ID: "proj_roundhq_test",
+  OPENAI_WEBHOOK_SECRET: "whsec_test",
+});
+assert.equal(readySipConfiguration.ready, true);
+assert.deepEqual(
+  getOpenAiRealtimeSipReadiness({
+    OPENAI_API_KEY: "key_tracking_id",
+    OPENAI_PROJECT_ID: "project-name",
+  }),
+  {
+    ready: false,
+    apiKeyConfigured: true,
+    apiKeyValid: false,
+    projectIdConfigured: true,
+    projectIdValid: false,
+    webhookSecretConfigured: false,
+  }
+);
+assert.equal(sipConfig.projectId, "proj_roundhq_test");
+assert.equal(sipConfig.model, "gpt-realtime-2.1");
+assert.equal(sipConfig.voice, "cedar");
+assert.equal(
+  buildOpenAiRealtimeSipUri(sipConfig.projectId),
+  "sip:proj_roundhq_test@sip.api.openai.com;transport=tls"
+);
+
+const encodedCallReference = encodeRoundHqCallReference("telnyx-call-123");
+assert.equal(
+  decodeRoundHqCallReference(encodedCallReference),
+  "telnyx-call-123"
+);
+const incomingSipCall = normalizeOpenAiRealtimeIncomingCall({
+  call_id: "rtc_test",
+  sip_headers: [
+    {
+      name: "User-to-User",
+      value: encodedCallReference,
+    },
+  ],
+});
+assert.equal(incomingSipCall.callId, "rtc_test");
+assert.equal(
+  getRoundHqCallReferenceFromSipHeaders(incomingSipCall.sipHeaders),
+  "telnyx-call-123"
+);
+
+const acceptPayload = buildOpenAiRealtimeCallAcceptPayload(
+  settings,
+  sipConfig
+);
+assert.equal(acceptPayload.type, "realtime");
+assert.equal(acceptPayload.model, "gpt-realtime-2.1");
+assert.deepEqual(acceptPayload.output_modalities, ["audio"]);
+assert.equal(acceptPayload.audio.output.voice, "cedar");
+assert.equal(acceptPayload.audio.output.speed, 0.95);
+assert.equal(acceptPayload.max_output_tokens, 1024);
+assert.equal(acceptPayload.audio.input.turn_detection.create_response, true);
+assert.equal(acceptPayload.audio.input.turn_detection.threshold, 0.7);
+assert.equal(acceptPayload.audio.input.turn_detection.prefix_padding_ms, 300);
+assert.equal(acceptPayload.audio.input.turn_detection.silence_duration_ms, 800);
+assert.equal(
+  acceptPayload.audio.input.turn_detection.interrupt_response,
+  false
+);
+assert.match(acceptPayload.instructions, /AI virtual receptionist/i);
+
+assert.match(acceptPayload.instructions, /natural, modern Scottish accent/i);
+assert.match(
+  acceptPayload.instructions,
+  /Do not drift into American pronunciation/i
+);
+
+const customConversationPrompt = buildAiReceptionistRealtimeSystemPrompt({
+  ...settings,
+  customConversationEnabled: true,
+  conversationInstructions:
+    'Start by saying "Welcome to {{business_name}}." Then ask what help is needed.',
+});
+assert.match(
+  customConversationPrompt,
+  /Customer-authored conversation instructions/
+);
+assert.match(
+  customConversationPrompt,
+  /Welcome to Cleancut Garden & Property Maintenance/
+);
+assert.doesNotMatch(customConversationPrompt, /Guided conversation flow/);
+assert.doesNotMatch(customConversationPrompt, /What is the property address/);
+
+const greetingEvent = buildOpenAiRealtimeInitialGreetingEvent();
+assert.equal(greetingEvent.type, "response.create");
+assert.match(greetingEvent.response.instructions, /selected conversation flow/i);
 const realtimeTwiML = buildRealtimeIncomingCallTwiML({
   settings,
   mediaStreamUrl:

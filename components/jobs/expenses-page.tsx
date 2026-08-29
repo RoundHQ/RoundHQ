@@ -141,7 +141,8 @@ function formatDisplayDate(value: string) {
     return value || "-";
   }
 
-  return parsedDate.toLocaleDateString(undefined, {
+  return parsedDate.toLocaleDateString("en-GB", {
+    timeZone: "Europe/London",
     day: "2-digit",
     month: "short",
     year: "numeric",

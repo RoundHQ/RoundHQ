@@ -1,6 +1,6 @@
 "use client";
 
-import { getCustomerDisplayAddress } from "@/components/jobs/helpers";
+import { formatStoredDate, getCustomerDisplayAddress } from "@/components/jobs/helpers";
 import {
   DEFAULT_ROTATION_WEEKS,
   getRotationCycleLabel,
@@ -359,7 +359,7 @@ export default function RoundsPage({
                         Visit Date
                       </p>
                       <p className="mt-2 text-sm font-semibold text-slate-900">
-                        {new Date(visit.visitDate).toLocaleDateString()}
+                        {formatStoredDate(visit.visitDate)}
                       </p>
                     </div>
 

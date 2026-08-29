@@ -3,13 +3,16 @@
 import { revalidatePath } from "next/cache";
 import {
   getDefaultAiReceptionistSettings,
+  getOrCreateAiReceptionistSettings,
   mapAiReceptionistSettingsToRow,
+  normalizeAiReceptionistVoiceAccent,
   normalizeAiReceptionistBusinessHours,
   normalizeAiReceptionistList,
   normalizeAiReceptionistSettings,
   validateAiReceptionistSettings,
   type AiReceptionistSettings,
 } from "@/lib/ai-receptionist-settings";
+import { isCustomerFeatureEnabled } from "@/lib/customer-account";
 import { requireWorkspaceAdmin } from "@/lib/workspace-admin";
 
 export type AiReceptionistSettingsActionState = {
@@ -39,51 +42,56 @@ function parseJsonField(formData: FormData, key: string, fallback: unknown) {
   }
 }
 
-function buildAiReceptionistSettingsFromFormData(formData: FormData) {
-  const defaults = getDefaultAiReceptionistSettings();
-
+function buildAiReceptionistSettingsFromFormData(
+  formData: FormData,
+  currentSettings: AiReceptionistSettings
+) {
   return normalizeAiReceptionistSettings({
+    ...currentSettings,
     enabled: formData.get("enabled") === "on",
     businessName: getText(formData, "business_name"),
     greetingMessage: getText(formData, "greeting_message"),
     fallbackPhoneNumber: getText(formData, "fallback_phone_number"),
     notificationEmail: getText(formData, "notification_email"),
-    telephonyProvider:
-      getText(formData, "telephony_provider") === "twilio" ? "twilio" : "telnyx",
-    telnyxPhoneNumber: getText(formData, "telnyx_phone_number"),
-    telnyxConnectionId: getText(formData, "telnyx_connection_id"),
-    telnyxMessagingProfileId: getText(formData, "telnyx_messaging_profile_id"),
-    telnyxPublicKey: getText(formData, "telnyx_public_key"),
-    telnyxApiKeyConfigured:
-      formData.get("telnyx_api_key_configured") === "true" ||
-      Boolean(getText(formData, "telnyx_api_key")),
-    twilioAccountSid: getText(formData, "twilio_account_sid"),
-    twilioPhoneNumber: getText(formData, "twilio_phone_number"),
-    twilioAuthTokenConfigured:
-      formData.get("twilio_auth_token_configured") === "true" ||
-      Boolean(getText(formData, "twilio_auth_token")),
+    telephonyProvider: "telnyx",
     realtimeEnabled: false,
+    voiceAccent: normalizeAiReceptionistVoiceAccent(
+      getText(formData, "voice_accent")
+    ),
+    customConversationEnabled: false,
+    conversationInstructions: getText(
+      formData,
+      "conversation_instructions"
+    ),
     transferToNumber: getText(formData, "transfer_to_number"),
     newLeadSmsEnabled: formData.get("new_lead_sms_enabled") === "on",
     newLeadSmsPhoneNumber: getText(formData, "new_lead_sms_phone_number"),
     businessHoursEnabled: formData.get("business_hours_enabled") === "on",
     businessHours: normalizeAiReceptionistBusinessHours(
-      parseJsonField(formData, "business_hours_json", defaults.businessHours)
+      parseJsonField(
+        formData,
+        "business_hours_json",
+        currentSettings.businessHours
+      )
     ),
     questionsToAsk: normalizeAiReceptionistList(
-      parseJsonField(formData, "questions_to_ask_json", defaults.questionsToAsk),
+      parseJsonField(
+        formData,
+        "questions_to_ask_json",
+        currentSettings.questionsToAsk
+      ),
       []
     ),
     emergencyKeywords: normalizeAiReceptionistList(
       parseJsonField(
         formData,
         "emergency_keywords_json",
-        defaults.emergencyKeywords
+        currentSettings.emergencyKeywords
       ),
       []
     ),
     consentMessage: getText(formData, "consent_message"),
-    leadSourceLabel: getText(formData, "lead_source_label") || "AI Receptionist",
+    leadSourceLabel: getText(formData, "lead_source_label") || "Voicemail",
   });
 }
 
@@ -91,59 +99,53 @@ export async function updateAiReceptionistSettingsAction(
   _previousState: AiReceptionistSettingsActionState,
   formData: FormData
 ): Promise<AiReceptionistSettingsActionState> {
-  const draftSettings = buildAiReceptionistSettingsFromFormData(formData);
-  const actionIntent = getText(formData, "action_intent");
-  const newTelnyxApiKey = getText(formData, "telnyx_api_key");
-  const newTwilioAuthToken = getText(formData, "twilio_auth_token");
   const { supabase, organizationId } = await requireWorkspaceAdmin(
     "/dashboard?page=settings&tab=ai-receptionist"
   );
-  const { data: storedSecrets } = await supabase
-    .from("ai_receptionist_settings")
-    .select("telnyx_api_key,twilio_auth_token")
-    .eq("organization_id", organizationId)
-    .maybeSingle();
-  const storedSecretRow = (storedSecrets ?? {}) as {
-    telnyx_api_key?: string | null;
-    twilio_auth_token?: string | null;
-  };
-  let telnyxApiKey = storedSecretRow.telnyx_api_key ?? "";
-  let twilioAuthToken = storedSecretRow.twilio_auth_token ?? "";
+  const featureEnabled = await isCustomerFeatureEnabled(
+    supabase,
+    organizationId,
+    "aiReceptionist"
+  );
 
-  try {
-    const { encryptAiReceptionistSecretForStorage } = await import(
-      "@/lib/ai-receptionist/secret-encryption"
-    );
+  if (!featureEnabled) {
+    const settings = getDefaultAiReceptionistSettings();
 
-    if (newTelnyxApiKey) {
-      telnyxApiKey = encryptAiReceptionistSecretForStorage(newTelnyxApiKey);
-    }
+    return {
+      ok: false,
+      message: "AI Receptionist is not enabled for this workspace.",
+      errors: ["Ask the RoundHQ platform owner to enable the AI Receptionist pilot."],
+      settings,
+    };
+  }
 
-    if (newTwilioAuthToken) {
-      twilioAuthToken = encryptAiReceptionistSecretForStorage(newTwilioAuthToken);
-    }
-  } catch (error) {
+  const currentSettings = await getOrCreateAiReceptionistSettings(
+    supabase,
+    organizationId
+  );
+
+  if (!currentSettings.schemaReady) {
     const message =
-      error instanceof Error && error.message.trim()
-        ? error.message
-        : "Unable to encrypt AI Receptionist provider secrets.";
+      currentSettings.schemaError ||
+      "AI Receptionist settings are not ready in this workspace.";
 
     return {
       ok: false,
       message,
       errors: [message],
-      settings: draftSettings,
+      settings: currentSettings,
     };
   }
 
-  const settings = normalizeAiReceptionistSettings({
-    ...draftSettings,
-    telnyxApiKeyConfigured: Boolean(telnyxApiKey),
-    twilioAuthTokenConfigured: Boolean(twilioAuthToken),
-  });
+  const settings = buildAiReceptionistSettingsFromFormData(
+    formData,
+    currentSettings
+  );
+  const actionIntent = getText(formData, "action_intent");
 
   if (actionIntent === "send_test_sms") {
-    const to = getText(formData, "test_sms_number") || settings.newLeadSmsPhoneNumber;
+    const to =
+      getText(formData, "test_sms_number") || settings.newLeadSmsPhoneNumber;
 
     if (!to) {
       return {
@@ -183,15 +185,10 @@ export async function updateAiReceptionistSettingsAction(
     };
   }
 
-  const { error } = await supabase.from("ai_receptionist_settings").upsert(
-    mapAiReceptionistSettingsToRow(settings, organizationId, {
-      telnyxApiKey,
-      twilioAuthToken,
-    }),
-    {
-      onConflict: "organization_id",
-    }
-  );
+  const { error } = await supabase
+    .from("ai_receptionist_settings")
+    .update(mapAiReceptionistSettingsToRow(settings, organizationId))
+    .eq("organization_id", organizationId);
 
   if (error) {
     return {
@@ -206,7 +203,7 @@ export async function updateAiReceptionistSettingsAction(
 
   return {
     ok: true,
-    message: "AI Receptionist settings saved.",
+    message: "Voicemail-to-lead settings saved.",
     errors: [],
     settings: {
       ...settings,

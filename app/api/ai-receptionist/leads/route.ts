@@ -11,6 +11,7 @@ import {
 import { readRequestTextWithLimit } from "@/lib/ai-receptionist/request-limits";
 import { createClient } from "@/lib/supabase/server";
 import { ensureWorkspace } from "@/lib/workspace";
+import { isCustomerFeatureEnabled } from "@/lib/customer-account";
 
 export const runtime = "nodejs";
 const AI_RECEPTIONIST_LEAD_MAX_BODY_BYTES = 512 * 1024;
@@ -187,6 +188,19 @@ export async function POST(request: NextRequest) {
 
     if (!auth.ok) {
       return auth.response;
+    }
+
+    const featureEnabled = await isCustomerFeatureEnabled(
+      auth.supabase,
+      auth.organizationId,
+      "aiReceptionist"
+    );
+
+    if (!featureEnabled) {
+      return NextResponse.json(
+        { error: "AI Receptionist is not enabled for this workspace." },
+        { status: 403 }
+      );
     }
 
     const result = await createAiReceptionistLeadFromPayload({

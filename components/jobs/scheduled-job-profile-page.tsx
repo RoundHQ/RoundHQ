@@ -1,6 +1,6 @@
 "use client";
 
-import { getCustomerDisplayAddress } from "./helpers";
+import { formatStoredDate, getCustomerDisplayAddress } from "./helpers";
 import type { Customer, ScheduledJob } from "./types";
 
 type Props = {
@@ -69,7 +69,7 @@ export default function ScheduledJobProfilePage({
           {job.title}
         </h1>
         <p className="mt-2 text-sm text-slate-500">
-          {new Date(job.date).toLocaleDateString()}
+          {formatStoredDate(job.date)}
         </p>
 
         <div className="mt-6 grid gap-4 md:grid-cols-2">

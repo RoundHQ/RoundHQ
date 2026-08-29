@@ -77,7 +77,10 @@ assert.deepEqual(
 );
 assert.equal(defaultSettings.businessHours.monday.start, "08:00");
 assert.equal(defaultSettings.businessHours.saturday.enabled, false);
-assert.equal(defaultSettings.leadSourceLabel, "AI Receptionist");
+assert.equal(defaultSettings.voiceAccent, "scottish");
+assert.equal(defaultSettings.customConversationEnabled, false);
+assert.equal(defaultSettings.conversationInstructions, "");
+assert.equal(defaultSettings.leadSourceLabel, "Voicemail");
 assert.equal(defaultSettings.telephonyProvider, "telnyx");
 assert.equal(defaultSettings.realtimeEnabled, false);
 
@@ -157,6 +160,11 @@ const updatedSettings = normalizeAiReceptionistSettings({
   telnyxConnectionId: "telnyx-app-1",
   telnyxMessagingProfileId: "messaging-profile-1",
   greetingMessage: "Thanks for calling RoundHQ Test Co.",
+  voiceAccent: "british",
+  customConversationEnabled: true,
+  conversationInstructions:
+    'Start with "Hello from {{business_name}}." Then ask what work is required.',
+  realtimeEnabled: true,
   consentMessage: "This call may be recorded.",
   businessHoursEnabled: true,
   questionsToAsk: ["Name?", "Service required?"],
@@ -186,8 +194,11 @@ assert.equal(writeRow.telnyx_phone_number, "+44 121 555 1001");
 assert.equal(writeRow.telnyx_connection_id, "telnyx-app-1");
 assert.equal(writeRow.telnyx_messaging_profile_id, "messaging-profile-1");
 assert.equal(writeRow.telnyx_public_key, "public-key");
+assert.equal(writeRow.voice_accent, "british");
+assert.equal(writeRow.custom_conversation_enabled, false);
+assert.match(writeRow.conversation_instructions, /Hello from/);
 assert.equal(writeRow.realtime_enabled, false);
-assert.equal(writeRow.lead_source_label, "AI Receptionist");
+assert.equal(writeRow.lead_source_label, "Voicemail");
 assert.deepEqual(writeRow.questions_to_ask, ["Name?", "Service required?"]);
 assert.deepEqual(writeRow.emergency_keywords, ["urgent", "same day"]);
 assert.equal(writeRow.business_hours_enabled, true);
@@ -222,23 +233,21 @@ const enabledWithoutQuestionsValidation = validateAiReceptionistSettings({
   enabled: true,
   businessName: "RoundHQ Test Co",
   questionsToAsk: [],
+  telnyxPhoneNumber: "+441215551001",
+  phoneProvisioningStatus: "active",
 });
-assert.equal(enabledWithoutQuestionsValidation.ok, false);
-assert.match(
-  enabledWithoutQuestionsValidation.errors.join(" "),
-  /at least one question/i
-);
+assert.equal(enabledWithoutQuestionsValidation.ok, true);
 
-const partialTwilioValidation = validateAiReceptionistSettings(
+const legacyTwilioFieldsValidation = validateAiReceptionistSettings(
   normalizeAiReceptionistSettings({
     ...defaultSettings,
     twilioAccountSid: "AC1234567890abcdef",
   })
 );
-assert.equal(partialTwilioValidation.ok, false);
-assert.match(
-  partialTwilioValidation.errors.join(" "),
-  /Account SID, Auth Token, and phone number/i
+assert.equal(
+  legacyTwilioFieldsValidation.ok,
+  true,
+  "hidden legacy provider fields should not block managed Telnyx setup"
 );
 
 const telnyxOnlyValidation = validateAiReceptionistSettings(
@@ -261,16 +270,17 @@ assert.equal(
   "Twilio should not be required for production voicemail-to-lead mode"
 );
 
-const partialTelnyxValidation = validateAiReceptionistSettings(
+const enabledWithoutManagedNumberValidation = validateAiReceptionistSettings(
   normalizeAiReceptionistSettings({
     ...defaultSettings,
-    telnyxPhoneNumber: "+441215551111",
+    enabled: true,
+    businessName: "RoundHQ Test Co",
   })
 );
-assert.equal(partialTelnyxValidation.ok, false);
+assert.equal(enabledWithoutManagedNumberValidation.ok, false);
 assert.match(
-  partialTelnyxValidation.errors.join(" "),
-  /Telnyx phone number, API key, and public key/i
+  enabledWithoutManagedNumberValidation.errors.join(" "),
+  /finish setting up the receptionist phone number/i
 );
 
 const normalizedQuestions = normalizeAiReceptionistList(
@@ -332,6 +342,7 @@ assert.equal(
 const enabledSettings = normalizeAiReceptionistSettings({
   ...updatedSettings,
   enabled: true,
+  customConversationEnabled: false,
 });
 const renderedFormHtml = renderToStaticMarkup(
   React.createElement(AiReceptionistSettingsForm, {
@@ -342,23 +353,56 @@ const renderedFormHtml = renderToStaticMarkup(
 assert.match(renderedFormHtml, /Status/);
 assert.match(renderedFormHtml, /Business Details/);
 assert.match(renderedFormHtml, /Greeting &amp; Consent/);
-assert.match(renderedFormHtml, /Questions/);
-assert.match(renderedFormHtml, /Business Hours/);
-assert.match(renderedFormHtml, /Emergency Keywords/);
-assert.match(renderedFormHtml, /Phone Connection/);
-assert.match(renderedFormHtml, /Telnyx Phone Number/);
-assert.match(renderedFormHtml, /Telnyx API Key/);
-assert.match(renderedFormHtml, /Telnyx Public Key/);
-assert.match(renderedFormHtml, /Voicemail-to-Lead mode/);
-assert.doesNotMatch(
-  renderedFormHtml,
-  /Realtime voice receptionist/,
-  "realtime live conversation should be hidden for launch"
-);
+assert.doesNotMatch(renderedFormHtml, /<h2[^>]*>Questions<\/h2>/);
+assert.doesNotMatch(renderedFormHtml, /Business Hours/);
+assert.doesNotMatch(renderedFormHtml, /Emergency Keywords/);
+assert.match(renderedFormHtml, /Voicemail number/);
+assert.match(renderedFormHtml, /Your receptionist number/);
+assert.match(renderedFormHtml, /RoundHQ manages the secure phone connection/);
+assert.doesNotMatch(renderedFormHtml, /Telnyx API Key/);
+assert.doesNotMatch(renderedFormHtml, /Telnyx Public Key/);
+assert.doesNotMatch(renderedFormHtml, /Connection \/ App ID/);
+assert.doesNotMatch(renderedFormHtml, /Answering mode/);
+assert.match(renderedFormHtml, /Voicemail-to-lead/);
+assert.doesNotMatch(renderedFormHtml, /Live AI conversation/);
+assert.doesNotMatch(renderedFormHtml, /Voice accent/);
+assert.doesNotMatch(renderedFormHtml, /Scottish/);
+assert.doesNotMatch(renderedFormHtml, /Fully custom conversation/);
 assert.match(
   renderedFormHtml,
-  /AI Receptionist is enabled and connected to Telnyx/
+  /Voicemail-to-lead is enabled on \+44 121 555 1001/
 );
+
+const renderedCustomConversationFormHtml = renderToStaticMarkup(
+  React.createElement(AiReceptionistSettingsForm, {
+    initialSettings: normalizeAiReceptionistSettings({
+      ...enabledSettings,
+      customConversationEnabled: true,
+      conversationInstructions:
+        'Start by saying "Hello from {{business_name}}." Then ask what help is needed.',
+    }),
+    workspaceName: "RoundHQ Test Co",
+  })
+);
+assert.doesNotMatch(renderedCustomConversationFormHtml, /Conversation instructions/);
+assert.doesNotMatch(
+  renderedCustomConversationFormHtml,
+  /<h2[^>]*>Questions<\/h2>/
+);
+
+const unconfiguredFormHtml = renderToStaticMarkup(
+  React.createElement(AiReceptionistSettingsForm, {
+    initialSettings: normalizeAiReceptionistSettings({
+      ...defaultSettings,
+      businessName: "RoundHQ Test Co",
+      phoneSetupMode: "call_forwarding",
+    }),
+    workspaceName: "RoundHQ Test Co",
+  })
+);
+assert.match(unconfiguredFormHtml, /Keep my existing number/);
+assert.match(unconfiguredFormHtml, /Choose a new number/);
+assert.match(unconfiguredFormHtml, /Set up call forwarding/);
 
 const renderedSettingsPageHtml = renderToStaticMarkup(
   React.createElement(SettingsPage, {
@@ -371,8 +415,8 @@ const renderedSettingsPageHtml = renderToStaticMarkup(
 );
 assert.match(
   renderedSettingsPageHtml,
-  /AI Receptionist/,
-  "AI Receptionist should render as a Settings tab"
+  /Voicemail/,
+  "Voicemail should render as a Settings tab"
 );
 assert.doesNotMatch(
   renderedSettingsPageHtml,
@@ -391,8 +435,8 @@ const renderedNonAdminSettingsPageHtml = renderToStaticMarkup(
 );
 assert.doesNotMatch(
   renderedNonAdminSettingsPageHtml,
-  /AI Receptionist/,
-  "non-admin users should not see the AI Receptionist settings tab"
+  /Voicemail/,
+  "non-admin users should not see the voicemail settings tab"
 );
 
 console.log("AI Receptionist settings tests passed.");

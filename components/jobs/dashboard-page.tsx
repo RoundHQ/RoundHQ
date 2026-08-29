@@ -71,6 +71,8 @@ import type {
 } from "./types";
 import type { PlatformAnnouncement } from "@/lib/platform-announcements";
 import type { AiReceptionistDashboardStats } from "@/lib/ai-receptionist/call-logs";
+import { formatUkDate, formatUkDateTime, getBusinessIsoDate } from "@/lib/dates";
+import { getVatThresholdSnapshot } from "@/lib/vat-threshold";
 
 type ScheduledJob = {
   id: string;
@@ -91,6 +93,10 @@ type ScheduledJob = {
 type FinancialDocument = {
   id: string;
   total?: number | null;
+  date?: string;
+  status?: string;
+  refundedAmount?: number | null;
+  voidedAt?: string | null;
 };
 
 type Props = {
@@ -115,6 +121,11 @@ type Props = {
   showUnpaidWidget: boolean;
   showRecentActivityWidget: boolean;
   aiReceptionistStats?: AiReceptionistDashboardStats | null;
+  showVatThresholdCard?: boolean;
+  vatRegistered?: boolean;
+  vatThresholdAmount?: number;
+  vatWarningPercent?: number;
+  businessTimezone?: string;
   showAdvancedInsights?: boolean;
   announcement?: PlatformAnnouncement | null;
   attentionItems: DashboardAttentionItem[];
@@ -131,6 +142,7 @@ type Props = {
   dayOptions?: string[];
   onWeekChange?: (week: string) => void;
   onDayChange?: (day: string) => void;
+  onToday?: () => void;
   onOpenCustomer?: (customerId: number) => void;
   onOpenQuote?: (quoteId: string) => void;
   onOpenInvoice?: (invoiceId: string) => void;
@@ -472,6 +484,11 @@ export default function DashboardPage({
   showWeatherWidget,
   aiReceptionistStats,
   announcement = null,
+  showVatThresholdCard = false,
+  vatRegistered = false,
+  vatThresholdAmount = 90_000,
+  vatWarningPercent = 80,
+  businessTimezone = "Europe/London",
   attentionItems,
   onGoToRounds,
   onGoToActions,
@@ -485,6 +502,7 @@ export default function DashboardPage({
   dayOptions,
   onWeekChange,
   onDayChange,
+  onToday,
   onOpenCustomer,
 }: Props) {
   const [weather, setWeather] = useState<WeatherState | null>(null);
@@ -927,6 +945,30 @@ export default function DashboardPage({
   const subtleButtonClassName =
     "inline-flex items-center justify-center gap-2 rounded-xl border border-[#e5e7eb] bg-white px-4 py-3 text-sm font-semibold text-[#071426] shadow-[0_10px_24px_rgba(7,20,38,0.05)] transition hover:-translate-y-0.5 hover:border-emerald-200 hover:text-emerald-700";
   const topSectionClassName = "space-y-3";
+  const vatSnapshot = useMemo(
+    () =>
+      getVatThresholdSnapshot({
+        invoices: invoices.map((invoice) => ({
+          id: invoice.id,
+          date: invoice.date ?? "",
+          status: invoice.status ?? "Draft",
+          total: invoice.total,
+          refundedAmount: invoice.refundedAmount,
+          voidedAt: invoice.voidedAt,
+        })),
+        asOfIsoDate: getBusinessIsoDate(new Date(), businessTimezone),
+        threshold: vatThresholdAmount,
+        warningPercentage: vatWarningPercent,
+      }),
+    [businessTimezone, invoices, vatThresholdAmount, vatWarningPercent]
+  );
+  const vatStatusClasses =
+      vatSnapshot.status === "VAT limit reached"
+        ? "bg-rose-100 text-rose-800"
+        : vatSnapshot.status === "Getting close"
+          ? "bg-amber-100 text-amber-800"
+          : "bg-emerald-100 text-emerald-800";
+  const vatCalculatedAt = formatUkDateTime(new Date(), businessTimezone);
   const showAiReceptionistStats = Boolean(aiReceptionistStats);
   const dashboardStatsGridClassName = showAiReceptionistStats
     ? "grid gap-4 sm:grid-cols-2 xl:grid-cols-6"
@@ -989,7 +1031,8 @@ export default function DashboardPage({
     },
   ];
   const dayFilters = dayOptions?.length ? dayOptions : [selectedDay];
-  const dashboardUpdatedAt = todayDate.toLocaleTimeString([], {
+  const dashboardUpdatedAt = todayDate.toLocaleTimeString("en-GB", {
+    timeZone: businessTimezone,
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -1075,7 +1118,7 @@ export default function DashboardPage({
           visit.status === "completed"
             ? `Job completed at ${customer?.name ?? "customer"}`
             : `Job marked missed at ${customer?.name ?? "customer"}`,
-        meta: new Date(visit.visitDate).toLocaleDateString(),
+        meta: formatUkDate(visit.visitDate, {}, businessTimezone),
         icon: visit.status === "completed" ? <Check size={14} /> : <CircleAlert size={14} />,
         tone:
           visit.status === "completed"
@@ -1279,7 +1322,7 @@ export default function DashboardPage({
             Today is {todayWeek}, {todayDayLabel}. You are currently viewing
           </p>
           <div className="mt-3 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div className="grid gap-2 sm:max-w-md sm:grid-cols-2 xl:min-w-[360px]">
+            <div className="flex flex-wrap gap-2">
               <select
                 value={selectedWeek}
                 onChange={(event) => onWeekChange?.(event.target.value)}
@@ -1302,8 +1345,16 @@ export default function DashboardPage({
                   </option>
                 ))}
               </select>
+              {onToday ? (
+                <button
+                  type="button"
+                  onClick={onToday}
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 text-sm font-bold text-emerald-800 transition hover:bg-emerald-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600"
+                >
+                  <Calendar size={16} /> Today
+                </button>
+              ) : null}
             </div>
-
             {onGoToCustomers ||
             onGoToQuoteForm ||
             onGoToInvoiceForm ||
@@ -1414,7 +1465,7 @@ export default function DashboardPage({
             <DashboardStatCard
               icon={<Bot size={24} />}
               value={String(aiReceptionistStats?.todayCalls ?? 0)}
-              label="AI Receptionist"
+              label="Voicemail leads"
               detail={`${aiReceptionistStats?.leadsCreated ?? 0} leads captured`}
               detailClassName="text-orange-600"
               iconClassName="bg-orange-50 text-orange-600"
@@ -1422,6 +1473,68 @@ export default function DashboardPage({
           ) : null}
         </div>
 
+
+        {showVatThresholdCard ? (
+          <section
+            aria-labelledby="vat-threshold-heading"
+            className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_16px_38px_rgba(15,23,42,0.06)]"
+          >
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">
+                  Rolling previous 12 months
+                </p>
+                <h2 id="vat-threshold-heading" className="mt-2 text-xl font-black text-slate-950">
+                  VAT taxable turnover estimate
+                </h2>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+                  Includes approved, sent, accepted, unpaid and paid invoices dated from{" "}
+                  {formatUkDate(vatSnapshot.window.start, {}, businessTimezone)} to{" "}
+                  {formatUkDate(vatSnapshot.window.end, {}, businessTimezone)}. Drafts, declined or
+                  voided invoices and recorded refunds are excluded.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {vatRegistered ? (
+                  <span className="rounded-full bg-sky-100 px-3 py-1.5 text-xs font-black text-sky-800">
+                    VAT registered
+                  </span>
+                ) : null}
+                <span className={`rounded-full px-3 py-1.5 text-xs font-black ${vatStatusClasses}`}>
+                  {vatSnapshot.status}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-4 sm:grid-cols-3">
+              <div><p className="text-xs font-bold text-slate-500">Estimated turnover</p><p className="mt-1 text-2xl font-black text-slate-950">{formatWholeMoney(vatSnapshot.turnover)}</p></div>
+              <div><p className="text-xs font-bold text-slate-500">Configured threshold</p><p className="mt-1 text-2xl font-black text-slate-950">{formatWholeMoney(vatSnapshot.threshold)}</p></div>
+              <div><p className="text-xs font-bold text-slate-500">Threshold used</p><p className="mt-1 text-2xl font-black text-slate-950">{vatSnapshot.percentage.toFixed(1)}%</p></div>
+            </div>
+
+            <div className="mt-5">
+              <div className="flex justify-between text-xs font-bold text-slate-600">
+                <span>{vatSnapshot.percentage.toFixed(1)}%</span>
+                <span>Warning at {vatSnapshot.warningPercentage}%</span>
+              </div>
+              <div
+                role="progressbar"
+                aria-label="Estimated taxable turnover against the VAT registration threshold"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(vatSnapshot.progressPercentage)}
+                className="mt-2 h-3 overflow-hidden rounded-full bg-slate-200"
+              >
+                <div className="h-full rounded-full bg-emerald-500 transition-[width]" style={{ width: `${vatSnapshot.progressPercentage}%` }} />
+              </div>
+            </div>
+
+            <div className="mt-5 flex flex-col gap-2 text-xs leading-5 text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+              <p>Estimate only, last calculated {vatCalculatedAt}. Confirm your position with HMRC or an accountant; this is not tax advice.</p>
+              <a href="https://www.gov.uk/register-for-vat" target="_blank" rel="noreferrer" className="shrink-0 font-black text-emerald-700 underline underline-offset-4 hover:text-emerald-900">HMRC VAT registration guidance</a>
+            </div>
+          </section>
+        ) : null}
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
           <section className="flex min-h-[620px] flex-col rounded-lg border border-slate-200 bg-white p-4 shadow-[0_16px_38px_rgba(15,23,42,0.06)] xl:row-span-2">
             <div className="flex flex-wrap items-center justify-between gap-3 px-1 pb-4">

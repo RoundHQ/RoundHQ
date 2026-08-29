@@ -66,6 +66,7 @@ type PendingQuoteSchedule = {
   quoteNumber: string;
   title: string;
   customerName: string;
+  customerEmail?: string;
   notes?: string;
   scheduledDate?: string;
   startTime?: string;
@@ -92,6 +93,7 @@ type Props = {
     startTime: string;
     finishTime: string;
     assignedStaffId?: number | null;
+    sendCustomerConfirmation: boolean;
   }) => void | boolean | Promise<void | boolean>;
   onClearPendingQuoteSchedule: () => void;
   onOpenJob: (jobId: string) => void;
@@ -223,7 +225,8 @@ function formatTimeValue(value?: string) {
     return value;
   }
 
-  return new Date(2000, 0, 1, hour, minute).toLocaleTimeString(undefined, {
+  return new Date(2000, 0, 1, hour, minute).toLocaleTimeString("en-GB", {
+    timeZone: "Europe/London",
     hour: "numeric",
     minute: "2-digit",
   });
@@ -370,6 +373,7 @@ export default function SchedulePage({
   const [assignedStaffId, setAssignedStaffId] = useState(
     defaultAssignedStaffId != null ? String(defaultAssignedStaffId) : ""
   );
+  const [sendCustomerConfirmation, setSendCustomerConfirmation] = useState(false);
 
   const { monthStart, days } = useMemo(() => getMonthGrid(viewDate), [viewDate]);
   const activeStaffMembers = useMemo(
@@ -501,6 +505,7 @@ export default function SchedulePage({
         ? String(defaultAssignedStaffId)
         : ""
     );
+    setSendCustomerConfirmation(false);
     setShowModal(true);
   }
 
@@ -590,6 +595,7 @@ export default function SchedulePage({
         startTime: trimmedStartTime,
         finishTime: trimmedFinishTime,
         assignedStaffId: getSelectedStaffMember()?.id ?? null,
+        sendCustomerConfirmation,
       });
 
       if (result === false) {
@@ -705,7 +711,8 @@ export default function SchedulePage({
           </div>
 
           <h3 className="text-center text-xl font-black tracking-tight text-slate-900">
-            {monthStart.toLocaleDateString(undefined, {
+            {monthStart.toLocaleDateString("en-GB", {
+              timeZone: "Europe/London",
               month: "long",
               year: "numeric",
             })}
@@ -807,7 +814,8 @@ export default function SchedulePage({
               Selected Date
             </p>
             <h3 className="mt-1 text-xl font-black tracking-tight text-slate-900">
-              {new Date(selectedDate).toLocaleDateString(undefined, {
+              {new Date(selectedDate).toLocaleDateString("en-GB", {
+                timeZone: "Europe/London",
                 weekday: "long",
                 day: "numeric",
                 month: "long",
@@ -901,7 +909,8 @@ export default function SchedulePage({
               {modalMode === "quote" ? "Schedule Quoted Work" : "Add Appointment"}
             </h3>
             <p className="mt-1 text-sm text-slate-500">
-              {new Date(selectedDate).toLocaleDateString(undefined, {
+              {new Date(selectedDate).toLocaleDateString("en-GB", {
+                timeZone: "Europe/London",
                 weekday: "long",
                 day: "numeric",
                 month: "long",
@@ -975,6 +984,34 @@ export default function SchedulePage({
                       ))}
                     </select>
                   </div>
+
+                  <label
+                    className={`flex items-start gap-3 rounded-2xl border p-4 ${
+                      pendingQuoteSchedule.customerEmail
+                        ? "cursor-pointer border-emerald-200 bg-emerald-50/70"
+                        : "cursor-not-allowed border-slate-200 bg-slate-50 opacity-70"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={sendCustomerConfirmation}
+                      disabled={!pendingQuoteSchedule.customerEmail}
+                      onChange={(event) =>
+                        setSendCustomerConfirmation(event.target.checked)
+                      }
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span>
+                      <span className="block text-sm font-semibold text-slate-900">
+                        Email schedule confirmation
+                      </span>
+                      <span className="mt-1 block text-xs leading-5 text-slate-600">
+                        {pendingQuoteSchedule.customerEmail
+                          ? `Send the date and an approximate 30-minute arrival window to ${pendingQuoteSchedule.customerEmail}.`
+                          : "Add an email address to the customer profile to enable this option."}
+                      </span>
+                    </span>
+                  </label>
                 </>
               ) : (
                 <>

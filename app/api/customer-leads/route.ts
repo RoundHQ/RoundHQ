@@ -147,6 +147,16 @@ function hasValidFormToken(
   return providedToken === expectedToken;
 }
 
+function getLeadFormOrganizationId() {
+  const organizationId = process.env.LEAD_FORM_ORGANIZATION_ID?.trim();
+
+  if (!organizationId) {
+    throw new Error("Website lead intake is not configured for an organisation.");
+  }
+
+  return organizationId;
+}
+
 export async function OPTIONS(request: Request) {
   const cors = getCorsHeaders(request);
   return new NextResponse(null, {
@@ -196,12 +206,21 @@ export async function POST(request: Request) {
       },
       crypto.randomUUID()
     );
+    const organizationId = getLeadFormOrganizationId();
     const supabase = getSupabaseClient();
     const { error } = await supabase
       .from("customer_leads")
-      .insert(mapCustomerLeadToWriteRow(lead));
+      .insert({
+        ...mapCustomerLeadToWriteRow(lead),
+        organization_id: organizationId,
+      });
 
     if (error) {
+      console.error("customer_lead_insert_failed", {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+      });
       return NextResponse.json(
         {
           error:

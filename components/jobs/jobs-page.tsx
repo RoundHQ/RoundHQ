@@ -79,11 +79,12 @@ function formatJobDate(value: string) {
         return value;
     }
 
-    return parsedDate.toLocaleDateString(undefined, {
+    return parsedDate.toLocaleDateString("en-GB", {
         weekday: "short",
         day: "numeric",
         month: "short",
         year: "numeric",
+        timeZone: "Europe/London",
     });
 }
 

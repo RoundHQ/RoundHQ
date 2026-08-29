@@ -217,7 +217,22 @@ const emailDrafts = buildSchedulingEmailDrafts({
   businessPhone: "01355 555 555",
 });
 assert.match(emailDrafts.customerMessage, /approximately|approximate/i, "customer email should mention approximate timing");
+assert.match(emailDrafts.customerMessage, /between 09:00 and 09:30/, "customer email should use a 30-minute arrival window");
 assert.match(emailDrafts.operatorMessage, /Estimated time: 1h 30m/, "operator email should include estimate");
 assert.match(emailDrafts.operatorMessage, /Reason:/, "operator email should include slot reason");
+
+const schedulePageSource = fs.readFileSync(
+  path.join(process.cwd(), "components", "jobs", "schedule-page.tsx"),
+  "utf8"
+);
+assert.match(schedulePageSource, /Email schedule confirmation/);
+assert.match(schedulePageSource, /sendCustomerConfirmation/);
+
+const jobsAppSource = fs.readFileSync(
+  path.join(process.cwd(), "components", "jobs-app.tsx"),
+  "utf8"
+);
+assert.match(jobsAppSource, /sendOperator: false/);
+assert.match(jobsAppSource, /Sent schedule confirmation by email/);
 
 console.log("Scheduling tests passed.");

@@ -1,10 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
-  AI_RECEPTIONIST_SETTINGS_SELECT,
+  AI_RECEPTIONIST_PRIVATE_LEGACY_SETTINGS_SELECT,
+  AI_RECEPTIONIST_PRIVATE_SETTINGS_SELECT,
   mapAiReceptionistSettingsRow,
   type AiReceptionistPrivateSettings,
   type AiReceptionistSettingsRow,
 } from "@/lib/ai-receptionist-settings";
+import { getTelnyxPlatformConfig } from "@/lib/ai-receptionist/telnyx-platform";
 
 function getText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -33,15 +35,24 @@ async function mapAiReceptionistPrivateSettingsRow(
     return null;
   }
 
+  const platform = getTelnyxPlatformConfig();
   const [telnyxApiKey, twilioAuthToken] = await Promise.all([
-    decryptStoredProviderSecret(row.telnyx_api_key),
+    platform.apiKey
+      ? Promise.resolve(platform.apiKey)
+      : decryptStoredProviderSecret(row.telnyx_api_key),
     decryptStoredProviderSecret(row.twilio_auth_token),
   ]);
+  const publicSettings = mapAiReceptionistSettingsRow(row);
 
   return {
-    ...mapAiReceptionistSettingsRow(row),
+    ...publicSettings,
     organizationId: row.organization_id,
     telnyxApiKey,
+    telnyxConnectionId:
+      platform.connectionId || publicSettings.telnyxConnectionId,
+    telnyxMessagingProfileId:
+      platform.messagingProfileId || publicSettings.telnyxMessagingProfileId,
+    telnyxPublicKey: platform.publicKey || publicSettings.telnyxPublicKey,
     telnyxApiKeyConfigured: Boolean(telnyxApiKey),
     twilioAuthToken,
     twilioAuthTokenConfigured: Boolean(twilioAuthToken),
@@ -52,18 +63,26 @@ export async function getAiReceptionistPrivateSettings(
   supabase: SupabaseClient,
   organizationId: string
 ) {
-  const { data, error } = await supabase
+  let result = await supabase
     .from("ai_receptionist_settings")
-    .select(AI_RECEPTIONIST_SETTINGS_SELECT)
+    .select(AI_RECEPTIONIST_PRIVATE_SETTINGS_SELECT)
     .eq("organization_id", organizationId)
     .maybeSingle();
 
-  if (error) {
+  if (result.error) {
+    result = await supabase
+      .from("ai_receptionist_settings")
+      .select(AI_RECEPTIONIST_PRIVATE_LEGACY_SETTINGS_SELECT)
+      .eq("organization_id", organizationId)
+      .maybeSingle();
+  }
+
+  if (result.error) {
     return null;
   }
 
   return mapAiReceptionistPrivateSettingsRow(
-    data as unknown as AiReceptionistSettingsRow | null
+    result.data as unknown as AiReceptionistSettingsRow | null
   );
 }
 
@@ -86,14 +105,22 @@ export async function findAiReceptionistSettingsForTwilioWebhook(
       return null;
     }
 
-    const { data, error } = await supabase
+    let result = await supabase
       .from("ai_receptionist_settings")
-      .select(AI_RECEPTIONIST_SETTINGS_SELECT)
+      .select(AI_RECEPTIONIST_PRIVATE_SETTINGS_SELECT)
       .eq("twilio_account_sid", accountSid)
       .limit(10);
 
-    if (!error && Array.isArray(data)) {
-      const rows = data as unknown as AiReceptionistSettingsRow[];
+    if (result.error) {
+      result = await supabase
+        .from("ai_receptionist_settings")
+        .select(AI_RECEPTIONIST_PRIVATE_LEGACY_SETTINGS_SELECT)
+        .eq("twilio_account_sid", accountSid)
+        .limit(10);
+    }
+
+    if (!result.error && Array.isArray(result.data)) {
+      const rows = result.data as unknown as AiReceptionistSettingsRow[];
       const matchedRow = rows.find(
         (row) =>
           normalizePhoneForLookup(row.twilio_phone_number ?? "") ===
@@ -115,17 +142,25 @@ export async function findAiReceptionistSettingsForTwilioWebhook(
     return null;
   }
 
-  const { data, error } = await supabase
+  let result = await supabase
     .from("ai_receptionist_settings")
-    .select(AI_RECEPTIONIST_SETTINGS_SELECT)
+    .select(AI_RECEPTIONIST_PRIVATE_SETTINGS_SELECT)
     .not("twilio_phone_number", "is", null)
     .limit(100);
 
-  if (error || !Array.isArray(data)) {
+  if (result.error) {
+    result = await supabase
+      .from("ai_receptionist_settings")
+      .select(AI_RECEPTIONIST_PRIVATE_LEGACY_SETTINGS_SELECT)
+      .not("twilio_phone_number", "is", null)
+      .limit(100);
+  }
+
+  if (result.error || !Array.isArray(result.data)) {
     return null;
   }
 
-  const matchedRow = (data as unknown as AiReceptionistSettingsRow[]).find(
+  const matchedRow = (result.data as unknown as AiReceptionistSettingsRow[]).find(
     (row) =>
       normalizePhoneForLookup(row.twilio_phone_number ?? "") === calledNumber
   );
@@ -135,30 +170,65 @@ export async function findAiReceptionistSettingsForTwilioWebhook(
 
 export async function findAiReceptionistSettingsForTelnyxWebhook(
   supabase: SupabaseClient,
-  calledNumber: string
+  calledNumber: string,
+  callControlId = ""
 ) {
   const normalizedCalledNumber = normalizePhoneForLookup(calledNumber);
 
-  if (!normalizedCalledNumber) {
+  if (normalizedCalledNumber) {
+    let result = await supabase
+      .from("ai_receptionist_settings")
+      .select(AI_RECEPTIONIST_PRIVATE_SETTINGS_SELECT)
+      .eq("telephony_provider", "telnyx")
+      .not("telnyx_phone_number", "is", null)
+      .limit(100);
+
+    if (result.error) {
+      result = await supabase
+        .from("ai_receptionist_settings")
+        .select(AI_RECEPTIONIST_PRIVATE_LEGACY_SETTINGS_SELECT)
+        .eq("telephony_provider", "telnyx")
+        .not("telnyx_phone_number", "is", null)
+        .limit(100);
+    }
+
+    if (result.error || !Array.isArray(result.data)) {
+      return null;
+    }
+
+    const matchedRow = (result.data as unknown as AiReceptionistSettingsRow[]).find(
+      (row) =>
+        normalizePhoneForLookup(row.telnyx_phone_number ?? "") ===
+        normalizedCalledNumber
+    );
+
+    return mapAiReceptionistPrivateSettingsRow(matchedRow ?? null);
+  }
+
+  const normalizedCallControlId = getText(callControlId);
+
+  if (!normalizedCallControlId) {
     return null;
   }
 
-  const { data, error } = await supabase
-    .from("ai_receptionist_settings")
-    .select(AI_RECEPTIONIST_SETTINGS_SELECT)
-    .eq("telephony_provider", "telnyx")
-    .not("telnyx_phone_number", "is", null)
-    .limit(100);
+  const { data: callLogs, error: callLogError } = await supabase
+    .from("ai_receptionist_call_logs")
+    .select("organization_id")
+    .eq("provider", "telnyx")
+    .eq("call_sid", normalizedCallControlId)
+    .limit(2);
 
-  if (error || !Array.isArray(data)) {
+  if (
+    callLogError ||
+    !Array.isArray(callLogs) ||
+    callLogs.length !== 1 ||
+    typeof callLogs[0]?.organization_id !== "string"
+  ) {
     return null;
   }
 
-  const matchedRow = (data as unknown as AiReceptionistSettingsRow[]).find(
-    (row) =>
-      normalizePhoneForLookup(row.telnyx_phone_number ?? "") ===
-      normalizedCalledNumber
+  return getAiReceptionistPrivateSettings(
+    supabase,
+    callLogs[0].organization_id
   );
-
-  return mapAiReceptionistPrivateSettingsRow(matchedRow ?? null);
 }

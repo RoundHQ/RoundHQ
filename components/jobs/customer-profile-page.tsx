@@ -220,7 +220,8 @@ function formatHistoryDate(value: string) {
     return "Unknown date";
   }
 
-  return parsedDate.toLocaleString(undefined, {
+  return parsedDate.toLocaleString("en-GB", {
+    timeZone: "Europe/London",
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -256,7 +257,7 @@ function getInvoiceEmailMessage(invoice: Invoice, businessDetails: BusinessDetai
     `Please find invoice ${invoice.invoiceNumber} attached.`,
     `Invoice total: ${formatCurrency(invoice.total)}`,
     invoice.dueDate
-      ? `Due by: ${new Date(invoice.dueDate).toLocaleDateString()}`
+      ? `Due by: ${formatStoredDate(invoice.dueDate)}`
       : undefined,
     "",
     invoice.notes?.trim() ||
@@ -893,7 +894,7 @@ export default function CustomerProfilePage({
                           >
                             <div>
                               <p className="font-semibold text-slate-900">
-                                {new Date(visit.visitDate).toLocaleDateString()}
+                                {formatStoredDate(visit.visitDate)}
                               </p>
                               <p className="mt-1 text-sm text-slate-500">
                                 {visit.status === "completed"
@@ -976,14 +977,14 @@ export default function CustomerProfilePage({
                 <div className="rounded-2xl bg-slate-50 p-4">
                   <p className="text-xs text-slate-400">Last Visit</p>
                   <p className="mt-2 text-xl font-bold text-slate-900">
-                    {lastVisit ? lastVisit.toLocaleDateString() : "—"}
+                    {lastVisit ? lastVisit.toLocaleDateString("en-GB", { timeZone: "Europe/London" }) : "\u2014"}
                   </p>
                 </div>
 
                 <div className="rounded-2xl bg-slate-50 p-4">
                   <p className="text-xs text-slate-400">Next Visit</p>
                   <p className="mt-2 text-xl font-bold text-slate-900">
-                    {nextVisit ? nextVisit.toLocaleDateString() : "—"}
+                    {nextVisit ? nextVisit.toLocaleDateString("en-GB", { timeZone: "Europe/London" }) : "\u2014"}
                   </p>
                 </div>
 

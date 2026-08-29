@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import Script from "next/script";
 import { ScrollToTopButton } from "@/components/scroll-to-top-button";
+import { PublicAnalyticsTracker } from "@/components/analytics/public-analytics-tracker";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -30,6 +31,7 @@ export default function RootLayout({
             strategy="afterInteractive"
           />
         ) : null}
+        <PublicAnalyticsTracker />
         {children}
         <ScrollToTopButton />
       </body>

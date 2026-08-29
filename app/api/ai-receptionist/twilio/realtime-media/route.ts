@@ -4,16 +4,7 @@ export const runtime = "nodejs";
 
 export async function GET() {
   return NextResponse.json(
-    {
-      error:
-        "This endpoint is reserved for the AI Receptionist WebSocket media bridge.",
-      expectedProtocol: "websocket",
-    },
-    {
-      status: 426,
-      headers: {
-        upgrade: "websocket",
-      },
-    }
+    { error: "Live AI calls have been retired. RoundHQ now uses voicemail-to-lead." },
+    { status: 410 }
   );
 }

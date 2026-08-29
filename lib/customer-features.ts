@@ -12,6 +12,13 @@ export const CUSTOMER_FEATURES = [
     description: "Website enquiries, lead notes, replies, and conversion tools.",
   },
   {
+    key: "aiReceptionist",
+    label: "AI Assistant",
+    section: "Core",
+    description:
+      "Private testing access for voicemail-to-lead settings, call history, and lead capture. Keep this off unless the customer is testing the feature.",
+  },
+  {
     key: "schedule",
     label: "Schedule & jobs",
     section: "Operations",
@@ -109,7 +116,10 @@ export type CustomerFeatureAccess = Record<CustomerFeatureKey, boolean>;
 
 export function getDefaultCustomerFeatureAccess(): CustomerFeatureAccess {
   return Object.fromEntries(
-    CUSTOMER_FEATURES.map((feature) => [feature.key, true])
+    CUSTOMER_FEATURES.map((feature) => [
+      feature.key,
+      feature.key !== "aiReceptionist",
+    ])
   ) as CustomerFeatureAccess;
 }
 

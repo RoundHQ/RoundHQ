@@ -136,6 +136,7 @@ export function hasStaffManagementAccess(
 const STARTER_FEATURES = new Set<CustomerFeatureKey>([
   "dashboard",
   "leads",
+  "aiReceptionist",
   "schedule",
   "rounds",
   "history",

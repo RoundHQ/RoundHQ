@@ -1,6 +1,7 @@
 "use client";
 
 import type { Customer, VisitLog } from "@/components/jobs/types";
+import { formatStoredDate } from "./helpers";
 
 type Props = {
   visits: VisitLog[];
@@ -47,7 +48,7 @@ export default function ActionsPage({
                     {customer?.name ?? "Unknown Customer"}
                   </p>
                   <p className="text-sm text-slate-500">
-                    {new Date(visit.visitDate).toLocaleDateString()}
+                    {formatStoredDate(visit.visitDate)}
                   </p>
                 </div>
 

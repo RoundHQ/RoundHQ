@@ -119,7 +119,7 @@ export default function HistoryPage({
                     return (
                         <tr key={visit.id} className="border-t border-slate-100">
                           <td className="px-4 py-4 text-sm text-slate-700">
-                            {new Date(visit.visitDate).toLocaleDateString()}
+                            {formatStoredDate(visit.visitDate)}
                           </td>
 
                           <td className="px-4 py-4 font-semibold text-slate-900">

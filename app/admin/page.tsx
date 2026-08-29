@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
   AlertTriangle,
+  BarChart3,
   ArrowRight,
   Bell,
   Building2,
@@ -294,6 +295,13 @@ export default async function AdminPage({
             </div>
 
             <nav className="flex flex-wrap gap-2 text-sm" aria-label="Admin navigation">
+              <Link
+                href="/admin/analytics"
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-white/12 px-3 font-bold text-white/88 transition hover:bg-white/10 hover:text-white"
+              >
+                <BarChart3 aria-hidden="true" className="size-4" />
+                Analytics
+              </Link>
               <Link
                 href="/admin/pages"
                 className="inline-flex h-9 items-center gap-2 rounded-md border border-white/12 px-3 font-bold text-white/88 transition hover:bg-white/10 hover:text-white"

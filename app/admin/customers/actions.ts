@@ -5,10 +5,10 @@ import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
-  getPlanFeatureAccess,
   getSubscriptionPlan,
   normalizePlanKey,
 } from "@/lib/billing/plans";
+import { getDefaultCustomerFeatureAccess } from "@/lib/customer-features";
 import {
   isMissingSubscriptionAddonColumn,
   isMissingSubscriptionPlanColumn,
@@ -27,6 +27,7 @@ import {
 import { getFriendlySmtpErrorMessage } from "@/lib/email/smtp-delivery";
 import { createServiceRoleClient } from "@/lib/supabase/admin";
 import { DEFAULT_ROLE_PERMISSIONS } from "@/lib/workspace";
+import { buildCanonicalUrl } from "@/lib/urls";
 
 type ManualSubscriptionStatus = "active" | "incomplete" | "trialing";
 type ManualCustomerEmailStatus =
@@ -85,10 +86,7 @@ function redirectManualCustomerError(message: string): never {
 }
 
 function getRoundHqLoginUrl() {
-  return `${
-    process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "") ||
-    "https://roundhq.co.uk"
-  }/login`;
+  return buildCanonicalUrl("/login");
 }
 
 function buildManualCustomerWelcomeEmail({
@@ -334,7 +332,7 @@ async function seedManualCustomerWorkspace({
         organization_id: organizationId,
         account_status: "active",
         disabled_reason: "",
-        feature_access: getPlanFeatureAccess(plan, 0),
+        feature_access: getDefaultCustomerFeatureAccess(),
         internal_notes: "",
         support_priority: "standard",
         updated_at: new Date().toISOString(),

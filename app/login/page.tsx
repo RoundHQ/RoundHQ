@@ -5,6 +5,7 @@ import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { ArrowRight, BadgeCheck, ShieldCheck } from "lucide-react";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { trackPublicAnalyticsEvent } from "@/components/analytics/public-analytics-tracker";
 
 const loginBenefits = [
   "Rounds, quotes, invoices and payments",
@@ -81,6 +82,7 @@ export default function LoginPage() {
     event.preventDefault();
     setLoading(true);
     setError("");
+    trackPublicAnalyticsEvent("login_started");
 
     try {
       if (!supabaseConfigured) {
