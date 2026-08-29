@@ -108,6 +108,7 @@ export type Customer = {
   postcode?: string;
   town?: string;
   savedAddresses?: CustomerAddress[];
+  savedSites?: CustomerSite[];
   serviceAddressId?: string;
   phone?: string;
   email?: string;
@@ -145,6 +146,14 @@ export type Customer = {
 export type CustomerAddress = {
   id: string;
   label: string;
+  address: string;
+  town?: string;
+  postcode?: string;
+};
+
+export type CustomerSite = {
+  id: string;
+  name: string;
   address: string;
   town?: string;
   postcode?: string;

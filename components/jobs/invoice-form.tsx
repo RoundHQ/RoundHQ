@@ -5,7 +5,7 @@ import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import DocumentHistoryPanel from "./document-history-panel";
 import DocumentCustomerCreateDialog from "./document-customer-create-dialog";
 import DocumentCustomerPicker from "./document-customer-picker";
-import { getCustomerAddressOptions } from "./customer-addresses";
+import { getCustomerAddressOptions, getCustomerSiteOptions } from "./customer-addresses";
 import {
     INVOICE_STATUS_OPTIONS,
     type Customer,
@@ -181,15 +181,17 @@ function normalizeDocumentCustomerFields(
 function getDocumentCustomerFieldsFromCustomer(
     customer: Customer
 ): DocumentCustomerFields {
+    const primarySite = getCustomerSiteOptions(customer)[0];
+
     return normalizeDocumentCustomerFields({
         customerType: customer.customerType,
         customerAddress: customer.address,
         customerTown: customer.town,
         customerPostcode: customer.postcode,
-        siteName: customer.siteName,
-        siteAddress: customer.siteAddress,
-        siteTown: customer.siteTown,
-        sitePostcode: customer.sitePostcode,
+        siteName: primarySite?.name ?? customer.siteName,
+        siteAddress: primarySite?.address ?? customer.siteAddress,
+        siteTown: primarySite?.town ?? customer.siteTown,
+        sitePostcode: primarySite?.postcode ?? customer.sitePostcode,
     });
 }
 
@@ -813,6 +815,21 @@ export default function InvoiceForm({
                                 className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
                             >
                                 {getCustomerAddressOptions(selectedCustomer).map((entry) => <option key={entry.id} value={entry.id}>{entry.label}: {[entry.address, entry.town, entry.postcode].filter(Boolean).join(", ")}</option>)}
+                            </select>
+                        </div>
+                    ) : null}
+                    {showCommercialTools && selectedCustomer && getCustomerSiteOptions(selectedCustomer).length > 1 ? (
+                        <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-700">Work site</label>
+                            <select
+                                value={getCustomerSiteOptions(selectedCustomer).find((site) => site.name === activeSiteName && site.address === activeSiteAddress && site.town === activeSiteTown && site.postcode === activeSitePostcode)?.id ?? getCustomerSiteOptions(selectedCustomer)[0]?.id ?? ""}
+                                onChange={(event) => {
+                                    const site = getCustomerSiteOptions(selectedCustomer).find((entry) => entry.id === event.target.value);
+                                    if (site) setDocumentCustomerFields((previous) => ({ ...previous, siteName: site.name, siteAddress: site.address, siteTown: site.town, sitePostcode: site.postcode }));
+                                }}
+                                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400"
+                            >
+                                {getCustomerSiteOptions(selectedCustomer).map((site) => <option key={site.id} value={site.id}>{site.name}: {[site.address, site.town, site.postcode].filter(Boolean).join(", ")}</option>)}
                             </select>
                         </div>
                     ) : null}

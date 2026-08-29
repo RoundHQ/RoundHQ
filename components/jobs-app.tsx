@@ -3070,6 +3070,7 @@ function formatDatabaseError(error: { code?: string; message: string }) {
               message.includes("customers_rotation_weeks_override_check") ||
               message.includes("customers_week_check") ||
               message.includes("customers_cut_frequency_check") ||
+              message.includes("saved_sites") ||
               message.includes("site_name") ||
               message.includes("site_address") ||
               message.includes("site_town") ||
@@ -3115,6 +3116,7 @@ function formatDatabaseError(error: { code?: string; message: string }) {
               message.includes("customer_address") ||
               message.includes("customer_town") ||
               message.includes("customer_postcode") ||
+              message.includes("saved_sites") ||
               message.includes("site_name") ||
               message.includes("site_address") ||
               message.includes("site_town") ||

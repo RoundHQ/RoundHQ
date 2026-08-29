@@ -753,6 +753,7 @@ create table if not exists public.customers (
   email text null,
   contact_emails jsonb not null default '[]'::jsonb,
   saved_addresses jsonb not null default '[]'::jsonb,
+  saved_sites jsonb not null default '[]'::jsonb,
   service_address_id text null,
   is_grass_cutting_customer boolean not null default true,
   grass_cut_areas jsonb not null default '["All"]'::jsonb,
